@@ -13,34 +13,24 @@ const Lexer = @This();
 pub fn lex(self: *Lexer, allocator: std.mem.Allocator) !std.MultiArrayList(Token) {
     var tokens = std.MultiArrayList(Token){};
     errdefer tokens.deinit(allocator);
-
-    var prev_token: ?Token = null;
-    var semicolon = Token{
-        .len = 1,
-        .offset = 0,
-        .tag = .punct_semicolon,
-    };
+    var after_newline = false;
 
     while (true) {
         const token_opt = self.next() catch |err| return self.reportErr(err, self.offset.?);
 
         if (token_opt) |token| {
             if (token.is(.punct_newline)) {
-                if (prev_token) |prev| {
-                    if (requiresSemi(prev.tag)) {
-                        semicolon.offset = token.offset;
-                        try tokens.append(allocator, semicolon);
-                    }
-                }
+                after_newline = true;
             } else {
+                if (after_newline) {
+                    if (token.is(.punct_lparen) or token.is(.punct_lbracket)) try tokens.append(allocator, self.oneChar(.punct_semicolon));
+                    after_newline = false;
+                }
+
                 try tokens.append(allocator, token);
             }
-
-            prev_token = token;
         } else break;
     }
-
-    if (prev_token == null or !prev_token.?.is(.punct_semicolon)) try tokens.append(allocator, self.oneChar(.punct_semicolon));
 
     return tokens;
 }
@@ -461,7 +451,7 @@ fn testLex(allocator: std.mem.Allocator, input: []const u8) !std.MultiArrayList(
 }
 
 fn singleTokenTests(tokens: std.MultiArrayList(Token), tag: Token.Tag, len: u16) !void {
-    try std.testing.expectEqual(@as(usize, 2), tokens.items(.tag).len);
+    try std.testing.expectEqual(@as(usize, 1), tokens.items(.tag).len);
     try std.testing.expectEqual(tag, tokens.items(.tag)[0]);
     try std.testing.expectEqual(@as(u16, 0), tokens.items(.offset)[0]);
     try std.testing.expectEqual(len, tokens.items(.len)[0]);
@@ -472,7 +462,7 @@ test "Lex booleans" {
     var tokens = try testLex(allocator, "true; false");
     defer tokens.deinit(allocator);
 
-    try std.testing.expectEqual(@as(usize, 4), tokens.items(.tag).len);
+    try std.testing.expectEqual(@as(usize, 3), tokens.items(.tag).len);
     try std.testing.expectEqual(Token.Tag.pd_true, tokens.items(.tag)[0]);
     try std.testing.expectEqual(@as(usize, 0), tokens.items(.offset)[0]);
     try std.testing.expectEqual(@as(usize, 4), tokens.items(.len)[0]);
@@ -480,7 +470,6 @@ test "Lex booleans" {
     try std.testing.expectEqual(Token.Tag.pd_false, tokens.items(.tag)[2]);
     try std.testing.expectEqual(@as(usize, 6), tokens.items(.offset)[2]);
     try std.testing.expectEqual(@as(usize, 5), tokens.items(.len)[2]);
-    try std.testing.expectEqual(Token.Tag.punct_semicolon, tokens.items(.tag)[3]);
 }
 
 test "Lex ident" {
@@ -515,9 +504,7 @@ test "Lex comment" {
     const allocator = std.testing.allocator;
     var tokens = try testLex(allocator, "# foo bar");
     defer tokens.deinit(allocator);
-
-    try std.testing.expectEqual(@as(usize, 1), tokens.items(.tag).len);
-    try std.testing.expectEqual(Token.Tag.punct_semicolon, tokens.items(.tag)[0]);
+    try std.testing.expectEqual(@as(usize, 0), tokens.items(.tag).len);
 }
 
 test "Lex string" {
@@ -525,6 +512,7 @@ test "Lex string" {
     var tokens = try testLex(allocator,
         \\"foo { "bar" } \" baz"
     );
+    errdefer tokens.deinit(allocator);
     try singleTokenTests(tokens, .string, 22);
     tokens.deinit(allocator);
 
@@ -618,17 +606,51 @@ test "Lex ops" {
     }
 }
 
-//test "Lex synthetic semicolons" {
-//    const semi_needed =
-//        \\5 + 5
-//        \\-foo
-//    ;
-//    const allocator = std.testing.allocator;
-//    var tokens = try testLex(allocator, semi_needed);
-//    defer tokens.deinit(allocator);
-//
-//    try std.testing.expectEqual(@as(usize, 2), tokens.items(.tag).len);
-//    try std.testing.expectEqual(tag, tokens.items(.tag)[0]);
-//    try std.testing.expectEqual(@as(u16, 0), tokens.items(.offset)[0]);
-//    try std.testing.expectEqual(len, tokens.items(.len)[0]);
-//}
+test "Lex synthetic semicolons" {
+    const avoid_call =
+        \\5 + 5
+        \\(5)
+    ;
+    const allocator = std.testing.allocator;
+    var tokens = try testLex(allocator, avoid_call);
+    defer tokens.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 7), tokens.items(.tag).len);
+    try std.testing.expectEqual(Token.Tag.uint, tokens.items(.tag)[0]);
+    try std.testing.expectEqual(Token.Tag.punct_plus, tokens.items(.tag)[1]);
+    try std.testing.expectEqual(Token.Tag.uint, tokens.items(.tag)[2]);
+    try std.testing.expectEqual(Token.Tag.punct_semicolon, tokens.items(.tag)[3]);
+    try std.testing.expectEqual(Token.Tag.punct_lparen, tokens.items(.tag)[4]);
+    try std.testing.expectEqual(Token.Tag.uint, tokens.items(.tag)[5]);
+    try std.testing.expectEqual(Token.Tag.punct_rparen, tokens.items(.tag)[6]);
+    tokens.deinit(allocator);
+
+    const avoid_subscript =
+        \\5 + 5
+        \\[5]
+    ;
+    tokens = try testLex(allocator, avoid_subscript);
+
+    try std.testing.expectEqual(@as(usize, 7), tokens.items(.tag).len);
+    try std.testing.expectEqual(Token.Tag.uint, tokens.items(.tag)[0]);
+    try std.testing.expectEqual(Token.Tag.punct_plus, tokens.items(.tag)[1]);
+    try std.testing.expectEqual(Token.Tag.uint, tokens.items(.tag)[2]);
+    try std.testing.expectEqual(Token.Tag.punct_semicolon, tokens.items(.tag)[3]);
+    try std.testing.expectEqual(Token.Tag.punct_lbracket, tokens.items(.tag)[4]);
+    try std.testing.expectEqual(Token.Tag.uint, tokens.items(.tag)[5]);
+    try std.testing.expectEqual(Token.Tag.punct_rbracket, tokens.items(.tag)[6]);
+    tokens.deinit(allocator);
+
+    const no_semi_needed =
+        \\5 + 5
+        \\- 5
+    ;
+    tokens = try testLex(allocator, no_semi_needed);
+
+    try std.testing.expectEqual(@as(usize, 5), tokens.items(.tag).len);
+    try std.testing.expectEqual(Token.Tag.uint, tokens.items(.tag)[0]);
+    try std.testing.expectEqual(Token.Tag.punct_plus, tokens.items(.tag)[1]);
+    try std.testing.expectEqual(Token.Tag.uint, tokens.items(.tag)[2]);
+    try std.testing.expectEqual(Token.Tag.punct_minus, tokens.items(.tag)[3]);
+    try std.testing.expectEqual(Token.Tag.uint, tokens.items(.tag)[4]);
+}
