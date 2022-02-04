@@ -53,9 +53,33 @@ fn next(self: *Lexer) !?Token {
         return switch (byte) {
             '#' => try self.lexComment(),
             '\n' => self.lexNewline(),
-            ';' => self.oneChar(.punct_semicolon),
             '"' => try self.lexString(),
             '@' => try self.lexGlobal(),
+
+            ':',
+            '!',
+            '<',
+            '>',
+            '=',
+            '~',
+            '*',
+            '/',
+            '%',
+            '.',
+            '?',
+            => self.lexOp(byte),
+
+            ';' => self.oneChar(.punct_semicolon),
+            '{' => self.oneChar(.punct_lbrace),
+            '}' => self.oneChar(.punct_rbrace),
+            ',' => self.oneChar(.punct_comma),
+            '$' => self.oneChar(.punct_dollar),
+            '(' => self.oneChar(.punct_lparen),
+            ')' => self.oneChar(.punct_rparen),
+            '[' => self.oneChar(.punct_lbracket),
+            ']' => self.oneChar(.punct_rbracket),
+            '|' => self.oneChar(.punct_pipe),
+
             else => error.UnknownByte,
         };
     }
@@ -78,7 +102,7 @@ fn lexGlobal(self: *Lexer) !Token {
 
     if (self.peek()) |peek_byte| {
         if (isWhitespace(peek_byte)) return self.oneChar(.punct_at);
-        if (!isIdentByte(peek_byte)) return self.reportErr(error.InvalidGlobal, start);
+        if (!isIdentByte(peek_byte)) return error.InvalidGlobal;
     } else return self.oneChar(.punct_at);
 
     self.run(isIdentByte);
@@ -99,16 +123,19 @@ fn lexNumber(self: *Lexer, byte: u8) Token {
     if ('+' == byte) {
         // Plus is special
         var token = self.oneChar(.punct_plus);
-        if (self.peekPred(isWhitespace)) return token;
+        if (self.peek() == null or self.peekPred(isWhitespace)) return token;
 
         if (self.skipByte('+')) {
             token.tag = .op_concat;
+            token.len = 2;
             return token;
         } else if (self.skipByte('=')) {
             token.tag = .op_add_eq;
+            token.len = 2;
             return token;
         } else if (self.skipByte('>')) {
             token.tag = .op_redir_append;
+            token.len = 2;
             return token;
         }
     }
@@ -116,7 +143,7 @@ fn lexNumber(self: *Lexer, byte: u8) Token {
     if ('-' == byte) {
         // Minus is special too
         var token = self.oneChar(.punct_minus);
-        if (self.peekPred(isWhitespace)) return token;
+        if (self.peek() == null or self.peekPred(isWhitespace)) return token;
 
         if (self.peekPred(isIdentStart)) {
             token.tag = .op_neg;
@@ -125,6 +152,7 @@ fn lexNumber(self: *Lexer, byte: u8) Token {
 
         if (self.skipByte('=')) {
             token.tag = .op_sub_eq;
+            token.len = 2;
             return token;
         }
     }
@@ -159,6 +187,75 @@ fn lexNewline(self: *Lexer) Token {
     return token;
 }
 
+fn lexCombineAssing(self: *Lexer, base: Token.Tag, with_eq: Token.Tag) Token {
+    var token = self.oneChar(base);
+    if (self.skipByte('=')) {
+        token.tag = with_eq;
+        token.len = 2;
+    }
+    return token;
+}
+
+fn lexOp(self: *Lexer, byte: u8) Token {
+    return switch (byte) {
+        ':' => self.lexCombineAssing(.punct_colon, .op_define),
+        '=' => op: {
+            if (self.skipByte('>')) break :op self.twoChar(.punct_fat_rarrow);
+            break :op self.lexCombineAssing(.punct_equals, .op_eq);
+        },
+        '!' => op: {
+            var token = self.oneChar(.punct_bang);
+            if (self.skipByte('=')) {
+                token.tag = .op_neq;
+                token.len = 2;
+            } else if (self.skipByte('~')) {
+                token.tag = .op_nomatch;
+                token.len = 2;
+            } else if (self.skipByte('>')) {
+                token.tag = .op_redir_clobber;
+                token.len = 2;
+            }
+            break :op token;
+        },
+        '<' => self.lexCombineAssing(.punct_lt, .op_lte),
+        '>' => self.lexCombineAssing(.punct_gt, .op_gte),
+        '~' => self.lexCombineAssing(.punct_tilde, .op_xmatch),
+        '*' => self.lexCombineAssing(.punct_star, .op_mul_eq),
+        '/' => self.lexCombineAssing(.punct_slash, .op_div_eq),
+        '%' => self.lexCombineAssing(.punct_percent, .op_mod_eq),
+        '.' => op: {
+            var token = self.oneChar(.punct_dot);
+
+            if (self.peekStr(".<")) {
+                self.skipN(2);
+                token.tag = .op_range_ex;
+                token.len = 3;
+            } else if (self.peekStr(".=")) {
+                self.skipN(2);
+                token.tag = .op_range_in;
+                token.len = 3;
+            }
+
+            break :op token;
+        },
+        '?' => op: {
+            var token = self.oneChar(.punct_question);
+
+            if (self.skipByte(':')) {
+                token.tag = .op_elvis;
+                token.len = 2;
+            } else if (self.skipByte('=')) {
+                token.tag = .op_elvis_eq;
+                token.len = 2;
+            }
+
+            break :op token;
+        },
+
+        else => unreachable,
+    };
+}
+
 fn lexString(self: *Lexer) !Token {
     const start = self.offset.?;
     var nest_level: usize = 0;
@@ -181,12 +278,7 @@ fn lexString(self: *Lexer) !Token {
         }
     }
 
-    if (reached_eof) {
-        const err = error.UnterminatedString;
-        const location = Location.getLocation(self.filename, self.src, start);
-        std.log.err("Lexer: {}; {}", .{ err, location });
-        return err;
-    }
+    if (reached_eof) return error.UnterminatedString;
 
     const src = self.src[start .. self.offset.? + 1];
     return Token.new(.string, start, src.len);
@@ -227,6 +319,21 @@ fn peekIs(self: Lexer, byte: u8) bool {
 
 fn peekPred(self: Lexer, pred: Predicate) bool {
     return if (self.peek()) |peek_byte| pred(peek_byte) else false;
+}
+
+fn peekStr(self: Lexer, str: []const u8) bool {
+    if (self.peek() == null) return false;
+
+    if (self.offset) |offset| {
+        return std.mem.startsWith(u8, self.src[offset + 1 ..], str);
+    } else {
+        return std.mem.startsWith(u8, self.src, str);
+    }
+}
+
+fn skipN(self: *Lexer, n: usize) void {
+    var i: usize = 0;
+    while (i < n) : (i += 1) _ = self.advance();
 }
 
 fn skipByte(self: *Lexer, byte: u8) bool {
@@ -338,7 +445,7 @@ fn oneChar(self: Lexer, tag: Token.Tag) Token {
     return Token.new(tag, self.offset.?, 1);
 }
 fn twoChar(self: Lexer, tag: Token.Tag) Token {
-    return Token.new(tag, self.offset.?, 2);
+    return Token.new(tag, self.offset.? - 1, 2);
 }
 
 fn reportErr(self: Lexer, err: anyerror, offset: u16) anyerror {
@@ -454,3 +561,74 @@ test "Lex global" {
     //    \\@+
     //));
 }
+
+test "Lex ops" {
+    const allocator = std.testing.allocator;
+    const tests = [_]struct {
+        input: []const u8,
+        tag: Token.Tag,
+        len: u16,
+    }{
+        .{ .input = "+", .tag = .punct_plus, .len = 1 },
+        .{ .input = "-", .tag = .punct_minus, .len = 1 },
+        .{ .input = "*", .tag = .punct_star, .len = 1 },
+        .{ .input = "/", .tag = .punct_slash, .len = 1 },
+        .{ .input = "%", .tag = .punct_percent, .len = 1 },
+        .{ .input = "+=", .tag = .op_add_eq, .len = 2 },
+        .{ .input = "-=", .tag = .op_sub_eq, .len = 2 },
+        .{ .input = "*=", .tag = .op_mul_eq, .len = 2 },
+        .{ .input = "/=", .tag = .op_div_eq, .len = 2 },
+        .{ .input = "%=", .tag = .op_mod_eq, .len = 2 },
+        .{ .input = "<", .tag = .punct_lt, .len = 1 },
+        .{ .input = "<=", .tag = .op_lte, .len = 2 },
+        .{ .input = ">", .tag = .punct_gt, .len = 1 },
+        .{ .input = ">=", .tag = .op_gte, .len = 2 },
+        .{ .input = "=", .tag = .punct_equals, .len = 1 },
+        .{ .input = "==", .tag = .op_eq, .len = 2 },
+        .{ .input = "!", .tag = .punct_bang, .len = 1 },
+        .{ .input = "!>", .tag = .op_redir_clobber, .len = 2 },
+        .{ .input = "+>", .tag = .op_redir_append, .len = 2 },
+        .{ .input = "!=", .tag = .op_neq, .len = 2 },
+        .{ .input = "!~", .tag = .op_nomatch, .len = 2 },
+        .{ .input = ":", .tag = .punct_colon, .len = 1 },
+        .{ .input = ".", .tag = .punct_dot, .len = 1 },
+        .{ .input = ":=", .tag = .op_define, .len = 2 },
+        .{ .input = "~", .tag = .punct_tilde, .len = 1 },
+        .{ .input = "~=", .tag = .op_xmatch, .len = 2 },
+        .{ .input = "..<", .tag = .op_range_ex, .len = 3 },
+        .{ .input = "..=", .tag = .op_range_in, .len = 3 },
+        .{ .input = "?", .tag = .punct_question, .len = 1 },
+        .{ .input = "?:", .tag = .op_elvis, .len = 2 },
+        .{ .input = "?=", .tag = .op_elvis_eq, .len = 2 },
+        .{ .input = "$", .tag = .punct_dollar, .len = 1 },
+        .{ .input = ",", .tag = .punct_comma, .len = 1 },
+        .{ .input = "|", .tag = .punct_pipe, .len = 1 },
+        .{ .input = "{", .tag = .punct_lbrace, .len = 1 },
+        .{ .input = "[", .tag = .punct_lbracket, .len = 1 },
+        .{ .input = "(", .tag = .punct_lparen, .len = 1 },
+        .{ .input = "}", .tag = .punct_rbrace, .len = 1 },
+        .{ .input = "]", .tag = .punct_rbracket, .len = 1 },
+        .{ .input = ")", .tag = .punct_rparen, .len = 1 },
+    };
+
+    for (tests) |t| {
+        var tokens = try testLex(allocator, t.input);
+        defer tokens.deinit(allocator);
+        try singleTokenTests(tokens, t.tag, t.len);
+    }
+}
+
+//test "Lex synthetic semicolons" {
+//    const semi_needed =
+//        \\5 + 5
+//        \\-foo
+//    ;
+//    const allocator = std.testing.allocator;
+//    var tokens = try testLex(allocator, semi_needed);
+//    defer tokens.deinit(allocator);
+//
+//    try std.testing.expectEqual(@as(usize, 2), tokens.items(.tag).len);
+//    try std.testing.expectEqual(tag, tokens.items(.tag)[0]);
+//    try std.testing.expectEqual(@as(u16, 0), tokens.items(.offset)[0]);
+//    try std.testing.expectEqual(len, tokens.items(.len)[0]);
+//}
