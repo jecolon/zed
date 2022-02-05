@@ -6,4 +6,5 @@ pub fn main() anyerror!void {
 
 test {
     _ = @import("Lexer.zig");
+    _ = @import("Parser.zig");
 }
