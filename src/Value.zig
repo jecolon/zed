@@ -6,16 +6,11 @@ pub const Type = union(enum) {
     uint: usize,
 };
 
-node_index: u16,
 offset: u16,
 ty: Type,
 
 const Value = @This();
 
-pub fn new(ty: Type, node_index: usize, offset: u16) Value {
-    return .{
-        .node_index = @intCast(u16, node_index),
-        .offset = offset,
-        .ty = ty,
-    };
+pub fn new(ty: Type, offset: u16) Value {
+    return .{ .offset = offset, .ty = ty };
 }

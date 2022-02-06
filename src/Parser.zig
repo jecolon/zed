@@ -137,6 +137,9 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .int => Parser.parseInt,
         .string => Parser.parseString,
         .uint => Parser.parseUint,
+
+        .op_neg, .punct_bang => Parser.parsePrefix,
+
         else => null,
     };
 }
@@ -180,7 +183,9 @@ fn parseBoolean(self: *Parser) anyerror!Node {
 }
 
 fn parseFloat(self: *Parser) anyerror!Node {
-    const float = try std.fmt.parseFloat(f64, self.src[self.currentOffset()..self.currentLen()]);
+    const start = self.currentOffset();
+    const end = self.currentOffset() + self.currentLen();
+    const float = try std.fmt.parseFloat(f64, self.src[start..end]);
 
     return Node.new(
         .{ .float = float },
@@ -190,7 +195,9 @@ fn parseFloat(self: *Parser) anyerror!Node {
 }
 
 fn parseInt(self: *Parser) anyerror!Node {
-    const int = try std.fmt.parseInt(isize, self.src[self.currentOffset()..self.currentLen()], 0);
+    const start = self.currentOffset();
+    const end = self.currentOffset() + self.currentLen();
+    const int = try std.fmt.parseInt(isize, self.src[start..end], 0);
 
     return Node.new(
         .{ .int = int },
@@ -199,16 +206,33 @@ fn parseInt(self: *Parser) anyerror!Node {
     );
 }
 
+fn parsePrefix(self: *Parser) anyerror!Node {
+    var node = Node.new(
+        .{ .prefix = .{ .op = self.currentTag(), .operand = undefined } },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+    try self.expectNext();
+    node.ty.prefix.operand = try self.allocator.create(Node);
+    node.ty.prefix.operand.* = try self.parseExpression(.prefix);
+    return node;
+}
+
 fn parseString(self: *Parser) anyerror!Node {
+    const start = self.currentOffset() + 1;
+    const end = self.currentOffset() + self.currentLen() - 1;
+
     return Node.new(
-        .{ .string = self.src[self.currentOffset() + 1 .. self.currentLen() - 1] },
+        .{ .string = self.src[start..end] },
         self.token_index.?,
         self.currentOffset(),
     );
 }
 
 fn parseUint(self: *Parser) anyerror!Node {
-    const uint = try std.fmt.parseUnsigned(usize, self.src[self.currentOffset()..self.currentLen()], 0);
+    const start = self.currentOffset();
+    const end = self.currentOffset() + self.currentLen();
+    const uint = try std.fmt.parseUnsigned(usize, self.src[start..end], 0);
 
     return Node.new(
         .{ .uint = uint },
@@ -269,7 +293,7 @@ fn skipTag(self: *Parser, tag: Token.Tag) bool {
 
 fn expectNext(self: *Parser) !void {
     if (!self.advance()) {
-        const location = Location.getLocation(self.filename, self.src, self.src.len() - 1);
+        const location = Location.getLocation(self.filename, self.src, self.len() - 1);
         std.log.err("Unexpected end of tokens; {}", .{location});
         return error.UnexpectedEndOfTokens;
     }

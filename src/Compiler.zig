@@ -22,16 +22,31 @@ pub fn init(allocator: std.mem.Allocator) !Compiler {
     return self;
 }
 
-pub fn compile(self: *Compiler, program: Program) anyerror!void {
-    for (program.rules) |node, i| {
-        switch (node.ty) {
-            .boolean => |b| try self.pushConstant(Value.new(.{ .boolean = b }, i, node.offset)),
-            .float => |f| try self.pushConstant(Value.new(.{ .float = f }, i, node.offset)),
-            .int => |int| try self.pushConstant(Value.new(.{ .int = int }, i, node.offset)),
-            .stmt_end => try self.pushInstruction(.pop),
-            .string => |s| try self.pushConstant(Value.new(.{ .string = s }, i, node.offset)),
-            .uint => |u| try self.pushConstant(Value.new(.{ .uint = u }, i, node.offset)),
-        }
+pub fn compileProgram(self: *Compiler, program: Program) anyerror!void {
+    for (program.rules) |node| try self.compile(node);
+}
+
+fn compile(self: *Compiler, node: Node) anyerror!void {
+    switch (node.ty) {
+        .boolean => |b| try self.pushConstant(Value.new(.{ .boolean = b }, node.offset)),
+        .float => |f| try self.pushConstant(Value.new(.{ .float = f }, node.offset)),
+        .int => |int| try self.pushConstant(Value.new(.{ .int = int }, node.offset)),
+        .stmt_end => try self.pushInstruction(.pop),
+        .string => |s| try self.pushConstant(Value.new(.{ .string = s }, node.offset)),
+        .uint => |u| try self.pushConstant(Value.new(.{ .uint = u }, node.offset)),
+
+        .prefix => try self.evalPrefix(node),
+    }
+}
+
+// Eval functions
+fn evalPrefix(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.prefix.operand.*);
+
+    switch (node.ty.prefix.op) {
+        .op_neg => try self.pushInstruction(.negative),
+        .punct_bang => try self.pushInstruction(.logic_not),
+        else => unreachable,
     }
 }
 
@@ -65,7 +80,7 @@ test "Compiler booleans" {
     };
     const program = try parser.parse();
     var compiler = try init(arena.allocator());
-    try compiler.compile(program);
+    try compiler.compileProgram(program);
 
     try std.testing.expectEqual(@as(usize, 8), compiler.instructions.items.len);
     try std.testing.expectEqual(Bytecode.Opcode.constant, @intToEnum(Bytecode.Opcode, compiler.instructions.items[0]));

@@ -1,7 +1,10 @@
+const Token = @import("Token.zig");
+
 pub const Type = union(enum) {
     boolean: bool,
     float: f64,
     int: isize,
+    prefix: Prefix,
     stmt_end,
     string: []const u8,
     uint: usize,
@@ -20,3 +23,8 @@ pub fn new(ty: Type, token_index: u16, offset: u16) Node {
         .ty = ty,
     };
 }
+
+const Prefix = struct {
+    op: Token.Tag,
+    operand: *Node,
+};
