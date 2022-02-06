@@ -8,4 +8,5 @@ test {
     _ = @import("Lexer.zig");
     _ = @import("Parser.zig");
     _ = @import("Compiler.zig");
+    _ = @import("Vm.zig");
 }
