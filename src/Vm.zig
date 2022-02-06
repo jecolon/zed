@@ -88,6 +88,109 @@ pub fn run(self: *Vm) !void {
 
                 self.ip.* += 1;
             },
+
+            .add => {
+                const right = self.value_stack.pop();
+                const left = self.value_stack.pop();
+                if (left.add(right)) |sum| {
+                    try self.value_stack.append(sum);
+                } else |err| {
+                    const location = Location.getLocation(self.filename, self.src, left.offset);
+                    std.log.err("Unable to add {s} and {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
+                    return err;
+                }
+
+                self.ip.* += 1;
+            },
+            .sub => {
+                const right = self.value_stack.pop();
+                const left = self.value_stack.pop();
+                if (left.sub(right)) |diff| {
+                    try self.value_stack.append(diff);
+                } else |err| {
+                    const location = Location.getLocation(self.filename, self.src, left.offset);
+                    std.log.err("Unable to subtract {s} from {s}; {}", .{ @tagName(right.ty), @tagName(left.ty), location });
+                    return err;
+                }
+
+                self.ip.* += 1;
+            },
+            .mul => {
+                const right = self.value_stack.pop();
+                const left = self.value_stack.pop();
+                if (left.mul(right)) |product| {
+                    try self.value_stack.append(product);
+                } else |err| {
+                    const location = Location.getLocation(self.filename, self.src, left.offset);
+                    std.log.err("Unable to multiply {s} and {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
+                    return err;
+                }
+
+                self.ip.* += 1;
+            },
+            .div => {
+                const right = self.value_stack.pop();
+                const left = self.value_stack.pop();
+                if (left.div(right)) |quotient| {
+                    try self.value_stack.append(quotient);
+                } else |err| {
+                    const location = Location.getLocation(self.filename, self.src, left.offset);
+                    std.log.err("Unable to divide {s} by {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
+                    return err;
+                }
+
+                self.ip.* += 1;
+            },
+            .mod => {
+                const right = self.value_stack.pop();
+                const left = self.value_stack.pop();
+                if (left.mod(right)) |remainder| {
+                    try self.value_stack.append(remainder);
+                } else |err| {
+                    const location = Location.getLocation(self.filename, self.src, left.offset);
+                    std.log.err("Unable to get remainder of {s} by {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
+                    return err;
+                }
+
+                self.ip.* += 1;
+            },
+
+            .eq, .neq => {
+                const right = self.value_stack.pop();
+                const left = self.value_stack.pop();
+                var comparison = left.eql(right);
+                if (opcode == .neq) comparison = !comparison;
+                try self.value_stack.append(Value.new(.{ .boolean = comparison }, left.offset));
+
+                self.ip.* += 1;
+            },
+
+            .lt,
+            .lte,
+            .gt,
+            .gte,
+            => {
+                const right = self.value_stack.pop();
+                const left = self.value_stack.pop();
+                const comparison = left.cmp(right) catch |err| {
+                    const location = Location.getLocation(self.filename, self.src, left.offset);
+                    std.log.err("Unable to compare {s} with {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
+                    return err;
+                };
+
+                const result = switch (opcode) {
+                    .lt => Value.new(.{ .boolean = comparison == .lt }, left.offset),
+                    .lte => Value.new(.{ .boolean = comparison == .lt or comparison == .eq }, left.offset),
+                    .gt => Value.new(.{ .boolean = comparison == .gt }, left.offset),
+                    .gte => Value.new(.{ .boolean = comparison == .gt or comparison == .eq }, left.offset),
+
+                    else => unreachable,
+                };
+
+                try self.value_stack.append(result);
+
+                self.ip.* += 1;
+            },
         }
     }
 }
@@ -159,4 +262,85 @@ test "Vm eval prefix" {
     try testLastValue("!true", Value.new(.{ .boolean = false }, 0));
     try testLastValue("!false", Value.new(.{ .boolean = true }, 0));
     //TODO: Negative op -
+}
+
+test "Vm eval infix add" {
+    try testLastValue("1 + 1", Value.new(.{ .uint = 2 }, 0));
+    try testLastValue("1 + -1", Value.new(.{ .int = 0 }, 0));
+    try testLastValue("1 + 1.0", Value.new(.{ .float = 2 }, 0));
+    try testLastValue("1 + \"1\"", Value.new(.{ .uint = 2 }, 0));
+    try testLastValue("-1 + -1", Value.new(.{ .int = -2 }, 0));
+    try testLastValue("-1 + 1", Value.new(.{ .int = 0 }, 0));
+    try testLastValue("-1 + 1.0", Value.new(.{ .float = 0 }, 0));
+    try testLastValue("-1 + \"1\"", Value.new(.{ .int = 0 }, 0));
+    try testLastValue("1.0 + 1", Value.new(.{ .float = 2 }, 0));
+    try testLastValue("1.0 + -1", Value.new(.{ .float = 0 }, 0));
+    try testLastValue("1.0 + 1.0", Value.new(.{ .float = 2 }, 0));
+    try testLastValue("1.0 + \"1\"", Value.new(.{ .float = 2 }, 0));
+}
+
+test "Vm eval infix subtract" {
+    try testLastValue("1 - 1", Value.new(.{ .uint = 0 }, 0));
+    try testLastValue("1 - -1", Value.new(.{ .int = 2 }, 0));
+    try testLastValue("1 - 1.0", Value.new(.{ .float = 0 }, 0));
+    try testLastValue("1 - \"1\"", Value.new(.{ .uint = 0 }, 0));
+    try testLastValue("-1 - -1", Value.new(.{ .int = 0 }, 0));
+    try testLastValue("-1 - 1", Value.new(.{ .int = -2 }, 0));
+    try testLastValue("-1 - 1.0", Value.new(.{ .float = -2 }, 0));
+    try testLastValue("-1 - \"1\"", Value.new(.{ .int = -2 }, 0));
+    try testLastValue("1.0 - 1", Value.new(.{ .float = 0 }, 0));
+    try testLastValue("1.0 - -1", Value.new(.{ .float = 2 }, 0));
+    try testLastValue("1.0 - 1.0", Value.new(.{ .float = 0 }, 0));
+    try testLastValue("1.0 - \"1\"", Value.new(.{ .float = 0 }, 0));
+}
+
+test "Vm eval infix multiply" {
+    try testLastValue("1 * 1", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("1 * -1", Value.new(.{ .int = -1 }, 0));
+    try testLastValue("1 * 1.0", Value.new(.{ .float = 1 }, 0));
+    try testLastValue("1 * \"1\"", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("-1 * -1", Value.new(.{ .int = 1 }, 0));
+    try testLastValue("-1 * 1", Value.new(.{ .int = -1 }, 0));
+    try testLastValue("-1 * 1.0", Value.new(.{ .float = -1 }, 0));
+    try testLastValue("-1 * \"1\"", Value.new(.{ .int = -1 }, 0));
+    try testLastValue("1.0 * 1", Value.new(.{ .float = 1 }, 0));
+    try testLastValue("1.0 * -1", Value.new(.{ .float = -1 }, 0));
+    try testLastValue("1.0 * 1.0", Value.new(.{ .float = 1 }, 0));
+    try testLastValue("1.0 * \"1\"", Value.new(.{ .float = 1 }, 0));
+}
+
+test "Vm eval infix divide" {
+    try testLastValue("1 / 1", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("1 / -1", Value.new(.{ .int = -1 }, 0));
+    try testLastValue("1 / 1.0", Value.new(.{ .float = 1 }, 0));
+    try testLastValue("1 / \"1\"", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("-1 / -1", Value.new(.{ .int = 1 }, 0));
+    try testLastValue("-1 / 1", Value.new(.{ .int = -1 }, 0));
+    try testLastValue("-1 / 1.0", Value.new(.{ .float = -1 }, 0));
+    try testLastValue("-1 / \"1\"", Value.new(.{ .int = -1 }, 0));
+    try testLastValue("1.0 / 1", Value.new(.{ .float = 1 }, 0));
+    try testLastValue("1.0 / -1", Value.new(.{ .float = -1 }, 0));
+    try testLastValue("1.0 / 1.0", Value.new(.{ .float = 1 }, 0));
+    try testLastValue("1.0 / \"1\"", Value.new(.{ .float = 1 }, 0));
+}
+
+test "Vm eval infix modulo" {
+    try testLastValue("1 % 1", Value.new(.{ .uint = 0 }, 0));
+    try testLastValue("1 % 1.0", Value.new(.{ .float = 0 }, 0));
+    try testLastValue("1 % \"1\"", Value.new(.{ .uint = 0 }, 0));
+    try testLastValue("-1 % 1", Value.new(.{ .int = 0 }, 0));
+    try testLastValue("-1 % 1.0", Value.new(.{ .float = 0 }, 0));
+    try testLastValue("-1 % \"1\"", Value.new(.{ .int = 0 }, 0));
+    try testLastValue("1.0 % 1", Value.new(.{ .float = 0 }, 0));
+    try testLastValue("1.0 % 1.0", Value.new(.{ .float = 0 }, 0));
+    try testLastValue("1.0 % \"1\"", Value.new(.{ .float = 0 }, 0));
+}
+
+test "Vm eval infix comparisons" {
+    try testLastValue("1 == 1", Value.new(.{ .boolean = true }, 0));
+    try testLastValue("1 != 1", Value.new(.{ .boolean = false }, 0));
+    try testLastValue("1 < 1", Value.new(.{ .boolean = false }, 0));
+    try testLastValue("1 <= 1", Value.new(.{ .boolean = true }, 0));
+    try testLastValue("1 > 1", Value.new(.{ .boolean = false }, 0));
+    try testLastValue("1 >= 1", Value.new(.{ .boolean = true }, 0));
 }

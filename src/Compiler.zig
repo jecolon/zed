@@ -35,11 +35,32 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .string => |s| try self.pushConstant(Value.new(.{ .string = s }, node.offset)),
         .uint => |u| try self.pushConstant(Value.new(.{ .uint = u }, node.offset)),
 
+        .infix => try self.evalInfix(node),
         .prefix => try self.evalPrefix(node),
     }
 }
 
 // Eval functions
+fn evalInfix(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.infix.left.*);
+    try self.compile(node.ty.infix.right.*);
+
+    switch (node.ty.infix.op) {
+        .punct_plus => try self.pushInstruction(.add),
+        .punct_minus => try self.pushInstruction(.sub),
+        .punct_star => try self.pushInstruction(.mul),
+        .punct_slash => try self.pushInstruction(.div),
+        .punct_percent => try self.pushInstruction(.mod),
+        .punct_lt => try self.pushInstruction(.lt),
+        .op_lte => try self.pushInstruction(.lte),
+        .punct_gt => try self.pushInstruction(.gt),
+        .op_gte => try self.pushInstruction(.gte),
+        .op_eq => try self.pushInstruction(.eq),
+        .op_neq => try self.pushInstruction(.neq),
+        else => unreachable,
+    }
+}
+
 fn evalPrefix(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.prefix.operand.*);
 

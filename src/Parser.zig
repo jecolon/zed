@@ -109,15 +109,15 @@ const Precedence = enum {
         return @enumToInt(self) < @enumToInt(other);
     }
 
-    fn isRightAssociative(token: Token) bool {
-        return switch (token.ty) {
+    fn isRightAssociative(tag: Token.Tag) bool {
+        return switch (tag) {
             .op_add_eq,
             .op_sub_eq,
             .op_mul_eq,
             .op_div_eq,
             .op_mod_eq,
             .punct_equals,
-            .op_walrus,
+            .op_define,
             .op_redir_append,
             .op_redir_clobber,
             => true,
@@ -146,6 +146,19 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
 
 fn infixFn(self: Parser) InfixFn {
     return switch (self.currentTag()) {
+        .punct_plus,
+        .punct_minus,
+        .punct_star,
+        .punct_slash,
+        .punct_percent,
+        .punct_lt,
+        .op_lte,
+        .punct_gt,
+        .op_gte,
+        .op_eq,
+        .op_neq,
+        => Parser.parseInfix,
+
         else => unreachable,
     };
 }
@@ -192,6 +205,23 @@ fn parseFloat(self: *Parser) anyerror!Node {
         self.token_index.?,
         self.currentOffset(),
     );
+}
+
+fn parseInfix(self: *Parser, left: Node) anyerror!Node {
+    const left_ptr = try self.allocator.create(Node);
+    left_ptr.* = left;
+
+    var node = Node.new(
+        .{ .infix = .{ .left = left_ptr, .op = self.currentTag(), .right = undefined } },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+    try self.expectNext();
+    node.ty.infix.right = try self.allocator.create(Node);
+    var precedence = Precedence.forTag(node.ty.infix.op);
+    if (Precedence.isRightAssociative(node.ty.infix.op)) precedence.demote();
+    node.ty.infix.right.* = try self.parseExpression(precedence);
+    return node;
 }
 
 fn parseInt(self: *Parser) anyerror!Node {
