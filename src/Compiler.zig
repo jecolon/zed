@@ -25,8 +25,12 @@ pub fn init(allocator: std.mem.Allocator) !Compiler {
 pub fn compile(self: *Compiler, program: Program) anyerror!void {
     for (program.rules) |node, i| {
         switch (node.ty) {
-            .boolean => |b| try self.pushConstant(Value.new(.{ .boolean = b }, @intCast(u16, i), node.offset)),
+            .boolean => |b| try self.pushConstant(Value.new(.{ .boolean = b }, i, node.offset)),
+            .float => |f| try self.pushConstant(Value.new(.{ .float = f }, i, node.offset)),
+            .int => |int| try self.pushConstant(Value.new(.{ .int = int }, i, node.offset)),
             .stmt_end => try self.pushInstruction(.pop),
+            .string => |s| try self.pushConstant(Value.new(.{ .string = s }, i, node.offset)),
+            .uint => |u| try self.pushConstant(Value.new(.{ .uint = u }, i, node.offset)),
         }
     }
 }

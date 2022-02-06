@@ -1,6 +1,10 @@
 pub const Type = union(enum) {
     boolean: bool,
+    float: f64,
+    int: isize,
     stmt_end,
+    string: []const u8,
+    uint: usize,
 };
 
 offset: u16,

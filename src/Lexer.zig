@@ -163,7 +163,10 @@ fn lexNumber(self: *Lexer, byte: u8) Token {
             if (isFloatOnly(num_byte)) break true;
         } else false;
 
-        if (is_float) token.tag = .float;
+        if (is_float) {
+            token.tag = .float;
+            return token;
+        }
     }
 
     if ('-' == src[0] or '+' == src[0]) token.tag = .int;

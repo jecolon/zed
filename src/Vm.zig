@@ -54,7 +54,7 @@ fn ip(self: *Vm) *u16 {
     return &self.call_stack.items[self.call_stack.items.len - 1].ip;
 }
 
-test "Vm eval booleans" {
+fn testLastValue(input: []const u8, expected: Value) !void {
     const Lexer = @import("Lexer.zig");
     const Parser = @import("Parser.zig");
     const Compiler = @import("Compiler.zig");
@@ -62,7 +62,6 @@ test "Vm eval booleans" {
     const allocator = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const input = "false true";
     var lexer = Lexer{ .filename = "inline", .src = input };
     var tokens = try lexer.lex(arena.allocator());
     var parser = Parser{
@@ -77,5 +76,37 @@ test "Vm eval booleans" {
     var vm = try init(arena.allocator(), compiler.constants.items, compiler.instructions.items);
     try vm.run();
 
-    try std.testing.expectEqual(vm.last_popped.?.ty.boolean, true);
+    const last_popped = vm.last_popped.?;
+    try std.testing.expectEqual(@as(usize, 0), vm.value_stack.items.len);
+
+    switch (expected.ty) {
+        .boolean => |b| try std.testing.expectEqual(b, last_popped.ty.boolean),
+        .float => |f| try std.testing.expectEqual(f, last_popped.ty.float),
+        .int => |i| try std.testing.expectEqual(i, last_popped.ty.int),
+        .string => |s| try std.testing.expectEqualStrings(s, last_popped.ty.string),
+        .uint => |u| try std.testing.expectEqual(u, last_popped.ty.uint),
+    }
+}
+
+test "Vm eval booleans" {
+    try testLastValue("false true", Value.new(.{ .boolean = true }, 2, 6));
+}
+
+test "Vm eval uint" {
+    try testLastValue("123", Value.new(.{ .uint = 123 }, 0, 0));
+    try testLastValue("0b00000011", Value.new(.{ .uint = 3 }, 0, 0));
+}
+
+test "Vm eval int" {
+    try testLastValue("-123", Value.new(.{ .int = -123 }, 0, 0));
+    try testLastValue("-0b00000011", Value.new(.{ .int = -3 }, 0, 0));
+}
+
+test "Vm eval float" {
+    try testLastValue("1.23", Value.new(.{ .float = 1.23 }, 0, 0));
+    try testLastValue("-1.23", Value.new(.{ .float = -1.23 }, 0, 0));
+}
+
+test "Vm eval string" {
+    try testLastValue("\"Hello World!\"", Value.new(.{ .string = "Hello World!" }, 0, 0));
 }

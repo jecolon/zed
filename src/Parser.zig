@@ -133,6 +133,10 @@ const InfixFn = fn (*Parser, Node) anyerror!Node;
 fn prefixFn(tag: Token.Tag) ?PrefixFn {
     return switch (tag) {
         .pd_false, .pd_true => Parser.parseBoolean,
+        .float => Parser.parseFloat,
+        .int => Parser.parseInt,
+        .string => Parser.parseString,
+        .uint => Parser.parseUint,
         else => null,
     };
 }
@@ -175,9 +179,51 @@ fn parseBoolean(self: *Parser) anyerror!Node {
     );
 }
 
+fn parseFloat(self: *Parser) anyerror!Node {
+    const float = try std.fmt.parseFloat(f64, self.src[self.currentOffset()..self.currentLen()]);
+
+    return Node.new(
+        .{ .float = float },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+}
+
+fn parseInt(self: *Parser) anyerror!Node {
+    const int = try std.fmt.parseInt(isize, self.src[self.currentOffset()..self.currentLen()], 0);
+
+    return Node.new(
+        .{ .int = int },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+}
+
+fn parseString(self: *Parser) anyerror!Node {
+    return Node.new(
+        .{ .string = self.src[self.currentOffset() + 1 .. self.currentLen() - 1] },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+}
+
+fn parseUint(self: *Parser) anyerror!Node {
+    const uint = try std.fmt.parseUnsigned(usize, self.src[self.currentOffset()..self.currentLen()], 0);
+
+    return Node.new(
+        .{ .uint = uint },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+}
+
 // Parser movement.
 fn len(self: Parser) u16 {
     return @intCast(u16, self.tokens.items(.tag).len);
+}
+
+fn currentLen(self: Parser) u16 {
+    return self.tokens.items(.len)[self.token_index.?];
 }
 
 fn currentOffset(self: Parser) u16 {
