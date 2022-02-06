@@ -6,7 +6,7 @@ const Token = @import("Token.zig");
 
 allocator: std.mem.Allocator,
 filename: []const u8,
-offset: ?u16 = null,
+token_index: ?u16 = null,
 src: []const u8,
 tokens: std.MultiArrayList(Token),
 
@@ -18,11 +18,10 @@ pub const Program = struct {
 
 pub fn parse(self: *Parser) !Program {
     var rules = std.ArrayList(Node).init(self.allocator);
-    const stmt_end = Node{ .token_offsets = &[_]u16{}, .tag = .stmt_end };
 
     while (try self.next()) |node| {
         try rules.append(node);
-        try rules.append(stmt_end);
+        try rules.append(Node.new(.stmt_end, 0, self.currentOffset()));
     }
 
     return Program{ .rules = rules.items };
@@ -169,11 +168,11 @@ fn parseExpression(self: *Parser, precedence: Precedence) anyerror!Node {
 
 // Parse functions.
 fn parseBoolean(self: *Parser) anyerror!Node {
-    var token_offsets = try self.allocator.alloc(u16, 1);
-    token_offsets[0] = self.offset.?;
-    var node = Node{ .token_offsets = token_offsets, .tag = .bool_false };
-    if (self.currentIs(.pd_true)) node.tag = .bool_true;
-    return node;
+    return Node.new(
+        .{ .boolean = self.currentIs(.pd_true) },
+        self.token_index.?,
+        self.currentOffset(),
+    );
 }
 
 // Parser movement.
@@ -182,25 +181,25 @@ fn len(self: Parser) u16 {
 }
 
 fn currentOffset(self: Parser) u16 {
-    return self.tokens.items(.offset)[self.offset.?];
+    return self.tokens.items(.offset)[self.token_index.?];
 }
 
 fn currentTag(self: Parser) Token.Tag {
-    return self.tokens.items(.tag)[self.offset.?];
+    return self.tokens.items(.tag)[self.token_index.?];
 }
 
 fn currentIs(self: Parser, tag: Token.Tag) bool {
-    return self.tokens.items(.tag)[self.offset.?] == tag;
+    return self.tokens.items(.tag)[self.token_index.?] == tag;
 }
 
 fn advance(self: *Parser) bool {
-    if (self.offset) |*offset| offset.* += 1 else self.offset = 0;
-    return self.offset.? < self.len();
+    if (self.token_index) |*index| index.* += 1 else self.token_index = 0;
+    return self.token_index.? < self.len();
 }
 
 fn peekNIs(self: Parser, n: usize, tag: Token.Tag) bool {
-    if (self.offset) |offset| {
-        return if (offset + n < self.len()) self.tokens.items(.tag)[offset + n] == tag else false;
+    if (self.token_index) |index| {
+        return if (index + n < self.len()) self.tokens.items(.tag)[index + n] == tag else false;
     } else {
         return if (n - 1 < self.len()) self.tokens.items(.tag)[n - 1] == tag else false;
     }
@@ -211,8 +210,8 @@ fn peekIs(self: Parser, tag: Token.Tag) bool {
 }
 
 fn peekPrecedence(self: Parser) ?Precedence {
-    if (self.offset) |offset| {
-        return if (offset + 1 < self.len()) Precedence.forTag(self.tokens.items(.tag)[offset + 1]) else null;
+    if (self.token_index) |index| {
+        return if (index + 1 < self.len()) Precedence.forTag(self.tokens.items(.tag)[index + 1]) else null;
     } else {
         return Precedence.forTag(self.tokens.items(.tag)[0]);
     }
@@ -256,8 +255,10 @@ test "Parser booleans" {
     const program = try parser.parse();
 
     try std.testing.expectEqual(@as(usize, 4), program.rules.len);
-    try std.testing.expectEqual(Node.Tag.bool_false, program.rules[0].tag);
-    try std.testing.expectEqual(@as(u16, 0), tokens.items(.offset)[program.rules[0].token_offsets[0]]);
-    try std.testing.expectEqual(Node.Tag.bool_true, program.rules[2].tag);
-    try std.testing.expectEqual(@as(u16, 6), tokens.items(.offset)[program.rules[2].token_offsets[0]]);
+    try std.testing.expectEqual(Node.Type.boolean, program.rules[0].ty);
+    try std.testing.expectEqual(false, program.rules[0].ty.boolean);
+    try std.testing.expectEqual(@as(u16, 0), program.rules[0].offset);
+    try std.testing.expectEqual(Node.Type.boolean, program.rules[2].ty);
+    try std.testing.expectEqual(true, program.rules[2].ty.boolean);
+    try std.testing.expectEqual(@as(u16, 6), program.rules[2].offset);
 }
