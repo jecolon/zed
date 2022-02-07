@@ -1,0 +1,172 @@
+const std = @import("std");
+
+const Value = @import("Value.zig");
+
+const Scope = @This();
+
+allocator: std.mem.Allocator,
+parent: ?*Scope,
+map: std.StringHashMap(Value),
+
+pub fn init(allocator: std.mem.Allocator, parent: ?*Scope) Scope {
+    return Scope{
+        .allocator = allocator,
+        .parent = parent,
+        .map = std.StringHashMap(Value).init(allocator),
+    };
+}
+
+pub fn deinit(self: *Scope) void {
+    var iter = self.map.iterator();
+    while (iter.next()) |entry| {
+        if (entry.value_ptr.ty == .string) self.allocator.free(entry.value_ptr.ty.string);
+        //if (entry.value_ptr.ty == .list) self.listDeinit(entry.value_ptr.ty.list);
+        //if (entry.value_ptr.ty == .map) self.mapDeinit(entry.value_ptr.ty.map);
+        self.allocator.free(entry.key_ptr.*);
+    }
+    self.map.deinit();
+}
+
+fn stringCopy(self: *Scope, str: Value) !Value {
+    const copy = try self.allocator.dupe(u8, str.ty.string);
+    return Value.new(.{ .string = copy }, str.offset);
+}
+
+fn listCopy(self: *Scope, list: Value) !Value {
+    var copy_ptr = try self.allocator.create(std.ArrayList(Value));
+    copy_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, list.ty.list.items.len);
+
+    for (list.ty.list.items) |item| {
+        if (item.ty == .string) {
+            copy_ptr.appendAssumeCapacity(self.stringCopy(item));
+        } else if (item.ty == .list) {
+            copy_ptr.appendAssumeCapacity(self.listCopy(item));
+        } else if (item.ty == .map) {
+            copy_ptr.appendAssumeCapacity(self.mapCopy(item));
+        } else {
+            copy_ptr.appendAssumeCapacity(item);
+        }
+    }
+
+    return Value.new(.{ .list = copy_ptr }, list.offset);
+}
+
+fn mapCopy(self: *Scope, map: Value) !Value {
+    const copy_ptr = try self.allocator.create(std.StringHashMap(Value));
+    copy_ptr.* = std.StringHashMap(Value).init(self.allocator);
+    var iter = map.ty.map.iterator();
+
+    while (iter.next()) |entry| {
+        const key_copy = try self.allocator.dupe(u8, entry.key_ptr.*);
+        const value_copy = switch (entry.value_ptr.ty) {
+            .string => self.stringCopy(entry.value_ptr.*),
+            .list => self.listCopy(entry.value_ptr.*),
+            .map => self.mapCopy(entry.value_ptr.*),
+            else => entry.value_ptr.*,
+        };
+        try copy_ptr.put(key_copy, value_copy);
+    }
+
+    return Value.new(.{ .map = copy_ptr }, map.offset);
+}
+
+pub fn listDeinit(self: *Scope, list_ptr: *std.ArrayList(Value)) void {
+    for (list_ptr.items) |*item| {
+        if (item.ty == .string) self.allocator.free(item.ty.string);
+        if (item.ty == .list) self.listDeinit(item.ty.list);
+        if (item.ty == .map) self.mapDeinit(item.ty.map);
+    }
+    list_ptr.deinit();
+    self.allocator.destroy(list_ptr);
+}
+
+pub fn mapDeinit(self: *Scope, map_ptr: *std.StringHashMap(Value)) void {
+    var iter = map_ptr.iterator();
+    while (iter.next()) |entry| {
+        if (entry.value_ptr.ty == .string) self.allocator.free(entry.value_ptr.ty.string);
+        if (entry.value_ptr.ty == .list) self.listDeinit(entry.value_ptr.ty.list);
+        if (entry.value_ptr.ty == .map) self.mapDeinit(entry.value_ptr.ty.map);
+        self.allocator.free(entry.key_ptr.*);
+    }
+    map_ptr.deinit();
+    self.allocator.destroy(map_ptr);
+}
+
+pub fn isDefined(self: Scope, key: []const u8) bool {
+    if (self.map.contains(key)) {
+        return true;
+    } else if (self.parent) |parent| {
+        return parent.isDefined(key);
+    } else {
+        return false;
+    }
+}
+
+pub fn load(self: Scope, key: []const u8) ?Value {
+    if (self.map.get(key)) |value| {
+        return value;
+    } else if (self.parent) |parent| {
+        return parent.load(key);
+    } else {
+        return null;
+    }
+}
+
+pub fn store(self: *Scope, key: []const u8, value: Value) !void {
+    const key_copy = try self.allocator.dupe(u8, key);
+
+    if (value.ty == .string) {
+        try self.map.put(key_copy, self.stringCopy(value));
+        //} else if (value.ty == .list) {
+        //    try self.map.put(key_copy, self.listCopy(value));
+        //} else if (value.ty == .map) {
+        //    try self.map.put(key_copy, self.mapCopy(value));
+    } else {
+        try self.map.put(key_copy, value);
+    }
+}
+
+pub fn update(self: *Scope, key: []const u8, value: Value) void {
+    if (self.map.get(key)) |old_value| {
+        if (old_value.ty == .string) self.allocator.free(old_value.ty.string);
+        //if (old_value.ty == .list) self.listDeinit(old_value.ty.list);
+        //if (old_value.ty == .map) self.mapDeinit(old_value.ty.map);
+
+        if (value.ty == .string) {
+            try self.map.put(key, self.stringCopy(value));
+            //} else if (value.ty == .list) {
+            //    try self.map.put(key, self.listCopy(value));
+            //} else if (value.ty == .map) {
+            //    try self.map.put(key, self.mapCopy(value));
+        } else {
+            try self.map.put(key, value);
+        }
+    } else if (self.parent) |parent| {
+        return parent.update(key, value);
+    } else {
+        unreachable;
+    }
+}
+
+// Ranges
+pub fn putRange(self: *Scope, key: usize) !void {
+    try self.get("@ranges").?.ty.rec_range_map.put(key, {});
+}
+
+pub fn hasRange(self: Scope, key: usize) bool {
+    return self.get("@ranges").?.ty.rec_range_map.contains(key);
+}
+
+pub fn deleteRange(self: *Scope, key: usize) void {
+    _ = self.get("@ranges").?.ty.rec_range_map.remove(key);
+}
+
+// Debug
+pub fn dump(self: Scope) void {
+    std.debug.print("\n*** Scope Dump Begin ***\n", .{});
+    var iter = self.map.iterator();
+    while (iter.next()) |entry| {
+        std.debug.print("\t{s}: {}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+    }
+    std.debug.print("*** Scope Dump End ***\n", .{});
+}

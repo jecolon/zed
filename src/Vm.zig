@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Bytecode = @import("Bytecode.zig");
 const Location = @import("Location.zig");
+const Scope = @import("Scope.zig");
 const Value = @import("Value.zig");
 
 const Frame = struct {
@@ -9,12 +10,14 @@ const Frame = struct {
     ip: u16 = 0,
 };
 
+allocator: std.mem.Allocator,
 call_stack: std.ArrayList(Frame),
 constants: []const Value,
 filename: []const u8,
 instructions: *[]const u8,
 ip: *u16,
 last_popped: ?Value = null,
+scope: *Scope,
 src: []const u8,
 value_stack: std.ArrayList(Value),
 
@@ -26,13 +29,16 @@ pub fn init(
     src: []const u8,
     constants: []const Value,
     insts: []const u8,
+    scope: *Scope,
 ) !Vm {
     var self = Vm{
+        .allocator = allocator,
         .call_stack = std.ArrayList(Frame).init(allocator),
         .constants = constants,
         .filename = filename,
         .instructions = undefined,
         .ip = undefined,
+        .scope = scope,
         .src = src,
         .value_stack = std.ArrayList(Value).init(allocator),
     };
@@ -62,6 +68,22 @@ pub fn run(self: *Vm) !void {
             // Stack clean up.
             .pop => {
                 self.last_popped = self.value_stack.pop();
+                self.ip.* += 1;
+            },
+            // Scope
+            .scope_in => {
+                var child_scope_ptr = try self.allocator.create(Scope);
+                child_scope_ptr.* = Scope.init(self.allocator, self.scope);
+                self.scope = child_scope_ptr;
+                self.ip.* += 1;
+            },
+            .scope_out => {
+                // TODO: Try this
+                //var child_scope_ptr = self.scope;
+                //self.scope = child_scope_ptr.parent.?;
+                //child_scope_ptr.deinit();
+                //self.allocator.destroy(child_scope_ptr);
+                self.scope = self.scope.parent.?;
                 self.ip.* += 1;
             },
 
@@ -270,12 +292,17 @@ fn testLastValue(input: []const u8, expected: Value) !void {
     const program = try parser.parse();
     var compiler = try Compiler.init(arena.allocator());
     try compiler.compileProgram(program);
+
+    var scope = Scope.init(allocator, null);
+    defer scope.deinit();
+
     var vm = try init(
         arena.allocator(),
         "inline",
         input,
         compiler.constants.items,
         compiler.instructions.items,
+        &scope,
     );
     try vm.run();
 

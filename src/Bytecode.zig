@@ -18,6 +18,8 @@ pub const Opcode = enum(u8) {
     negative,
     neq,
     pop,
+    scope_in,
+    scope_out,
     sub,
 };
 

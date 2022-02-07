@@ -50,13 +50,17 @@ fn evalConditional(self: *Compiler, node: Node) anyerror!void {
     try self.pushInstruction(.jump_false);
     const jump_false_operand_index = try self.pushZeroes(2);
     // Then branch
+    try self.pushInstruction(.scope_in);
     for (node.ty.conditional.then_branch) |n| try self.compile(n);
+    try self.pushInstruction(.scope_out);
     // Unconditional jump
     try self.pushInstruction(.jump);
     const jump_operand_index = try self.pushZeroes(2);
     self.updateJumpIndex(jump_false_operand_index);
     // Else branch
+    try self.pushInstruction(.scope_in);
     for (node.ty.conditional.else_branch) |n| try self.compile(n);
+    try self.pushInstruction(.scope_out);
 
     self.updateJumpIndex(jump_operand_index);
 }
