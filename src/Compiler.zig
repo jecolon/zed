@@ -41,6 +41,7 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .define => try self.compileDefine(node),
         .ident => try self.compileIdent(node),
         .infix => try self.compileInfix(node),
+        .loop => try self.compileLoop(node),
         .prefix => try self.compilePrefix(node),
     }
 }
@@ -117,6 +118,22 @@ fn compilePrefix(self: *Compiler, node: Node) anyerror!void {
         .punct_bang => try self.pushInstruction(.logic_not),
         else => unreachable,
     }
+}
+
+fn compileLoop(self: *Compiler, node: Node) anyerror!void {
+    const Unconditional_jump_target = self.instructions.items.len;
+    // Condition
+    try self.compile(node.ty.loop.condition.*);
+    // Jump if false
+    try self.pushInstruction(.jump_false);
+    const jump_false_operand_index = try self.pushZeroes(2);
+    // Body
+    try self.pushInstruction(.scope_in);
+    for (node.ty.loop.body) |n| try self.compile(n);
+    try self.pushInstruction(.scope_out);
+    // Unconditional jump
+    try self.pushInstructionAndOperands(u16, .jump, &[_]u16{@intCast(u16, Unconditional_jump_target)});
+    self.updateJumpIndex(jump_false_operand_index);
 }
 
 // Helpers

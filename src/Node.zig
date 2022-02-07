@@ -14,6 +14,7 @@ pub const Type = union(enum) {
     conditional: Conditional,
     define: Define,
     infix: Infix,
+    loop: Loop,
     prefix: Prefix,
 };
 
@@ -40,6 +41,11 @@ const Conditional = struct {
 const Define = struct {
     name: *Node,
     value: *Node,
+};
+
+const Loop = struct {
+    condition: *Node,
+    body: []Node,
 };
 
 const Prefix = struct {

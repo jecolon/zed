@@ -21,7 +21,8 @@ pub fn parse(self: *Parser) !Program {
 
     while (try self.next()) |node| {
         try rules.append(node);
-        try rules.append(Node.new(.stmt_end, 0, self.currentOffset()));
+        if (node.ty == .loop) try rules.append(Node.new(.nil, 0, 0));
+        try rules.append(Node.new(.stmt_end, 0, 0));
     }
 
     return Program{ .rules = rules.items };
@@ -142,6 +143,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
 
         .op_neg, .punct_bang => Parser.parsePrefix,
         .kw_if => Parser.parseIf,
+        .kw_while => Parser.parseWhile,
 
         else => null,
     };
@@ -267,7 +269,7 @@ fn parseIf(self: *Parser) anyerror!Node {
     var then_branch_list = std.ArrayList(Node).init(self.allocator);
 
     if (self.skipTag(.punct_lbrace)) {
-        try self.parseNodes(&then_branch_list, .punct_rbrace, .punct_semicolon);
+        try self.parseNodes(&then_branch_list, .punct_rbrace, .punct_semicolon, true);
     } else {
         try self.expectNext();
         const then_node = try self.parseExpression(.lowest);
@@ -278,7 +280,7 @@ fn parseIf(self: *Parser) anyerror!Node {
 
     if (self.skipTag(.kw_else)) {
         if (self.skipTag(.punct_lbrace)) {
-            try self.parseNodes(&else_branch_list, .punct_rbrace, .punct_semicolon);
+            try self.parseNodes(&else_branch_list, .punct_rbrace, .punct_semicolon, true);
         } else {
             try self.expectNext();
             const else_node = try self.parseExpression(.lowest);
@@ -372,6 +374,35 @@ fn parseUint(self: *Parser) anyerror!Node {
     );
 }
 
+fn parseWhile(self: *Parser) anyerror!Node {
+    var node = Node.new(
+        .{ .loop = .{ .condition = undefined, .body = undefined } },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+    // Condition
+    try self.expectTag(.punct_lparen);
+    try self.expectNext();
+    node.ty.loop.condition = try self.allocator.create(Node);
+    node.ty.loop.condition.* = try self.parseExpression(.lowest);
+    try self.expectTag(.punct_rparen);
+    // Body
+    var body_list = std.ArrayList(Node).init(self.allocator);
+
+    if (self.skipTag(.punct_lbrace)) {
+        try self.parseNodes(&body_list, .punct_rbrace, .punct_semicolon, false);
+    } else {
+        try self.expectNext();
+        const body_node = try self.parseExpression(.lowest);
+        try body_list.append(body_node);
+        try body_list.append(Node.new(.stmt_end, 0, 0));
+    }
+
+    node.ty.loop.body = body_list.items;
+
+    return node;
+}
+
 // Parser movement.
 fn len(self: Parser) u16 {
     return @intCast(u16, self.tokens.items(.tag).len);
@@ -440,7 +471,7 @@ fn expectTag(self: *Parser, tag: Token.Tag) !void {
 }
 
 // Helpers
-fn parseNodes(self: *Parser, list: *std.ArrayList(Node), stop: Token.Tag, skip: Token.Tag) anyerror!void {
+fn parseNodes(self: *Parser, list: *std.ArrayList(Node), stop: Token.Tag, skip: Token.Tag, leave_on_stack: bool) anyerror!void {
     while (!self.skipTag(stop)) {
         try self.expectNext();
         const node = try self.parseExpression(.lowest);
@@ -449,7 +480,7 @@ fn parseNodes(self: *Parser, list: *std.ArrayList(Node), stop: Token.Tag, skip: 
         _ = self.skipTag(skip);
     }
 
-    _ = list.pop(); // Remove last stmt_end
+    if (leave_on_stack) _ = list.pop(); // Remove last stmt_end
 }
 
 // Tests

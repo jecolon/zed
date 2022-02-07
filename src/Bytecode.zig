@@ -24,6 +24,42 @@ pub const Opcode = enum(u8) {
     scope_out,
     store,
     sub,
+
+    pub const Def = struct {
+        opcode: Opcode,
+        bytes: u2,
+    };
+
+    pub fn fromInt(int: u8) ?Def {
+        return switch (int) {
+            0 => .{ .opcode = .add, .bytes = 1 },
+            1 => .{ .opcode = .constant, .bytes = 3 },
+            2 => .{ .opcode = .define, .bytes = 1 },
+            3 => .{ .opcode = .div, .bytes = 1 },
+            4 => .{ .opcode = .eq, .bytes = 1 },
+            5 => .{ .opcode = .jump, .bytes = 3 },
+            6 => .{ .opcode = .jump_false, .bytes = 3 },
+            7 => .{ .opcode = .jump_true, .bytes = 3 },
+            8 => .{ .opcode = .gt, .bytes = 1 },
+            9 => .{ .opcode = .gte, .bytes = 1 },
+            10 => .{ .opcode = .load, .bytes = 1 },
+            11 => .{ .opcode = .logic_and, .bytes = 1 },
+            12 => .{ .opcode = .logic_not, .bytes = 1 },
+            13 => .{ .opcode = .logic_or, .bytes = 1 },
+            14 => .{ .opcode = .lt, .bytes = 1 },
+            15 => .{ .opcode = .lte, .bytes = 1 },
+            16 => .{ .opcode = .mod, .bytes = 1 },
+            17 => .{ .opcode = .mul, .bytes = 1 },
+            18 => .{ .opcode = .negative, .bytes = 1 },
+            19 => .{ .opcode = .neq, .bytes = 1 },
+            20 => .{ .opcode = .pop, .bytes = 1 },
+            21 => .{ .opcode = .scope_in, .bytes = 1 },
+            22 => .{ .opcode = .scope_out, .bytes = 1 },
+            23 => .{ .opcode = .store, .bytes = 1 },
+            24 => .{ .opcode = .sub, .bytes = 1 },
+            else => null,
+        };
+    }
 };
 
 const Bytecode = @This();

@@ -11,6 +11,7 @@ pub const Tag = enum {
     kw_else,
     kw_if,
     kw_or,
+    kw_while,
 
     pd_false,
     pd_nil,
@@ -74,6 +75,7 @@ pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "false", .pd_false },
     .{ "nil", .pd_nil },
     .{ "true", .pd_true },
+    .{ "while", .kw_while },
 });
 
 len: u16,

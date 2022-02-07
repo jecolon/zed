@@ -311,7 +311,42 @@ fn jump(self: *Vm) void {
     self.ip.* = index;
 }
 
+pub fn dump(self: Vm) void {
+    std.debug.print("\n*** VM Dump Begin ***\n", .{});
+    std.debug.print("- Constants Dump\n", .{});
+
+    for (self.constants) |constant, i| {
+        std.debug.print("\t{}: {}\n", .{ i, constant });
+    }
+
+    std.debug.print("- Instructions Dump\n", .{});
+
+    var ins_index: usize = 0;
+    while (ins_index < self.instructions.len) {
+        const ins = self.instructions.*[ins_index];
+
+        if (Bytecode.Opcode.fromInt(ins)) |def| {
+            if (def.bytes == 3) {
+                const operand = std.mem.bytesAsSlice(u16, self.instructions.*[ins_index + 1 .. ins_index + 3])[0];
+                std.debug.print("\t{}: {} -> {}\n", .{ ins_index, def.opcode, operand });
+            } else if (def.bytes == 2) {
+                std.debug.print("\t{}: {} -> {}\n", .{ ins_index, def.opcode, self.instructions.*[ins_index + 1] });
+            } else {
+                std.debug.print("\t{}: {}\n", .{ ins_index, def.opcode });
+            }
+
+            ins_index += def.bytes;
+        } else {
+            std.debug.print("\t{}: {}\n", .{ ins_index, ins });
+            ins_index += 1;
+        }
+    }
+
+    std.debug.print("*** VM Dump End ***\n", .{});
+}
+
 // Tests
+const debug_dumps = false;
 
 fn testLastValue(input: []const u8, expected: Value) !void {
     const Lexer = @import("Lexer.zig");
@@ -320,7 +355,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
 
     const allocator = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
+    errdefer arena.deinit();
     var lexer = Lexer{ .filename = "inline", .src = input };
     var tokens = try lexer.lex(arena.allocator());
     var parser = Parser{
@@ -344,6 +379,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         compiler.instructions.items,
         &scope,
     );
+    if (debug_dumps) vm.dump();
     try vm.run();
 
     const last_popped = vm.last_popped.?;
@@ -362,6 +398,10 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         .string => |s| try std.testing.expectEqualStrings(s, last_popped.ty.string),
         .uint => |u| try std.testing.expectEqual(u, last_popped.ty.uint),
     }
+
+    arena.deinit();
+
+    if (debug_dumps) scope.dump();
 }
 
 test "Vm eval booleans" {
@@ -504,6 +544,17 @@ test "Vm child scopes" {
         \\  foo = foo * bar
         \\}
         \\foo
+    ;
+    try testLastValue(input, Value.new(.{ .uint = 3 }, 0));
+}
+
+test "Vm while loop" {
+    const input =
+        \\i := 0
+        \\while (i < 3) {
+        \\  if (true) { i = i + 1 }
+        \\}
+        \\i
     ;
     try testLastValue(input, Value.new(.{ .uint = 3 }, 0));
 }
