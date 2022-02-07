@@ -134,14 +134,13 @@ fn compileLoop(self: *Compiler, node: Node) anyerror!void {
     // Unconditional jump
     try self.pushInstructionAndOperands(u16, .jump, &[_]u16{@intCast(u16, Unconditional_jump_target)});
     self.updateJumpIndex(jump_false_operand_index);
+    // while loops always return nul.
+    try self.pushConstant(Value.new(.nil, node.offset));
 }
 
 // Helpers
 fn pushConstant(self: *Compiler, value: Value) !void {
     try self.pushInstructionAndOperands(u16, .constant, &[_]u16{@intCast(u16, self.constants.items.len)});
-    //try self.instructions.append(@enumToInt(Bytecode.Opcode.constant));
-    //const index_bytes = std.mem.sliceAsBytes(&[_]u16{@intCast(u16, self.constants.items.len)});
-    //try self.instructions.appendSlice(index_bytes);
     try self.constants.append(value);
 }
 
