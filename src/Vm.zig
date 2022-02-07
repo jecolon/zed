@@ -49,15 +49,51 @@ pub fn run(self: *Vm) !void {
         const opcode = @intToEnum(Bytecode.Opcode, self.instructions.*[self.ip.*]);
 
         switch (opcode) {
+            // Instruction pointer movements.
+            .jump => self.jump(),
+            .jump_false => {
+                const condition = self.value_stack.pop();
+                if (!isTruthy(condition)) self.jump() else self.ip.* += 3;
+            },
+            .jump_true => {
+                const condition = self.value_stack.pop();
+                if (isTruthy(condition)) self.jump() else self.ip.* += 3;
+            },
+            // Stack clean up.
             .pop => {
                 self.last_popped = self.value_stack.pop();
                 self.ip.* += 1;
             },
 
+            // Normal opcodes.
             .constant => {
                 const index = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
                 try self.value_stack.append(self.constants[index]);
                 self.ip.* += 3;
+            },
+
+            .logic_and, .logic_or => {
+                const right = self.value_stack.pop();
+                const left = self.value_stack.pop();
+
+                if (left.ty != .boolean) {
+                    const location = Location.getLocation(self.filename, self.src, left.offset);
+                    std.log.err("Logical op on {s}; {}", .{ @tagName(left.ty), location });
+                    return error.InvalidLogicOp;
+                }
+                if (right.ty != .boolean) {
+                    const location = Location.getLocation(self.filename, self.src, right.offset);
+                    std.log.err("Logical op on {s}; {}", .{ @tagName(right.ty), location });
+                    return error.InvalidLogicOp;
+                }
+
+                switch (opcode) {
+                    .logic_and => try self.value_stack.append(Value.new(.{ .boolean = left.ty.boolean and right.ty.boolean }, left.offset)),
+                    .logic_or => try self.value_stack.append(Value.new(.{ .boolean = left.ty.boolean or right.ty.boolean }, left.offset)),
+                    else => unreachable,
+                }
+
+                self.ip.* += 1;
             },
 
             .logic_not => {
@@ -195,6 +231,26 @@ pub fn run(self: *Vm) !void {
     }
 }
 
+// Helpers
+fn isTruthy(value: Value) bool {
+    return switch (value.ty) {
+        .boolean => |b| b,
+        .float => |f| f != 0.0,
+        .int => |i| i != 0,
+        .string => |s| s.len != 0,
+        .uint => |u| u != 0,
+
+        else => false,
+    };
+}
+
+fn jump(self: *Vm) void {
+    const index = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+    self.ip.* = index;
+}
+
+// Tests
+
 fn testLastValue(input: []const u8, expected: Value) !void {
     const Lexer = @import("Lexer.zig");
     const Parser = @import("Parser.zig");
@@ -230,6 +286,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         .boolean => |b| try std.testing.expectEqual(b, last_popped.ty.boolean),
         .float => |f| try std.testing.expectEqual(f, last_popped.ty.float),
         .int => |i| try std.testing.expectEqual(i, last_popped.ty.int),
+        .nil => try std.testing.expectEqual(Value.Type.nil, last_popped.ty),
         .string => |s| try std.testing.expectEqualStrings(s, last_popped.ty.string),
         .uint => |u| try std.testing.expectEqual(u, last_popped.ty.uint),
     }
@@ -343,4 +400,21 @@ test "Vm eval infix comparisons" {
     try testLastValue("1 <= 1", Value.new(.{ .boolean = true }, 0));
     try testLastValue("1 > 1", Value.new(.{ .boolean = false }, 0));
     try testLastValue("1 >= 1", Value.new(.{ .boolean = true }, 0));
+}
+
+test "Vm eval infix mix" {
+    try testLastValue("1 + 2 * 5 % 2 / 1 * \"1.0\" == 1", Value.new(.{ .boolean = true }, 0));
+}
+
+test "Vm eval infix logic and / or" {
+    try testLastValue("true and true", Value.new(.{ .boolean = true }, 0));
+}
+
+test "Vm if conditional" {
+    try testLastValue("if (true) 1 else 2", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("if (false) 1 else 2", Value.new(.{ .uint = 2 }, 0));
+    try testLastValue("if (false) 1", Value.new(.nil, 0));
+    try testLastValue("if (true) { 1 } else { 2 }", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("if (false) { 1 } else { 2 }", Value.new(.{ .uint = 2 }, 0));
+    try testLastValue("if (false) { 1 }", Value.new(.nil, 0));
 }

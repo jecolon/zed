@@ -4,6 +4,7 @@ pub const Type = union(enum) {
     boolean: bool,
     float: f64,
     int: isize,
+    nil,
     string: []const u8,
     uint: usize,
 };
@@ -17,18 +18,30 @@ pub fn new(ty: Type, offset: u16) Value {
     return .{ .offset = offset, .ty = ty };
 }
 
+fn isNumeric(self: Value) bool {
+    return switch (self.ty) {
+        .float => true,
+        .int => true,
+        .uint => true,
+        else => false,
+    };
+}
+
 pub fn eql(self: Value, other: Value) bool {
+    if (self.asFloat()) |f1| {
+        if (other.asFloat()) |f2| return f1.ty.float == f2.ty.float;
+    }
+
     if (!self.eqlType(other)) return false;
+
     return switch (self.ty) {
         .boolean => |b| b == other.ty.boolean,
-        .float => |f| f == other.ty.float,
         //.func => |f| fnc: {
         //    if (!std.mem.eql(u8, f.instructions, other.ty.func.instructions)) break :fnc false;
         //    break :fnc for (f.params) |param, i| {
         //        if (!std.mem.eql(u8, param, other.ty.func.params[i])) break false;
         //    } else true;
         //},
-        .int => |i| i == other.ty.int,
         //.list => |l| lst: {
         //    if (l.items.len != other.ty.list.items.len) break :lst false;
         //    break :lst for (l.items) |item, i| {
@@ -45,8 +58,8 @@ pub fn eql(self: Value, other: Value) bool {
         //    } else true;
         //},
         .string => |s| std.mem.eql(u8, s, other.ty.string),
-        .uint => |u| u == other.ty.uint,
-        //.nil => other.ty == .nil,
+        .nil => other.ty == .nil,
+        else => unreachable,
     };
 }
 
@@ -63,7 +76,7 @@ pub fn eqlType(self: Value, other: Value) bool {
         //.rec_range_map => other.ty == .rec_range_map,
         .string => other.ty == .string,
         .uint => other.ty == .uint,
-        //.nil => other.ty == .nil,
+        .nil => other.ty == .nil,
     };
 }
 

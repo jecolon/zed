@@ -8,6 +8,8 @@ pub const Tag = enum {
     uint,
 
     kw_and,
+    kw_else,
+    kw_if,
     kw_or,
 
     pd_false,
@@ -66,6 +68,8 @@ pub const Tag = enum {
 
 pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "and", .kw_and },
+    .{ "else", .kw_else },
+    .{ "if", .kw_if },
     .{ "or", .kw_or },
     .{ "false", .pd_false },
     .{ "nil", .pd_nil },

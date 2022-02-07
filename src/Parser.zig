@@ -135,10 +135,12 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .pd_false, .pd_true => Parser.parseBoolean,
         .float => Parser.parseFloat,
         .int => Parser.parseInt,
+        .pd_nil => Parser.parseNil,
         .string => Parser.parseString,
         .uint => Parser.parseUint,
 
         .op_neg, .punct_bang => Parser.parsePrefix,
+        .kw_if => Parser.parseIf,
 
         else => null,
     };
@@ -157,6 +159,8 @@ fn infixFn(self: Parser) InfixFn {
         .op_gte,
         .op_eq,
         .op_neq,
+        .kw_and,
+        .kw_or,
         => Parser.parseInfix,
 
         else => unreachable,
@@ -207,6 +211,53 @@ fn parseFloat(self: *Parser) anyerror!Node {
     );
 }
 
+fn parseIf(self: *Parser) anyerror!Node {
+    try self.expectTag(.punct_lparen);
+    try self.expectNext();
+    const condition_ptr = try self.allocator.create(Node);
+    condition_ptr.* = try self.parseExpression(.lowest);
+    try self.expectTag(.punct_rparen);
+
+    var then_branch_list = std.ArrayList(Node).init(self.allocator);
+
+    if (self.skipTag(.punct_lbrace)) {
+        while (!self.skipTag(.punct_rbrace)) {
+            try self.expectNext();
+            const then_node = try self.parseExpression(.lowest);
+            try then_branch_list.append(then_node);
+        }
+    } else {
+        try self.expectNext();
+        const then_node = try self.parseExpression(.lowest);
+        try then_branch_list.append(then_node);
+    }
+
+    var else_branch_list = std.ArrayList(Node).init(self.allocator);
+
+    if (self.skipTag(.kw_else)) {
+        if (self.skipTag(.punct_lbrace)) {
+            while (!self.skipTag(.punct_rbrace)) {
+                try self.expectNext();
+                const else_node = try self.parseExpression(.lowest);
+                try else_branch_list.append(else_node);
+            }
+        } else {
+            try self.expectNext();
+            const else_node = try self.parseExpression(.lowest);
+            try else_branch_list.append(else_node);
+        }
+    } else {
+        // Synthetic nil if no else branch provided.
+        try else_branch_list.append(Node.new(.nil, self.token_index.?, self.currentOffset()));
+    }
+
+    return Node.new(.{ .conditional = .{
+        .condition = condition_ptr,
+        .then_branch = then_branch_list.items,
+        .else_branch = else_branch_list.items,
+    } }, self.token_index.?, self.currentOffset());
+}
+
 fn parseInfix(self: *Parser, left: Node) anyerror!Node {
     const left_ptr = try self.allocator.create(Node);
     left_ptr.* = left;
@@ -231,6 +282,14 @@ fn parseInt(self: *Parser) anyerror!Node {
 
     return Node.new(
         .{ .int = int },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+}
+
+fn parseNil(self: *Parser) anyerror!Node {
+    return Node.new(
+        .nil,
         self.token_index.?,
         self.currentOffset(),
     );
