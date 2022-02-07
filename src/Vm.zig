@@ -137,6 +137,7 @@ pub fn run(self: *Vm) !void {
                 switch (value.ty) {
                     .float => |f| try self.value_stack.append(Value.new(.{ .float = -f }, value.offset)),
                     .int => |i| try self.value_stack.append(Value.new(.{ .int = -i }, value.offset)),
+                    .uint => |u| try self.value_stack.append(Value.new(.{ .int = -@intCast(isize, u) }, value.offset)),
                     else => {
                         const location = Location.getLocation(self.filename, self.src, value.offset);
                         std.log.err("Negative op `-` not allowed on {s}; {}", .{ @tagName(value.ty), location });
@@ -249,6 +250,45 @@ pub fn run(self: *Vm) !void {
 
                 self.ip.* += 1;
             },
+
+            // Names
+            .define => {
+                const name = self.value_stack.pop();
+                const value = self.value_stack.pop();
+                if (self.scope.isDefined(name.ty.string)) {
+                    const location = Location.getLocation(self.filename, self.src, name.offset);
+                    std.log.err("{s} already defined; {}", .{ name.ty.string, location });
+                    return error.NameAlreadyDefined;
+                }
+                try self.scope.store(name.ty.string, value);
+                try self.value_stack.append(value);
+                self.ip.* += 1;
+            },
+            .load => {
+                const name = self.value_stack.pop();
+
+                if (self.scope.load(name.ty.string)) |value| {
+                    try self.value_stack.append(value);
+                } else {
+                    const location = Location.getLocation(self.filename, self.src, name.offset);
+                    std.log.err("{s} not defined; {}", .{ name.ty.string, location });
+                    return error.NameNotDefined;
+                }
+
+                self.ip.* += 1;
+            },
+            .store => {
+                const name = self.value_stack.pop();
+                const value = self.value_stack.pop();
+                if (!self.scope.isDefined(name.ty.string)) {
+                    const location = Location.getLocation(self.filename, self.src, name.offset);
+                    std.log.err("{s} not defined; {}", .{ name.ty.string, location });
+                    return error.NameNotDefined;
+                }
+                try self.scope.update(name.ty.string, value);
+                try self.value_stack.append(value);
+                self.ip.* += 1;
+            },
         }
     }
 }
@@ -307,7 +347,12 @@ fn testLastValue(input: []const u8, expected: Value) !void {
     try vm.run();
 
     const last_popped = vm.last_popped.?;
-    try std.testing.expectEqual(@as(usize, 0), vm.value_stack.items.len);
+    std.testing.expectEqual(@as(usize, 0), vm.value_stack.items.len) catch |err| {
+        for (vm.value_stack.items) |value| {
+            std.debug.print("\n***{}***\n", .{value.ty});
+        }
+        return err;
+    };
 
     switch (expected.ty) {
         .boolean => |b| try std.testing.expectEqual(b, last_popped.ty.boolean),
@@ -345,7 +390,7 @@ test "Vm eval string" {
 test "Vm eval prefix" {
     try testLastValue("!true", Value.new(.{ .boolean = false }, 0));
     try testLastValue("!false", Value.new(.{ .boolean = true }, 0));
-    //TODO: Negative op -
+    try testLastValue("foo := 1; -foo", Value.new(.{ .int = -1 }, 0));
 }
 
 test "Vm eval infix add" {
@@ -444,4 +489,21 @@ test "Vm if conditional" {
     try testLastValue("if (true) { 1 } else { 2 }", Value.new(.{ .uint = 1 }, 0));
     try testLastValue("if (false) { 1 } else { 2 }", Value.new(.{ .uint = 2 }, 0));
     try testLastValue("if (false) { 1 }", Value.new(.nil, 0));
+}
+
+test "Vm name definition, store, and load" {
+    try testLastValue("foo := 1", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("foo := 1; foo = foo + 1; foo", Value.new(.{ .uint = 2 }, 0));
+}
+
+test "Vm child scopes" {
+    const input =
+        \\foo := 1
+        \\if (2 >= 1.2) {
+        \\  bar := 3
+        \\  foo = foo * bar
+        \\}
+        \\foo
+    ;
+    try testLastValue(input, Value.new(.{ .uint = 3 }, 0));
 }

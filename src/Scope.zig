@@ -116,28 +116,28 @@ pub fn store(self: *Scope, key: []const u8, value: Value) !void {
     const key_copy = try self.allocator.dupe(u8, key);
 
     if (value.ty == .string) {
-        try self.map.put(key_copy, self.stringCopy(value));
+        try self.map.put(key_copy, try self.stringCopy(value));
         //} else if (value.ty == .list) {
-        //    try self.map.put(key_copy, self.listCopy(value));
+        //    try self.map.put(key_copy, try self.listCopy(value));
         //} else if (value.ty == .map) {
-        //    try self.map.put(key_copy, self.mapCopy(value));
+        //    try self.map.put(key_copy, try self.mapCopy(value));
     } else {
         try self.map.put(key_copy, value);
     }
 }
 
-pub fn update(self: *Scope, key: []const u8, value: Value) void {
+pub fn update(self: *Scope, key: []const u8, value: Value) !void {
     if (self.map.get(key)) |old_value| {
         if (old_value.ty == .string) self.allocator.free(old_value.ty.string);
         //if (old_value.ty == .list) self.listDeinit(old_value.ty.list);
         //if (old_value.ty == .map) self.mapDeinit(old_value.ty.map);
 
         if (value.ty == .string) {
-            try self.map.put(key, self.stringCopy(value));
+            try self.map.put(key, try self.stringCopy(value));
             //} else if (value.ty == .list) {
-            //    try self.map.put(key, self.listCopy(value));
+            //    try self.map.put(key, try self.listCopy(value));
             //} else if (value.ty == .map) {
-            //    try self.map.put(key, self.mapCopy(value));
+            //    try self.map.put(key, try self.mapCopy(value));
         } else {
             try self.map.put(key, value);
         }

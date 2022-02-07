@@ -1,6 +1,7 @@
 pub const Opcode = enum(u8) {
     add,
     constant,
+    define,
     div,
     eq,
     jump,
@@ -8,6 +9,7 @@ pub const Opcode = enum(u8) {
     jump_true,
     gt,
     gte,
+    load,
     logic_and,
     logic_not,
     logic_or,
@@ -20,6 +22,7 @@ pub const Opcode = enum(u8) {
     pop,
     scope_in,
     scope_out,
+    store,
     sub,
 };
 

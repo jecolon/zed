@@ -134,6 +134,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
     return switch (tag) {
         .pd_false, .pd_true => Parser.parseBoolean,
         .float => Parser.parseFloat,
+        .ident => Parser.parseIdent,
         .int => Parser.parseInt,
         .pd_nil => Parser.parseNil,
         .string => Parser.parseString,
@@ -163,6 +164,9 @@ fn infixFn(self: Parser) InfixFn {
         .kw_or,
         => Parser.parseInfix,
 
+        .punct_equals => Parser.parseAssign,
+        .op_define => Parser.parseDefine,
+
         else => unreachable,
     };
 }
@@ -191,12 +195,48 @@ fn parseExpression(self: *Parser, precedence: Precedence) anyerror!Node {
 }
 
 // Parse functions.
+fn parseAssign(self: *Parser, name: Node) anyerror!Node {
+    if (name.ty != .ident) {
+        const location = Location.getLocation(self.filename, self.src, name.offset);
+        std.log.err("Invalid assignment left hand side {s}; {}", .{ @tagName(name.ty), location });
+        return error.InvalidAssign;
+    }
+
+    var node = Node.new(
+        .{ .assign = .{ .name = try self.allocator.create(Node), .value = try self.allocator.create(Node) } },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+    node.ty.assign.name.* = name;
+    try self.expectNext();
+    node.ty.assign.value.* = try self.parseExpression(.lowest);
+    return node;
+}
+
 fn parseBoolean(self: *Parser) anyerror!Node {
     return Node.new(
         .{ .boolean = self.currentIs(.pd_true) },
         self.token_index.?,
         self.currentOffset(),
     );
+}
+
+fn parseDefine(self: *Parser, name: Node) anyerror!Node {
+    if (name.ty != .ident) {
+        const location = Location.getLocation(self.filename, self.src, name.offset);
+        std.log.err("Name definition of non-name {s}; {}", .{ @tagName(name.ty), location });
+        return error.InvalidDefine;
+    }
+
+    var node = Node.new(
+        .{ .define = .{ .name = try self.allocator.create(Node), .value = try self.allocator.create(Node) } },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+    node.ty.define.name.* = name;
+    try self.expectNext();
+    node.ty.define.value.* = try self.parseExpression(.lowest);
+    return node;
 }
 
 fn parseFloat(self: *Parser) anyerror!Node {
@@ -211,6 +251,12 @@ fn parseFloat(self: *Parser) anyerror!Node {
     );
 }
 
+fn parseIdent(self: *Parser) anyerror!Node {
+    const start = self.currentOffset();
+    const end = self.currentOffset() + self.currentLen();
+    return Node.new(.{ .ident = self.src[start..end] }, self.token_index.?, start);
+}
+
 fn parseIf(self: *Parser) anyerror!Node {
     try self.expectTag(.punct_lparen);
     try self.expectNext();
@@ -221,11 +267,7 @@ fn parseIf(self: *Parser) anyerror!Node {
     var then_branch_list = std.ArrayList(Node).init(self.allocator);
 
     if (self.skipTag(.punct_lbrace)) {
-        while (!self.skipTag(.punct_rbrace)) {
-            try self.expectNext();
-            const then_node = try self.parseExpression(.lowest);
-            try then_branch_list.append(then_node);
-        }
+        try self.parseNodes(&then_branch_list, .punct_rbrace, .punct_semicolon);
     } else {
         try self.expectNext();
         const then_node = try self.parseExpression(.lowest);
@@ -236,11 +278,7 @@ fn parseIf(self: *Parser) anyerror!Node {
 
     if (self.skipTag(.kw_else)) {
         if (self.skipTag(.punct_lbrace)) {
-            while (!self.skipTag(.punct_rbrace)) {
-                try self.expectNext();
-                const else_node = try self.parseExpression(.lowest);
-                try else_branch_list.append(else_node);
-            }
+            try self.parseNodes(&else_branch_list, .punct_rbrace, .punct_semicolon);
         } else {
             try self.expectNext();
             const else_node = try self.parseExpression(.lowest);
@@ -263,7 +301,11 @@ fn parseInfix(self: *Parser, left: Node) anyerror!Node {
     left_ptr.* = left;
 
     var node = Node.new(
-        .{ .infix = .{ .left = left_ptr, .op = self.currentTag(), .right = undefined } },
+        .{ .infix = .{
+            .left = left_ptr,
+            .op = self.currentTag(),
+            .right = undefined,
+        } },
         self.token_index.?,
         self.currentOffset(),
     );
@@ -396,6 +438,21 @@ fn expectTag(self: *Parser, tag: Token.Tag) !void {
         return error.UnexpectedToken;
     }
 }
+
+// Helpers
+fn parseNodes(self: *Parser, list: *std.ArrayList(Node), stop: Token.Tag, skip: Token.Tag) anyerror!void {
+    while (!self.skipTag(stop)) {
+        try self.expectNext();
+        const node = try self.parseExpression(.lowest);
+        try list.append(node);
+        try list.append(Node.new(.stmt_end, 0, 0));
+        _ = self.skipTag(skip);
+    }
+
+    _ = list.pop(); // Remove last stmt_end
+}
+
+// Tests
 
 test "Parser booleans" {
     const allocator = std.testing.allocator;

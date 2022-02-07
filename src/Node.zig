@@ -3,13 +3,16 @@ const Token = @import("Token.zig");
 pub const Type = union(enum) {
     boolean: bool,
     float: f64,
+    ident: []const u8,
     int: isize,
     nil,
     stmt_end,
     string: []const u8,
     uint: usize,
 
+    assign: Define,
     conditional: Conditional,
+    define: Define,
     infix: Infix,
     prefix: Prefix,
 };
@@ -32,6 +35,11 @@ const Conditional = struct {
     condition: *Node,
     then_branch: []Node,
     else_branch: []Node,
+};
+
+const Define = struct {
+    name: *Node,
+    value: *Node,
 };
 
 const Prefix = struct {

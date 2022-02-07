@@ -36,14 +36,24 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .string => |s| try self.pushConstant(Value.new(.{ .string = s }, node.offset)),
         .uint => |u| try self.pushConstant(Value.new(.{ .uint = u }, node.offset)),
 
-        .conditional => try self.evalConditional(node),
-        .infix => try self.evalInfix(node),
-        .prefix => try self.evalPrefix(node),
+        .assign => try self.compileAssign(node),
+        .conditional => try self.compileConditional(node),
+        .define => try self.compileDefine(node),
+        .ident => try self.compileIdent(node),
+        .infix => try self.compileInfix(node),
+        .prefix => try self.compilePrefix(node),
     }
 }
 
 // Eval functions
-fn evalConditional(self: *Compiler, node: Node) anyerror!void {
+fn compileAssign(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.assign.value.*);
+    //TODO: Handle other lvalue types.
+    try self.pushConstant(Value.new(.{ .string = node.ty.assign.name.ty.ident }, node.ty.assign.name.offset));
+    try self.pushInstruction(.store);
+}
+
+fn compileConditional(self: *Compiler, node: Node) anyerror!void {
     // Condition
     try self.compile(node.ty.conditional.condition.*);
     // Jump if false
@@ -65,7 +75,18 @@ fn evalConditional(self: *Compiler, node: Node) anyerror!void {
     self.updateJumpIndex(jump_operand_index);
 }
 
-fn evalInfix(self: *Compiler, node: Node) anyerror!void {
+fn compileDefine(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.define.value.*);
+    try self.pushConstant(Value.new(.{ .string = node.ty.define.name.ty.ident }, node.ty.define.name.offset));
+    try self.pushInstruction(.define);
+}
+
+fn compileIdent(self: *Compiler, node: Node) anyerror!void {
+    try self.pushConstant(Value.new(.{ .string = node.ty.ident }, node.offset));
+    try self.pushInstruction(.load);
+}
+
+fn compileInfix(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.infix.left.*);
     try self.compile(node.ty.infix.right.*);
 
@@ -88,7 +109,7 @@ fn evalInfix(self: *Compiler, node: Node) anyerror!void {
     }
 }
 
-fn evalPrefix(self: *Compiler, node: Node) anyerror!void {
+fn compilePrefix(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.prefix.operand.*);
 
     switch (node.ty.prefix.op) {
