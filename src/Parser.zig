@@ -142,12 +142,15 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .kw_break => Parser.parseBreak,
         .kw_continue => Parser.parseContinue,
         .kw_if => Parser.parseIf,
+        .kw_return => Parser.parseReturn,
         .kw_while => Parser.parseWhile,
 
         .op_neg, .punct_bang => Parser.parsePrefix,
 
         .pd_false, .pd_true => Parser.parseBoolean,
         .pd_nil => Parser.parseNil,
+
+        .punct_lbrace => Parser.parseFunc,
 
         else => null,
     };
@@ -285,6 +288,32 @@ fn parseFloat(self: *Parser) anyerror!Node {
     );
 }
 
+fn parseFunc(self: *Parser) anyerror!Node {
+    var node = Node.new(
+        .{ .func = .{ .body = undefined, .params = &[_][]const u8{} } }, //TODO: Parse params.
+        self.token_index.?,
+        self.currentOffset(),
+    );
+
+    var body_list = std.ArrayList(Node).init(self.allocator);
+    try self.parseNodes(&body_list, .punct_rbrace, .punct_semicolon);
+
+    //TODO: Handle empty functions.
+    // Implicit return
+    if (body_list.items[body_list.items.len - 1].ty != .func_return) {
+        var synth_return = Node.new(
+            .{ .func_return = try self.allocator.create(Node) },
+            self.token_index.?,
+            self.currentOffset(),
+        );
+        synth_return.ty.func_return.* = body_list.pop();
+        try body_list.append(synth_return);
+    }
+
+    node.ty.func.body = body_list.items;
+    return node;
+}
+
 fn parseIdent(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
@@ -380,6 +409,26 @@ fn parsePrefix(self: *Parser) anyerror!Node {
     try self.expectNext();
     node.ty.prefix.operand = try self.allocator.create(Node);
     node.ty.prefix.operand.* = try self.parseExpression(.prefix);
+    return node;
+}
+
+fn parseReturn(self: *Parser) anyerror!Node {
+    var node = Node.new(
+        .{ .func_return = try self.allocator.create(Node) },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+
+    if (!self.peekIs(.punct_semicolon) and
+        !self.peekIs(.punct_rbrace) and
+        !self.atEnd())
+    {
+        _ = self.advance();
+        node.ty.func_return.* = try self.parseExpression(.lowest);
+    } else {
+        node.ty.func_return.* = Node.new(.nil, self.token_index.?, self.currentOffset());
+    }
+
     return node;
 }
 
@@ -508,6 +557,10 @@ fn expectTag(self: *Parser, tag: Token.Tag) !void {
 }
 
 // Helpers
+fn atEnd(self: Parser) bool {
+    return self.token_index.? + 1 >= self.tokens.items(.tag).len;
+}
+
 fn parseNodes(self: *Parser, list: *std.ArrayList(Node), stop: Token.Tag, skip: Token.Tag) anyerror!void {
     while (!self.skipTag(stop)) {
         try self.expectNext();

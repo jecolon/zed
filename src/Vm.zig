@@ -16,7 +16,7 @@ constants: []const Value,
 filename: []const u8,
 instructions: *[]const u8,
 ip: *u16,
-last_popped: ?Value = null,
+last_popped: Value = Value.new(.nil, 0),
 scope: *Scope,
 src: []const u8,
 value_stack: std.ArrayList(Value),
@@ -310,6 +310,13 @@ pub fn run(self: *Vm) !void {
                 try self.value_stack.append(value);
                 self.ip.* += 1;
             },
+
+            .func_return => {
+                if (self.call_stack.items.len == 1) {
+                    self.last_popped = self.value_stack.pop();
+                    break;
+                }
+            },
         }
     }
 }
@@ -403,7 +410,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
     if (debug_dumps) vm.dump();
     try vm.run();
 
-    const last_popped = vm.last_popped.?;
+    const last_popped = vm.last_popped;
     std.testing.expectEqual(@as(usize, 0), vm.value_stack.items.len) catch |err| {
         for (vm.value_stack.items) |value| {
             std.debug.print("\n***{}***\n", .{value.ty});
@@ -418,6 +425,8 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         .nil => try std.testing.expectEqual(Value.Type.nil, last_popped.ty),
         .string => |s| try std.testing.expectEqualStrings(s, last_popped.ty.string),
         .uint => |u| try std.testing.expectEqual(u, last_popped.ty.uint),
+
+        .func => try std.testing.expect(expected.eql(last_popped)),
     }
 
     arena.deinit();
@@ -646,4 +655,38 @@ test "Vm loop continue" {
         \\total
     ;
     try testLastValue(input, Value.new(.{ .uint = 5 }, 0));
+}
+
+test "Vm function literal" {
+    const instructions = [_]u8{
+        @enumToInt(Bytecode.Opcode.constant),
+        0,
+        0,
+        @enumToInt(Bytecode.Opcode.func_return),
+    };
+
+    const func = Value.new(.{ .func = .{
+        .instructions = &instructions,
+        .params = &[_][]const u8{},
+    } }, 0);
+
+    try testLastValue("{ 1 }", func);
+    try testLastValue("{ return 1 }", func);
+
+    const instructions_2 = [_]u8{
+        @enumToInt(Bytecode.Opcode.constant),
+        0,
+        0,
+        @enumToInt(Bytecode.Opcode.func_return),
+    };
+
+    const func_2 = Value.new(.{ .func = .{
+        .instructions = &instructions_2,
+        .params = &[_][]const u8{},
+    } }, 0);
+
+    try testLastValue("{ return }", func_2);
+    try testLastValue("return", Value.new(.nil, 0));
+    try testLastValue("return 1", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("", Value.new(.nil, 0));
 }

@@ -6,14 +6,14 @@ const Scope = @This();
 
 allocator: std.mem.Allocator,
 break_point: bool = false,
-parent: ?*Scope,
 map: std.StringHashMap(Value),
+parent: ?*Scope,
 
 pub fn init(allocator: std.mem.Allocator, parent: ?*Scope) Scope {
     return Scope{
         .allocator = allocator,
-        .parent = parent,
         .map = std.StringHashMap(Value).init(allocator),
+        .parent = parent,
     };
 }
 

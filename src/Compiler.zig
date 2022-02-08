@@ -58,20 +58,14 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .assign => try self.compileAssign(node),
         .conditional => try self.compileConditional(node),
         .define => try self.compileDefine(node),
+        .func => try self.compileFunc(node),
+        .func_return => try self.compileReturn(node),
         .ident => try self.compileIdent(node),
         .infix => try self.compileInfix(node),
         .loop => try self.compileLoop(node),
+        .loop_break => try self.compileBreak(),
+        .loop_continue => try self.compileContinue(),
         .prefix => try self.compilePrefix(node),
-
-        .loop_break => {
-            try self.pushInstruction(.scope_out_loop);
-            try self.pushInstruction(.jump);
-            try self.jump_updates.?.updates.append(try self.pushZeroes(2));
-        },
-        .loop_continue => {
-            try self.pushInstruction(.scope_out_loop);
-            try self.pushInstructionAndOperands(u16, .jump, &[_]u16{self.current_loop_start.?.index});
-        },
     }
 }
 
@@ -81,6 +75,12 @@ fn compileAssign(self: *Compiler, node: Node) anyerror!void {
     //TODO: Handle other lvalue types.
     try self.pushConstant(Value.new(.{ .string = node.ty.assign.name.ty.ident }, node.ty.assign.name.offset));
     try self.pushInstruction(.store);
+}
+
+fn compileBreak(self: *Compiler) anyerror!void {
+    try self.pushInstruction(.scope_out_loop);
+    try self.pushInstruction(.jump);
+    try self.jump_updates.?.updates.append(try self.pushZeroes(2));
 }
 
 fn compileConditional(self: *Compiler, node: Node) anyerror!void {
@@ -105,10 +105,25 @@ fn compileConditional(self: *Compiler, node: Node) anyerror!void {
     self.updateJumpIndex(jump_operand_index);
 }
 
+fn compileContinue(self: *Compiler) anyerror!void {
+    try self.pushInstruction(.scope_out_loop);
+    try self.pushInstructionAndOperands(u16, .jump, &[_]u16{self.current_loop_start.?.index});
+}
+
 fn compileDefine(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.define.value.*);
     try self.pushConstant(Value.new(.{ .string = node.ty.define.name.ty.ident }, node.ty.define.name.offset));
     try self.pushInstruction(.define);
+}
+
+fn compileFunc(self: *Compiler, node: Node) anyerror!void {
+    // Compile function body.
+    try self.pushCompileContext();
+    for (node.ty.func.body) |n| try self.compile(n);
+    const value = Value.new(.{ .func = .{ .instructions = self.instructions.items, .params = node.ty.func.params } }, node.offset);
+    self.popCompileContext();
+    // Put function value on stack.
+    try self.pushConstant(value);
 }
 
 fn compileIdent(self: *Compiler, node: Node) anyerror!void {
@@ -180,6 +195,11 @@ fn compileLoop(self: *Compiler, node: Node) anyerror!void {
     try self.pushConstant(Value.new(.nil, node.offset));
 }
 
+fn compileReturn(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.func_return.*);
+    try self.pushInstruction(.func_return);
+}
+
 // Helpers
 fn pushConstant(self: *Compiler, value: Value) !void {
     try self.pushInstructionAndOperands(u16, .constant, &[_]u16{@intCast(u16, self.constants.items.len)});
@@ -218,11 +238,13 @@ fn pushCompileContext(self: *Compiler) anyerror!void {
     const ctx_ptr = try self.allocator.create(CompileContext);
     ctx_ptr.* = .{ .instructions = std.ArrayList(u8).init(self.allocator), .prev = self.compile_Context };
     self.compile_Context = ctx_ptr;
+    self.instructions = &self.compile_Context.?.instructions;
 }
 
 fn popCompileContext(self: *Compiler) void {
     std.debug.assert(self.compile_Context != null);
     self.compile_Context = self.compile_Context.?.prev;
+    self.instructions = &self.compile_Context.?.instructions;
 }
 
 fn pushCurrentLoopIndex(self: *Compiler) anyerror!void {

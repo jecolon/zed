@@ -3,6 +3,7 @@ const std = @import("std");
 pub const Type = union(enum) {
     boolean: bool,
     float: f64,
+    func: Function,
     int: isize,
     nil,
     string: []const u8,
@@ -13,6 +14,11 @@ offset: u16,
 ty: Type,
 
 const Value = @This();
+
+pub const Function = struct {
+    instructions: []const u8,
+    params: [][]const u8,
+};
 
 pub fn new(ty: Type, offset: u16) Value {
     return .{ .offset = offset, .ty = ty };
@@ -36,12 +42,12 @@ pub fn eql(self: Value, other: Value) bool {
 
     return switch (self.ty) {
         .boolean => |b| b == other.ty.boolean,
-        //.func => |f| fnc: {
-        //    if (!std.mem.eql(u8, f.instructions, other.ty.func.instructions)) break :fnc false;
-        //    break :fnc for (f.params) |param, i| {
-        //        if (!std.mem.eql(u8, param, other.ty.func.params[i])) break false;
-        //    } else true;
-        //},
+        .func => |f| fnc: {
+            if (!std.mem.eql(u8, f.instructions, other.ty.func.instructions)) break :fnc false;
+            break :fnc for (f.params) |param, i| {
+                if (!std.mem.eql(u8, param, other.ty.func.params[i])) break false;
+            } else true;
+        },
         //.list => |l| lst: {
         //    if (l.items.len != other.ty.list.items.len) break :lst false;
         //    break :lst for (l.items) |item, i| {
@@ -68,7 +74,7 @@ pub fn eqlType(self: Value, other: Value) bool {
         .boolean => other.ty == .boolean,
         //.builtin => other.ty == .builtin,
         .float => other.ty == .float,
-        //.func => other.ty == .func,
+        .func => other.ty == .func,
         .int => other.ty == .int,
         //.list => other.ty == .list,
         //.map => other.ty == .map,

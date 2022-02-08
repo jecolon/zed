@@ -13,6 +13,7 @@ pub const Tag = enum {
     kw_else,
     kw_if,
     kw_or,
+    kw_return,
     kw_while,
 
     pd_false,
@@ -78,6 +79,7 @@ pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "or", .kw_or },
     .{ "false", .pd_false },
     .{ "nil", .pd_nil },
+    .{ "return", .kw_return },
     .{ "true", .pd_true },
     .{ "while", .kw_while },
 });

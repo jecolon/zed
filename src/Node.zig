@@ -3,6 +3,7 @@ const Token = @import("Token.zig");
 pub const Type = union(enum) {
     boolean: bool,
     float: f64,
+    func_return: *Node,
     ident: []const u8,
     int: isize,
     loop_break,
@@ -15,6 +16,7 @@ pub const Type = union(enum) {
     assign: Define,
     conditional: Conditional,
     define: Define,
+    func: Function,
     infix: Infix,
     loop: Loop,
     prefix: Prefix,
@@ -43,6 +45,11 @@ const Conditional = struct {
 const Define = struct {
     name: *Node,
     value: *Node,
+};
+
+const Function = struct {
+    params: [][]const u8,
+    body: []Node,
 };
 
 const Loop = struct {
