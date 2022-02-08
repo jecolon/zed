@@ -5,6 +5,8 @@ pub const Type = union(enum) {
     float: f64,
     ident: []const u8,
     int: isize,
+    loop_break,
+    loop_continue,
     nil,
     stmt_end,
     string: []const u8,

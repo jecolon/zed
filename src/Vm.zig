@@ -77,6 +77,13 @@ pub fn run(self: *Vm) !void {
                 self.scope = child_scope_ptr;
                 self.ip.* += 1;
             },
+            .scope_in_loop => {
+                var child_scope_ptr = try self.allocator.create(Scope);
+                child_scope_ptr.* = Scope.init(self.allocator, self.scope);
+                self.scope = child_scope_ptr;
+                self.scope.break_point = true;
+                self.ip.* += 1;
+            },
             .scope_out => {
                 // TODO: Try this
                 //var child_scope_ptr = self.scope;
@@ -84,6 +91,20 @@ pub fn run(self: *Vm) !void {
                 //child_scope_ptr.deinit();
                 //self.allocator.destroy(child_scope_ptr);
                 self.scope = self.scope.parent.?;
+                self.ip.* += 1;
+            },
+            .scope_out_loop => {
+                // TODO: Try this
+                //var child_scope_ptr = self.scope;
+                //self.scope = child_scope_ptr.parent.?;
+                //child_scope_ptr.deinit();
+                //self.allocator.destroy(child_scope_ptr);
+                while (true) {
+                    const child_scope = self.scope;
+                    self.scope = self.scope.parent.?;
+                    if (child_scope.break_point) break;
+                }
+
                 self.ip.* += 1;
             },
 
@@ -557,4 +578,72 @@ test "Vm while loop" {
         \\i
     ;
     try testLastValue(input, Value.new(.{ .uint = 3 }, 0));
+}
+
+test "Vm loop break" {
+    const input =
+        \\i := 0
+        \\iterations := 0
+        \\j := 0
+        \\
+        \\while (i < 9) {
+        \\  if (i == 4) break
+        \\
+        \\  while (j < 9) {
+        \\      if (j == 2) break
+        \\      j = j + 1
+        \\  }
+        \\
+        \\  i = i + j
+        \\  iterations = iterations + 1
+        \\}
+        \\iterations
+    ;
+    try testLastValue(input, Value.new(.{ .uint = 2 }, 0));
+}
+
+test "Vm loop scope" {
+    const input =
+        \\i := 0
+        \\
+        \\while (i < 9) {
+        \\  j := 0
+        \\  while (j < 4) {
+        \\      if (j == 2) break
+        \\
+        \\      k := 0
+        \\      while (k < 2) {
+        \\          if (k == 1) break
+        \\          k = k + 1
+        \\      }
+        \\
+        \\      j = j + 1
+        \\  }
+        \\  i = i + 1
+        \\}
+        \\i
+    ;
+    try testLastValue(input, Value.new(.{ .uint = 9 }, 0));
+}
+
+test "Vm loop continue" {
+    const input =
+        \\i := 0
+        \\total := 0
+        \\
+        \\while (i < 3) {
+        \\  i = i + 1
+        \\  if (i == 1) continue
+        \\
+        \\  j := 0
+        \\  while (j < 3) {
+        \\      j = j + 1
+        \\      if (j == 1) continue
+        \\  }
+        \\
+        \\  total = total + i
+        \\}
+        \\total
+    ;
+    try testLastValue(input, Value.new(.{ .uint = 5 }, 0));
 }

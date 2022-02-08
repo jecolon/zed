@@ -5,6 +5,7 @@ const Value = @import("Value.zig");
 const Scope = @This();
 
 allocator: std.mem.Allocator,
+break_point: bool = false,
 parent: ?*Scope,
 map: std.StringHashMap(Value),
 

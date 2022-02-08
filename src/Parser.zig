@@ -5,6 +5,7 @@ const Node = @import("Node.zig");
 const Token = @import("Token.zig");
 
 allocator: std.mem.Allocator,
+can_break: bool = false,
 filename: []const u8,
 token_index: ?u16 = null,
 src: []const u8,
@@ -132,17 +133,21 @@ const InfixFn = fn (*Parser, Node) anyerror!Node;
 
 fn prefixFn(tag: Token.Tag) ?PrefixFn {
     return switch (tag) {
-        .pd_false, .pd_true => Parser.parseBoolean,
         .float => Parser.parseFloat,
         .ident => Parser.parseIdent,
         .int => Parser.parseInt,
-        .pd_nil => Parser.parseNil,
         .string => Parser.parseString,
         .uint => Parser.parseUint,
 
-        .op_neg, .punct_bang => Parser.parsePrefix,
+        .kw_break => Parser.parseBreak,
+        .kw_continue => Parser.parseContinue,
         .kw_if => Parser.parseIf,
         .kw_while => Parser.parseWhile,
+
+        .op_neg, .punct_bang => Parser.parsePrefix,
+
+        .pd_false, .pd_true => Parser.parseBoolean,
+        .pd_nil => Parser.parseNil,
 
         else => null,
     };
@@ -217,6 +222,34 @@ fn parseAssign(self: *Parser, name: Node) anyerror!Node {
 fn parseBoolean(self: *Parser) anyerror!Node {
     return Node.new(
         .{ .boolean = self.currentIs(.pd_true) },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+}
+
+fn parseBreak(self: *Parser) anyerror!Node {
+    if (!self.can_break) {
+        const location = Location.getLocation(self.filename, self.src, self.currentOffset());
+        std.log.err("break not allowed here; {}", .{location});
+        return error.InvalidBreak;
+    }
+
+    return Node.new(
+        .loop_break,
+        self.token_index.?,
+        self.currentOffset(),
+    );
+}
+
+fn parseContinue(self: *Parser) anyerror!Node {
+    if (!self.can_break) {
+        const location = Location.getLocation(self.filename, self.src, self.currentOffset());
+        std.log.err("continue not allowed here; {}", .{location});
+        return error.InvalidContinue;
+    }
+
+    return Node.new(
+        .loop_continue,
         self.token_index.?,
         self.currentOffset(),
     );
@@ -374,6 +407,9 @@ fn parseUint(self: *Parser) anyerror!Node {
 }
 
 fn parseWhile(self: *Parser) anyerror!Node {
+    self.can_break = true;
+    defer self.can_break = false;
+
     var node = Node.new(
         .{ .loop = .{ .condition = undefined, .body = undefined } },
         self.token_index.?,

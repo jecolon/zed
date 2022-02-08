@@ -7,8 +7,20 @@ const Value = @import("Value.zig");
 
 allocator: std.mem.Allocator,
 constants: std.ArrayList(Value),
+current_loop_start: ?*Index = null,
 instructions: *std.ArrayList(u8),
+jump_updates: ?*JumpUpdates = null,
 stash: ?*std.ArrayList(u8) = null,
+
+const Index = struct {
+    index: u16,
+    prev: ?*Index = null,
+};
+
+const JumpUpdates = struct {
+    prev: ?*JumpUpdates = null,
+    updates: std.ArrayList(usize),
+};
 
 const Compiler = @This();
 
@@ -43,6 +55,16 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .infix => try self.compileInfix(node),
         .loop => try self.compileLoop(node),
         .prefix => try self.compilePrefix(node),
+
+        .loop_break => {
+            try self.pushInstruction(.scope_out_loop);
+            try self.pushInstruction(.jump);
+            try self.jump_updates.?.updates.append(try self.pushZeroes(2));
+        },
+        .loop_continue => {
+            try self.pushInstruction(.scope_out_loop);
+            try self.pushInstructionAndOperands(u16, .jump, &[_]u16{self.current_loop_start.?.index});
+        },
     }
 }
 
@@ -121,19 +143,41 @@ fn compilePrefix(self: *Compiler, node: Node) anyerror!void {
 }
 
 fn compileLoop(self: *Compiler, node: Node) anyerror!void {
-    const Unconditional_jump_target = self.instructions.items.len;
+    // Breaks
+    var jump_updates_ptr = try self.allocator.create(JumpUpdates);
+    jump_updates_ptr.* = .{ .prev = self.jump_updates, .updates = std.ArrayList(usize).init(self.allocator) };
+    self.jump_updates = jump_updates_ptr;
+    defer self.jump_updates = self.jump_updates.?.prev;
+    //TODO: Try this.
+    // jump_updates_ptr.updates.deinit();
+    //self.allocator.destroy(jump_updates_ptr);
+
+    // Iterate / Continues
+    var current_loop_start_ptr = try self.allocator.create(Index);
+    current_loop_start_ptr.* = .{ .index = @intCast(u16, self.instructions.items.len), .prev = self.current_loop_start };
+    self.current_loop_start = current_loop_start_ptr;
+    defer self.current_loop_start = self.current_loop_start.?.prev;
+    //TODO: Try this.
+    //self.allocator.destroy(current_loop_start_ptr);
+
     // Condition
     try self.compile(node.ty.loop.condition.*);
+
     // Jump if false
     try self.pushInstruction(.jump_false);
-    const jump_false_operand_index = try self.pushZeroes(2);
+    try self.jump_updates.?.updates.append(try self.pushZeroes(2));
+
     // Body
-    try self.pushInstruction(.scope_in);
+    try self.pushInstruction(.scope_in_loop);
     for (node.ty.loop.body) |n| try self.compile(n);
-    try self.pushInstruction(.scope_out);
+    try self.pushInstruction(.scope_out_loop);
+
     // Unconditional jump
-    try self.pushInstructionAndOperands(u16, .jump, &[_]u16{@intCast(u16, Unconditional_jump_target)});
-    self.updateJumpIndex(jump_false_operand_index);
+    try self.pushInstructionAndOperands(u16, .jump, &[_]u16{self.current_loop_start.?.index});
+
+    // Update break out jumps.
+    while (self.jump_updates.?.updates.popOrNull()) |index| self.updateJumpIndex(index);
+
     // while loops always return nul.
     try self.pushConstant(Value.new(.nil, node.offset));
 }

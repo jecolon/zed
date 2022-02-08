@@ -21,7 +21,9 @@ pub const Opcode = enum(u8) {
     neq,
     pop,
     scope_in,
+    scope_in_loop,
     scope_out,
+    scope_out_loop,
     store,
     sub,
 
@@ -54,9 +56,11 @@ pub const Opcode = enum(u8) {
             19 => .{ .opcode = .neq, .bytes = 1 },
             20 => .{ .opcode = .pop, .bytes = 1 },
             21 => .{ .opcode = .scope_in, .bytes = 1 },
-            22 => .{ .opcode = .scope_out, .bytes = 1 },
-            23 => .{ .opcode = .store, .bytes = 1 },
-            24 => .{ .opcode = .sub, .bytes = 1 },
+            22 => .{ .opcode = .scope_in_loop, .bytes = 1 },
+            23 => .{ .opcode = .scope_out, .bytes = 1 },
+            24 => .{ .opcode = .scope_out_loop, .bytes = 1 },
+            25 => .{ .opcode = .store, .bytes = 1 },
+            26 => .{ .opcode = .sub, .bytes = 1 },
             else => null,
         };
     }
