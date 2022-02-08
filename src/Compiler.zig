@@ -6,11 +6,17 @@ const Program = @import("Parser.zig").Program;
 const Value = @import("Value.zig");
 
 allocator: std.mem.Allocator,
+compile_Context: ?*CompileContext = null,
 constants: std.ArrayList(Value),
-current_loop_start: ?*Index = null,
+current_loop_start: ?*Index = null, // Index of instruction at current loop start; if applicable.
 instructions: *std.ArrayList(u8),
-jump_updates: ?*JumpUpdates = null,
+jump_updates: ?*JumpUpdates = null, // Indexes of jump instruciton operands that need updating.
 stash: ?*std.ArrayList(u8) = null,
+
+const CompileContext = struct {
+    instructions: std.ArrayList(u8),
+    prev: ?*CompileContext = null,
+};
 
 const Index = struct {
     index: u16,
@@ -25,12 +31,13 @@ const JumpUpdates = struct {
 const Compiler = @This();
 
 pub fn init(allocator: std.mem.Allocator) !Compiler {
-    var self = .{
+    var self = Compiler{
         .allocator = allocator,
         .constants = std.ArrayList(Value).init(allocator),
-        .instructions = try allocator.create(std.ArrayList(u8)),
+        .instructions = undefined,
     };
-    self.instructions.* = std.ArrayList(u8).init(allocator);
+    try self.pushCompileContext();
+    self.instructions = &self.compile_Context.?.instructions;
     return self;
 }
 
@@ -144,21 +151,12 @@ fn compilePrefix(self: *Compiler, node: Node) anyerror!void {
 
 fn compileLoop(self: *Compiler, node: Node) anyerror!void {
     // Breaks
-    var jump_updates_ptr = try self.allocator.create(JumpUpdates);
-    jump_updates_ptr.* = .{ .prev = self.jump_updates, .updates = std.ArrayList(usize).init(self.allocator) };
-    self.jump_updates = jump_updates_ptr;
-    defer self.jump_updates = self.jump_updates.?.prev;
-    //TODO: Try this.
-    // jump_updates_ptr.updates.deinit();
-    //self.allocator.destroy(jump_updates_ptr);
+    try self.pushJumpUpdates();
+    defer self.popJumpUpdates();
 
     // Iterate / Continues
-    var current_loop_start_ptr = try self.allocator.create(Index);
-    current_loop_start_ptr.* = .{ .index = @intCast(u16, self.instructions.items.len), .prev = self.current_loop_start };
-    self.current_loop_start = current_loop_start_ptr;
-    defer self.current_loop_start = self.current_loop_start.?.prev;
-    //TODO: Try this.
-    //self.allocator.destroy(current_loop_start_ptr);
+    try self.pushCurrentLoopIndex();
+    defer self.popCurrentLoopIndex();
 
     // Condition
     try self.compile(node.ty.loop.condition.*);
@@ -200,6 +198,44 @@ fn pushOperands(self: *Compiler, comptime T: type, operands: []const T) !void {
 fn pushInstructionAndOperands(self: *Compiler, comptime T: type, opcode: Bytecode.Opcode, operands: []const T) !void {
     try self.pushInstruction(opcode);
     try self.pushOperands(T, operands);
+}
+
+fn pushJumpUpdates(self: *Compiler) anyerror!void {
+    var jump_updates_ptr = try self.allocator.create(JumpUpdates);
+    jump_updates_ptr.* = .{ .prev = self.jump_updates, .updates = std.ArrayList(usize).init(self.allocator) };
+    self.jump_updates = jump_updates_ptr;
+    //TODO: Try this.
+    // jump_updates_ptr.updates.deinit();
+    //self.allocator.destroy(jump_updates_ptr);
+}
+
+fn popJumpUpdates(self: *Compiler) void {
+    std.debug.assert(self.jump_updates != null);
+    self.jump_updates = self.jump_updates.?.prev;
+}
+
+fn pushCompileContext(self: *Compiler) anyerror!void {
+    const ctx_ptr = try self.allocator.create(CompileContext);
+    ctx_ptr.* = .{ .instructions = std.ArrayList(u8).init(self.allocator), .prev = self.compile_Context };
+    self.compile_Context = ctx_ptr;
+}
+
+fn popCompileContext(self: *Compiler) void {
+    std.debug.assert(self.compile_Context != null);
+    self.compile_Context = self.compile_Context.?.prev;
+}
+
+fn pushCurrentLoopIndex(self: *Compiler) anyerror!void {
+    var current_loop_start_ptr = try self.allocator.create(Index);
+    current_loop_start_ptr.* = .{ .index = @intCast(u16, self.instructions.items.len), .prev = self.current_loop_start };
+    self.current_loop_start = current_loop_start_ptr;
+}
+
+fn popCurrentLoopIndex(self: *Compiler) void {
+    std.debug.assert(self.current_loop_start != null);
+    self.current_loop_start = self.current_loop_start.?.prev;
+    //TODO: Try this.
+    //self.allocator.destroy(current_loop_start_ptr);
 }
 
 // Returns index of first byte pushed.

@@ -5,7 +5,7 @@ const Node = @import("Node.zig");
 const Token = @import("Token.zig");
 
 allocator: std.mem.Allocator,
-can_break: bool = false,
+can_break: bool = false, // Parsing something that can be broken out of or continued? (i.e. loops)
 filename: []const u8,
 token_index: ?u16 = null,
 src: []const u8,
@@ -22,7 +22,7 @@ pub fn parse(self: *Parser) !Program {
 
     while (try self.next()) |node| {
         try rules.append(node);
-        try rules.append(Node.new(.stmt_end, 0, 0));
+        try rules.append(Node.new(.stmt_end, 0, 0)); // Stack clean up.
     }
 
     return Program{ .rules = rules.items };
@@ -513,11 +513,11 @@ fn parseNodes(self: *Parser, list: *std.ArrayList(Node), stop: Token.Tag, skip: 
         try self.expectNext();
         const node = try self.parseExpression(.lowest);
         try list.append(node);
-        try list.append(Node.new(.stmt_end, 0, 0));
+        try list.append(Node.new(.stmt_end, 0, 0)); // Stack clean up.
         _ = self.skipTag(skip);
     }
 
-    _ = list.pop(); // Remove last stmt_end
+    _ = list.pop(); // Remove last stmt_end to leave only last value on the stack.
 }
 
 // Tests
