@@ -359,6 +359,23 @@ pub fn run(self: *Vm) !void {
                 self.popFrame();
                 self.ip.* += 1;
             },
+
+            .list => {
+                const num_items = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+                self.ip.* += 3;
+
+                var list_ptr = try self.allocator.create(std.ArrayList(Value));
+                list_ptr.* = std.ArrayList(Value).init(self.allocator);
+
+                if (num_items == 0) {
+                    try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
+                    continue;
+                }
+
+                var i: usize = 0;
+                while (i < num_items) : (i += 1) try list_ptr.append(self.value_stack.pop());
+                try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
+            },
         }
     }
 }
@@ -485,7 +502,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         .string => |s| try std.testing.expectEqualStrings(s, last_popped.ty.string),
         .uint => |u| try std.testing.expectEqual(u, last_popped.ty.uint),
 
-        .func => try std.testing.expect(expected.eql(last_popped)),
+        .func, .list => try std.testing.expect(expected.eql(last_popped)),
     }
 
     arena.deinit();
@@ -804,4 +821,21 @@ test "Vm more complex recursion" {
         \\wrapper()
     ;
     try testLastValue(input, Value.new(.{ .uint = 0 }, 0));
+}
+
+test "Vm list literal" {
+    const allocator = std.testing.allocator;
+    var list_ptr = try allocator.create(std.ArrayList(Value));
+    defer allocator.destroy(list_ptr);
+    list_ptr.* = try std.ArrayList(Value).initCapacity(allocator, 3);
+    defer list_ptr.deinit();
+    list_ptr.appendAssumeCapacity(Value.new(.{ .uint = 1 }, 2));
+    list_ptr.appendAssumeCapacity(Value.new(.{ .uint = 2 }, 5));
+    list_ptr.appendAssumeCapacity(Value.new(.{ .uint = 3 }, 8));
+    const list = Value.new(.{ .list = list_ptr }, 0);
+
+    const input =
+        \\[ 1, 2, 3 ]
+    ;
+    try testLastValue(input, list);
 }

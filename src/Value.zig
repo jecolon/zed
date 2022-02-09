@@ -5,6 +5,7 @@ pub const Type = union(enum) {
     float: f64,
     func: Function,
     int: isize,
+    list: *std.ArrayList(Value),
     nil,
     string: []const u8,
     uint: usize,
@@ -25,15 +26,6 @@ pub fn new(ty: Type, offset: u16) Value {
     return .{ .offset = offset, .ty = ty };
 }
 
-fn isNumeric(self: Value) bool {
-    return switch (self.ty) {
-        .float => true,
-        .int => true,
-        .uint => true,
-        else => false,
-    };
-}
-
 pub fn eql(self: Value, other: Value) bool {
     if (self.asFloat()) |f1| {
         if (other.asFloat()) |f2| return f1.ty.float == f2.ty.float;
@@ -49,12 +41,12 @@ pub fn eql(self: Value, other: Value) bool {
                 if (!std.mem.eql(u8, param, other.ty.func.params[i])) break false;
             } else true;
         },
-        //.list => |l| lst: {
-        //    if (l.items.len != other.ty.list.items.len) break :lst false;
-        //    break :lst for (l.items) |item, i| {
-        //        if (!item.eql(other.ty.list.items[i])) break false;
-        //    } else true;
-        //},
+        .list => |l| lst: {
+            if (l.items.len != other.ty.list.items.len) break :lst false;
+            break :lst for (l.items) |item, i| {
+                if (!item.eql(other.ty.list.items[i])) break false;
+            } else true;
+        },
         //.map => |m| mp: {
         //    if (m.count() != other.ty.map.count()) break :mp false;
         //    var iter = m.iterator();
@@ -77,7 +69,7 @@ pub fn eqlType(self: Value, other: Value) bool {
         .float => other.ty == .float,
         .func => other.ty == .func,
         .int => other.ty == .int,
-        //.list => other.ty == .list,
+        .list => other.ty == .list,
         //.map => other.ty == .map,
         //.range => other.ty == .range,
         //.rec_range_map => other.ty == .rec_range_map,
@@ -148,15 +140,15 @@ fn addUint(self: Value, other: Value) anyerror!Value {
     };
 }
 
-//fn addList(self: Value, other: Value) anyerror!Value {
-//    if (other.ty == .list) {
-//        try self.ty.list.appendSlice(other.ty.list.items);
-//    } else {
-//        try self.ty.list.append(other);
-//    }
-//
-//    return self;
-//}
+fn addList(self: Value, other: Value) anyerror!Value {
+    if (other.ty == .list) {
+        try self.ty.list.appendSlice(other.ty.list.items);
+    } else {
+        try self.ty.list.append(other);
+    }
+
+    return self;
+}
 
 pub fn add(self: Value, other: Value) anyerror!Value {
     return switch (self.ty) {
@@ -388,3 +380,44 @@ pub fn cmp(self: Value, other: Value) anyerror!std.math.Order {
 pub fn lessThan(_: void, a: Value, b: Value) bool {
     return a.cmp(b) catch unreachable == .lt;
 }
+
+pub fn format(self: Value, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+    _ = fmt;
+    _ = options;
+
+    switch (self.ty) {
+        .boolean => |b| _ = try writer.print("{}", .{b}),
+        .float => |f| _ = try writer.print("{d}", .{f}),
+        .int => |i| _ = try writer.print("{}", .{i}),
+        .list => |l| try printList(l, writer),
+        //.map => |m| try printMap(m, writer),
+        .string => |s| _ = try writer.print("{s}", .{s}),
+        .uint => |u| _ = try writer.print("{}", .{u}),
+
+        else => {},
+    }
+}
+
+fn printList(list: *std.ArrayList(Value), writer: anytype) !void {
+    try writer.writeByte('[');
+
+    for (list.items) |element, i| {
+        if (i != 0) try writer.writeAll(", ");
+        _ = try writer.print("{}", .{element});
+    }
+
+    try writer.writeByte(']');
+}
+
+//fn printMap(map: *std.StringHashMap(Value), writer: anytype) !void {
+//    try writer.writeByte('[');
+//    var iter = map.iterator();
+//    var i: usize = 0;
+//
+//    while (iter.next()) |entry| : (i += 1) {
+//        if (i != 0) try writer.writeAll(", ");
+//        _ = try writer.print("{s}: {}", .{ entry.key_ptr.*, entry.value_ptr.* });
+//    }
+//
+//    try writer.writeByte(']');
+//}

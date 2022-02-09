@@ -152,6 +152,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .pd_nil => Parser.parseNil,
 
         .punct_lbrace => Parser.parseFunc,
+        .punct_lbracket => Parser.parseList,
 
         else => null,
     };
@@ -443,6 +444,26 @@ fn parseInt(self: *Parser) anyerror!Node {
         self.token_index.?,
         self.currentOffset(),
     );
+}
+
+fn parseList(self: *Parser) anyerror!Node {
+    var node = Node.new(
+        .{ .list = &[_]Node{} },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+    if (self.skipTag(.punct_rbracket)) return node;
+
+    var node_list = std.ArrayList(Node).init(self.allocator);
+    while (!self.skipTag(.punct_rbracket)) {
+        try self.expectNext();
+        const item_node = try self.parseExpression(.lowest);
+        try node_list.append(item_node);
+        _ = self.skipTag(.punct_comma);
+    }
+    node.ty.list = node_list.items;
+
+    return node;
 }
 
 fn parseNil(self: *Parser) anyerror!Node {

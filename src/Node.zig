@@ -6,6 +6,7 @@ pub const Type = union(enum) {
     func_return: *Node,
     ident: []const u8,
     int: isize,
+    list: []Node,
     loop_break,
     loop_continue,
     nil,

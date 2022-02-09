@@ -63,6 +63,7 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .func_return => try self.compileReturn(node),
         .ident => try self.compileIdent(node),
         .infix => try self.compileInfix(node),
+        .list => try self.compileList(node),
         .loop => try self.compileLoop(node),
         .loop_break => try self.compileBreak(),
         .loop_continue => try self.compileContinue(),
@@ -166,6 +167,13 @@ fn compileInfix(self: *Compiler, node: Node) anyerror!void {
         .kw_or => try self.pushInstruction(.logic_or),
         else => unreachable,
     }
+}
+
+fn compileList(self: *Compiler, node: Node) anyerror!void {
+    var i: usize = 1;
+    const list_len = node.ty.list.len;
+    while (i <= list_len) : (i += 1) try self.compile(node.ty.list[list_len - i]);
+    try self.pushInstructionAndOperands(u16, .list, &[_]u16{@intCast(u16, node.ty.list.len)});
 }
 
 fn compilePrefix(self: *Compiler, node: Node) anyerror!void {
