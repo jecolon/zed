@@ -85,10 +85,12 @@ fn compileBreak(self: *Compiler) anyerror!void {
 }
 
 fn compileCall(self: *Compiler, node: Node) anyerror!void {
-    for (node.ty.call.args) |arg| try self.compile(arg);
+    var i: usize = 1;
+    const num_args = node.ty.call.args.len;
+    while (i <= num_args) : (i += 1) try self.compile(node.ty.call.args[num_args - i]);
     try self.compile(node.ty.call.callee.*);
     try self.pushInstruction(.call);
-    try self.instructions.append(@intCast(u8, node.ty.call.args.len));
+    try self.instructions.append(@intCast(u8, num_args));
 }
 
 fn compileConditional(self: *Compiler, node: Node) anyerror!void {
@@ -128,7 +130,11 @@ fn compileFunc(self: *Compiler, node: Node) anyerror!void {
     // Compile function body.
     try self.pushCompileContext();
     for (node.ty.func.body) |n| try self.compile(n);
-    const value = Value.new(.{ .func = .{ .instructions = self.instructions.items, .params = node.ty.func.params } }, node.offset);
+    const value = Value.new(.{ .func = .{
+        .instructions = self.instructions.items,
+        .name = node.ty.func.name,
+        .params = node.ty.func.params,
+    } }, node.offset);
     self.popCompileContext();
     // Put function value on stack.
     try self.pushConstant(value);

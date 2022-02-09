@@ -145,6 +145,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .kw_return => Parser.parseReturn,
         .kw_while => Parser.parseWhile,
 
+        .op_global => Parser.parseGlobal,
         .op_neg, .punct_bang => Parser.parsePrefix,
 
         .pd_false, .pd_true => Parser.parseBoolean,
@@ -296,6 +297,10 @@ fn parseDefine(self: *Parser, name: Node) anyerror!Node {
     node.ty.define.name.* = name;
     try self.expectNext();
     node.ty.define.value.* = try self.parseExpression(.lowest);
+
+    // Self-references
+    if (node.ty.define.value.ty == .func) node.ty.define.value.ty.func.name = name.ty.ident;
+
     return node;
 }
 
@@ -318,6 +323,25 @@ fn parseFunc(self: *Parser) anyerror!Node {
         self.currentOffset(),
     );
 
+    if (self.peekIs(.ident) and (self.peekNIs(2, .punct_comma) or self.peekNIs(2, .punct_fat_rarrow))) {
+        var params_list = std.ArrayList([]const u8).init(self.allocator);
+        while (!self.skipTag(.punct_fat_rarrow)) {
+            try self.expectNext();
+            if (!self.currentIs(.ident)) {
+                const location = Location.getLocation(self.filename, self.src, self.currentOffset());
+                std.log.err("Function param must be identifier; {}", .{location});
+                return error.InvalidParam;
+            }
+
+            const param_node = try self.parseIdent();
+            try params_list.append(param_node.ty.ident);
+            _ = self.skipTag(.punct_comma);
+        }
+        node.ty.func.params = params_list.items;
+    } else {
+        _ = self.skipTag(.punct_fat_rarrow); // Optional =>
+    }
+
     var body_list = std.ArrayList(Node).init(self.allocator);
     try self.parseNodes(&body_list, .punct_rbrace, .punct_semicolon);
 
@@ -335,6 +359,12 @@ fn parseFunc(self: *Parser) anyerror!Node {
 
     node.ty.func.body = body_list.items;
     return node;
+}
+
+fn parseGlobal(self: *Parser) anyerror!Node {
+    const start = self.currentOffset();
+    const end = self.currentOffset() + self.currentLen();
+    return Node.new(.{ .ident = self.src[start..end] }, self.token_index.?, start);
 }
 
 fn parseIdent(self: *Parser) anyerror!Node {

@@ -54,6 +54,7 @@ const Define = struct {
 };
 
 const Function = struct {
+    name: []const u8 = "",
     params: [][]const u8,
     body: []Node,
 };

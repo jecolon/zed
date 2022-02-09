@@ -31,9 +31,14 @@ pub fn deinit(self: *Scope) void {
 
 fn funcCopy(self: *Scope, func: Value) !Value {
     const instructions_copy = try self.allocator.dupe(u8, func.ty.func.instructions);
+    const name_copy = try self.allocator.dupe(u8, func.ty.func.name);
     var params_copy = try self.allocator.alloc([]const u8, func.ty.func.params.len);
     for (func.ty.func.params) |param, i| params_copy[i] = try self.allocator.dupe(u8, param);
-    return Value.new(.{ .func = .{ .instructions = instructions_copy, .params = params_copy } }, func.offset);
+    return Value.new(.{ .func = .{
+        .instructions = instructions_copy,
+        .name = name_copy,
+        .params = params_copy,
+    } }, func.offset);
 }
 
 fn listCopy(self: *Scope, list: Value) !Value {
@@ -81,6 +86,7 @@ fn stringCopy(self: *Scope, str: Value) !Value {
 
 fn funcDeinit(self: *Scope, func: Value) void {
     self.allocator.free(func.ty.func.instructions);
+    self.allocator.free(func.ty.func.name);
     for (func.ty.func.params) |param| self.allocator.free(param);
     self.allocator.free(func.ty.func.params);
 }

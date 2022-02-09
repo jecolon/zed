@@ -17,6 +17,7 @@ const Value = @This();
 
 pub const Function = struct {
     instructions: []const u8,
+    name: []const u8 = "",
     params: [][]const u8,
 };
 

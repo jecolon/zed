@@ -8,12 +8,14 @@ const Value = @import("Value.zig");
 const Frame = struct {
     instructions: []const u8,
     ip: u16 = 0,
+    scope: *Scope,
 };
 
 allocator: std.mem.Allocator,
 call_stack: std.ArrayList(Frame),
 constants: []const Value,
 filename: []const u8,
+global_scope: *Scope,
 instructions: *[]const u8,
 ip: *u16,
 last_popped: Value = Value.new(.nil, 0),
@@ -36,16 +38,18 @@ pub fn init(
         .call_stack = std.ArrayList(Frame).init(allocator),
         .constants = constants,
         .filename = filename,
+        .global_scope = scope,
         .instructions = undefined,
         .ip = undefined,
-        .scope = scope,
+        .scope = undefined,
         .src = src,
         .value_stack = std.ArrayList(Value).init(allocator),
     };
 
-    try self.call_stack.append(.{ .instructions = insts });
+    try self.call_stack.append(.{ .instructions = insts, .scope = scope });
     self.instructions = &self.call_stack.items[0].instructions;
     self.ip = &self.call_stack.items[0].ip;
+    self.scope = self.call_stack.items[0].scope;
 
     return self;
 }
@@ -77,13 +81,6 @@ pub fn run(self: *Vm) !void {
                 self.scope = child_scope_ptr;
                 self.ip.* += 1;
             },
-            .scope_in_loop => {
-                var child_scope_ptr = try self.allocator.create(Scope);
-                child_scope_ptr.* = Scope.init(self.allocator, self.scope);
-                self.scope = child_scope_ptr;
-                self.scope.break_point = true;
-                self.ip.* += 1;
-            },
             .scope_out => {
                 // TODO: Try this
                 //var child_scope_ptr = self.scope;
@@ -91,6 +88,13 @@ pub fn run(self: *Vm) !void {
                 //child_scope_ptr.deinit();
                 //self.allocator.destroy(child_scope_ptr);
                 self.scope = self.scope.parent.?;
+                self.ip.* += 1;
+            },
+            .scope_in_loop => {
+                var child_scope_ptr = try self.allocator.create(Scope);
+                child_scope_ptr.* = Scope.init(self.allocator, self.scope);
+                self.scope = child_scope_ptr;
+                self.scope.break_point = true;
                 self.ip.* += 1;
             },
             .scope_out_loop => {
@@ -101,7 +105,7 @@ pub fn run(self: *Vm) !void {
                 //self.allocator.destroy(child_scope_ptr);
                 while (true) {
                     const child_scope = self.scope;
-                    self.scope = self.scope.parent.?;
+                    self.scope = child_scope.parent.?;
                     if (child_scope.break_point) break;
                 }
 
@@ -313,9 +317,6 @@ pub fn run(self: *Vm) !void {
 
             // Functions
             .call => {
-                //TODO: Handle args.
-                self.ip.* += 1;
-
                 // Get the function.
                 const callee = self.value_stack.pop();
                 if (callee.ty != .func) {
@@ -326,13 +327,29 @@ pub fn run(self: *Vm) !void {
 
                 // Prepare the child scope.
                 var func_scope_ptr = try self.allocator.create(Scope);
-                func_scope_ptr.* = Scope.init(self.allocator, self.scope);
-                self.scope = func_scope_ptr;
+                func_scope_ptr.* = Scope.init(self.allocator, self.global_scope);
+
+                // Self-references
+                if (callee.ty.func.name.len != 0) try func_scope_ptr.store(callee.ty.func.name, callee);
+
+                // Process args
+                self.ip.* += 1;
+                const num_args = self.instructions.*[self.ip.*];
+                var i: usize = 0;
+                while (i < num_args) : (i += 1) {
+                    const arg = self.value_stack.pop();
+                    if (i == 0) try func_scope_ptr.store("it", arg); // it
+                    var buf: [4]u8 = undefined;
+                    const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{i});
+                    try func_scope_ptr.store(auto_arg_name, arg); // @0, @1, ...
+                    if (i < callee.ty.func.params.len) try func_scope_ptr.store(callee.ty.func.params[i], arg);
+                }
 
                 // Push the function's frame.
-                try self.call_stack.append(.{ .instructions = callee.ty.func.instructions });
+                try self.call_stack.append(.{ .instructions = callee.ty.func.instructions, .scope = func_scope_ptr });
                 self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
                 self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
+                self.scope = self.call_stack.items[self.call_stack.items.len - 1].scope;
             },
             .func_return => {
                 if (self.call_stack.items.len == 1) {
@@ -340,17 +357,14 @@ pub fn run(self: *Vm) !void {
                     break;
                 }
 
-                // Pop the child scope.
-                var func_scope_ptr = self.scope;
-                self.scope = func_scope_ptr.parent.?;
-                //TODO: Try this.
-                //func_scope_ptr.deinit();
-                //self.allocator.destroy(func_scope_ptr);
-
                 // Pop the function's frame.
+                //TODO: Try this.
+                //self.Scope.deinit();
+                //self.allocator.destroy(self.scope);
                 _ = self.call_stack.pop();
                 self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
                 self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
+                self.scope = self.call_stack.items[self.call_stack.items.len - 1].scope;
 
                 self.ip.* += 1;
             },
@@ -735,13 +749,51 @@ test "Vm function call" {
 
 test "Vm function recursion" {
     const input =
-        \\i := 2
-        \\foo := {
-        \\  if (i == 0) return i
-        \\  i = i - 1;
-        \\  return foo()
+        \\fib := {
+        \\  if (it < 2) return it
+        \\  return fib(it - 1) + fib(it - 2)
         \\}
-        \\foo()
+        \\fib(6)
+    ;
+    try testLastValue(input, Value.new(.{ .uint = 8 }, 0));
+}
+
+test "Vm more complex function" {
+    const input =
+        \\fib := { =>
+        \\  a := 0
+        \\  b := @1
+        \\  i := 0
+        \\
+        \\  while (true) {
+        \\      if (i >= it) break
+        \\
+        \\      tmp := a
+        \\      a = b
+        \\      b = tmp + a
+        \\      i = i + 1
+        \\  }
+        \\
+        \\  return a
+        \\}
+        \\fib(6, 1)
+    ;
+    try testLastValue(input, Value.new(.{ .uint = 8 }, 0));
+}
+
+test "Vm more complex recursion" {
+    const input =
+        \\wrapper := {
+        \\  countdown := { x =>
+        \\      if (x == 0) {
+        \\          return 0
+        \\      } else {
+        \\          return countdown(x - 1)
+        \\      }
+        \\  }
+        \\  countdown(1)
+        \\}
+        \\wrapper()
     ;
     try testLastValue(input, Value.new(.{ .uint = 0 }, 0));
 }
