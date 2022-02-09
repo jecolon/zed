@@ -56,6 +56,7 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .uint => |u| try self.pushConstant(Value.new(.{ .uint = u }, node.offset)),
 
         .assign => try self.compileAssign(node),
+        .call => try self.compileCall(node),
         .conditional => try self.compileConditional(node),
         .define => try self.compileDefine(node),
         .func => try self.compileFunc(node),
@@ -81,6 +82,13 @@ fn compileBreak(self: *Compiler) anyerror!void {
     try self.pushInstruction(.scope_out_loop);
     try self.pushInstruction(.jump);
     try self.jump_updates.?.updates.append(try self.pushZeroes(2));
+}
+
+fn compileCall(self: *Compiler, node: Node) anyerror!void {
+    for (node.ty.call.args) |arg| try self.compile(arg);
+    try self.compile(node.ty.call.callee.*);
+    try self.pushInstruction(.call);
+    try self.instructions.append(@intCast(u8, node.ty.call.args.len));
 }
 
 fn compileConditional(self: *Compiler, node: Node) anyerror!void {

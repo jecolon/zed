@@ -173,8 +173,9 @@ fn infixFn(self: Parser) InfixFn {
         .kw_or,
         => Parser.parseInfix,
 
-        .punct_equals => Parser.parseAssign,
         .op_define => Parser.parseDefine,
+        .punct_equals => Parser.parseAssign,
+        .punct_lparen => Parser.parseCall,
 
         else => unreachable,
     };
@@ -242,6 +243,28 @@ fn parseBreak(self: *Parser) anyerror!Node {
         self.token_index.?,
         self.currentOffset(),
     );
+}
+
+fn parseCall(self: *Parser, callee: Node) anyerror!Node {
+    var node = Node.new(
+        .{ .call = .{ .args = &[_]Node{}, .callee = try self.allocator.create(Node) } },
+        self.token_index.?,
+        self.currentOffset(),
+    );
+    node.ty.call.callee.* = callee;
+
+    if (self.skipTag(.punct_rparen)) return node;
+
+    var args_list = std.ArrayList(Node).init(self.allocator);
+    while (!self.skipTag(.punct_rparen)) {
+        try self.expectNext();
+        const arg_node = try self.parseExpression(.lowest);
+        try args_list.append(arg_node);
+        _ = self.skipTag(.punct_comma);
+    }
+    node.ty.call.args = args_list.items;
+
+    return node;
 }
 
 fn parseContinue(self: *Parser) anyerror!Node {

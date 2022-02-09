@@ -311,11 +311,48 @@ pub fn run(self: *Vm) !void {
                 self.ip.* += 1;
             },
 
+            // Functions
+            .call => {
+                //TODO: Handle args.
+                self.ip.* += 1;
+
+                // Get the function.
+                const callee = self.value_stack.pop();
+                if (callee.ty != .func) {
+                    const location = Location.getLocation(self.filename, self.src, callee.offset);
+                    std.log.err("Call op on {s}; {}", .{ @tagName(callee.ty), location });
+                    return error.InvalidCall;
+                }
+
+                // Prepare the child scope.
+                var func_scope_ptr = try self.allocator.create(Scope);
+                func_scope_ptr.* = Scope.init(self.allocator, self.scope);
+                self.scope = func_scope_ptr;
+
+                // Push the function's frame.
+                try self.call_stack.append(.{ .instructions = callee.ty.func.instructions });
+                self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
+                self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
+            },
             .func_return => {
                 if (self.call_stack.items.len == 1) {
                     self.last_popped = self.value_stack.pop();
                     break;
                 }
+
+                // Pop the child scope.
+                var func_scope_ptr = self.scope;
+                self.scope = func_scope_ptr.parent.?;
+                //TODO: Try this.
+                //func_scope_ptr.deinit();
+                //self.allocator.destroy(func_scope_ptr);
+
+                // Pop the function's frame.
+                _ = self.call_stack.pop();
+                self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
+                self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
+
+                self.ip.* += 1;
             },
         }
     }
@@ -689,4 +726,9 @@ test "Vm function literal" {
     try testLastValue("return", Value.new(.nil, 0));
     try testLastValue("return 1", Value.new(.{ .uint = 1 }, 0));
     try testLastValue("", Value.new(.nil, 0));
+}
+
+test "Vm eval function call" {
+    try testLastValue("{ 1 }()", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("{ return 1 + 1 }() + { 1 }()", Value.new(.{ .uint = 3 }, 0));
 }

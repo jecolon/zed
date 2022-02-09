@@ -14,6 +14,7 @@ pub const Type = union(enum) {
     uint: usize,
 
     assign: Define,
+    call: Call,
     conditional: Conditional,
     define: Define,
     func: Function,
@@ -35,6 +36,11 @@ pub fn new(ty: Type, token_index: u16, offset: u16) Node {
         .ty = ty,
     };
 }
+
+const Call = struct {
+    args: []Node,
+    callee: *Node,
+};
 
 const Conditional = struct {
     condition: *Node,
