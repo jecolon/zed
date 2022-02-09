@@ -20,17 +20,20 @@ pub fn init(allocator: std.mem.Allocator, parent: ?*Scope) Scope {
 pub fn deinit(self: *Scope) void {
     var iter = self.map.iterator();
     while (iter.next()) |entry| {
-        if (entry.value_ptr.ty == .string) self.allocator.free(entry.value_ptr.ty.string);
+        if (entry.value_ptr.ty == .func) self.funcDeinit(entry.value_ptr.*);
         //if (entry.value_ptr.ty == .list) self.listDeinit(entry.value_ptr.ty.list);
         //if (entry.value_ptr.ty == .map) self.mapDeinit(entry.value_ptr.ty.map);
+        if (entry.value_ptr.ty == .string) self.allocator.free(entry.value_ptr.ty.string);
         self.allocator.free(entry.key_ptr.*);
     }
     self.map.deinit();
 }
 
-fn stringCopy(self: *Scope, str: Value) !Value {
-    const copy = try self.allocator.dupe(u8, str.ty.string);
-    return Value.new(.{ .string = copy }, str.offset);
+fn funcCopy(self: *Scope, func: Value) !Value {
+    const instructions_copy = try self.allocator.dupe(u8, func.ty.func.instructions);
+    var params_copy = try self.allocator.alloc([]const u8, func.ty.func.params.len);
+    for (func.ty.func.params) |param, i| params_copy[i] = try self.allocator.dupe(u8, param);
+    return Value.new(.{ .func = .{ .instructions = instructions_copy, .params = params_copy } }, func.offset);
 }
 
 fn listCopy(self: *Scope, list: Value) !Value {
@@ -71,7 +74,18 @@ fn mapCopy(self: *Scope, map: Value) !Value {
     return Value.new(.{ .map = copy_ptr }, map.offset);
 }
 
-pub fn listDeinit(self: *Scope, list_ptr: *std.ArrayList(Value)) void {
+fn stringCopy(self: *Scope, str: Value) !Value {
+    const copy = try self.allocator.dupe(u8, str.ty.string);
+    return Value.new(.{ .string = copy }, str.offset);
+}
+
+fn funcDeinit(self: *Scope, func: Value) void {
+    self.allocator.free(func.ty.func.instructions);
+    for (func.ty.func.params) |param| self.allocator.free(param);
+    self.allocator.free(func.ty.func.params);
+}
+
+fn listDeinit(self: *Scope, list_ptr: *std.ArrayList(Value)) void {
     for (list_ptr.items) |*item| {
         if (item.ty == .string) self.allocator.free(item.ty.string);
         if (item.ty == .list) self.listDeinit(item.ty.list);
@@ -116,12 +130,14 @@ pub fn load(self: Scope, key: []const u8) ?Value {
 pub fn store(self: *Scope, key: []const u8, value: Value) !void {
     const key_copy = try self.allocator.dupe(u8, key);
 
-    if (value.ty == .string) {
-        try self.map.put(key_copy, try self.stringCopy(value));
+    if (value.ty == .func) {
+        try self.map.put(key_copy, try self.funcCopy(value));
         //} else if (value.ty == .list) {
         //    try self.map.put(key_copy, try self.listCopy(value));
         //} else if (value.ty == .map) {
         //    try self.map.put(key_copy, try self.mapCopy(value));
+    } else if (value.ty == .string) {
+        try self.map.put(key_copy, try self.stringCopy(value));
     } else {
         try self.map.put(key_copy, value);
     }
@@ -129,16 +145,19 @@ pub fn store(self: *Scope, key: []const u8, value: Value) !void {
 
 pub fn update(self: *Scope, key: []const u8, value: Value) !void {
     if (self.map.get(key)) |old_value| {
-        if (old_value.ty == .string) self.allocator.free(old_value.ty.string);
+        if (old_value.ty == .func) self.funcDeinit(old_value);
         //if (old_value.ty == .list) self.listDeinit(old_value.ty.list);
         //if (old_value.ty == .map) self.mapDeinit(old_value.ty.map);
+        if (old_value.ty == .string) self.allocator.free(old_value.ty.string);
 
-        if (value.ty == .string) {
-            try self.map.put(key, try self.stringCopy(value));
+        if (value.ty == .func) {
+            try self.map.put(key, try self.funcCopy(value));
             //} else if (value.ty == .list) {
             //    try self.map.put(key, try self.listCopy(value));
             //} else if (value.ty == .map) {
             //    try self.map.put(key, try self.mapCopy(value));
+        } else if (value.ty == .string) {
+            try self.map.put(key, try self.stringCopy(value));
         } else {
             try self.map.put(key, value);
         }

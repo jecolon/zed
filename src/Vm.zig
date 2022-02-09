@@ -471,36 +471,36 @@ fn testLastValue(input: []const u8, expected: Value) !void {
     if (debug_dumps) scope.dump();
 }
 
-test "Vm eval booleans" {
+test "Vm booleans" {
     try testLastValue("false true", Value.new(.{ .boolean = true }, 6));
 }
 
-test "Vm eval uint" {
+test "Vm uint" {
     try testLastValue("123", Value.new(.{ .uint = 123 }, 0));
     try testLastValue("0b00000011", Value.new(.{ .uint = 3 }, 0));
 }
 
-test "Vm eval int" {
+test "Vm int" {
     try testLastValue("-123", Value.new(.{ .int = -123 }, 0));
     try testLastValue("-0b00000011", Value.new(.{ .int = -3 }, 0));
 }
 
-test "Vm eval float" {
+test "Vm float" {
     try testLastValue("1.23", Value.new(.{ .float = 1.23 }, 0));
     try testLastValue("-1.23", Value.new(.{ .float = -1.23 }, 0));
 }
 
-test "Vm eval string" {
+test "Vm string" {
     try testLastValue("\"Hello World!\"", Value.new(.{ .string = "Hello World!" }, 0));
 }
 
-test "Vm eval prefix" {
+test "Vm prefix" {
     try testLastValue("!true", Value.new(.{ .boolean = false }, 0));
     try testLastValue("!false", Value.new(.{ .boolean = true }, 0));
     try testLastValue("foo := 1; -foo", Value.new(.{ .int = -1 }, 0));
 }
 
-test "Vm eval infix add" {
+test "Vm infix add" {
     try testLastValue("1 + 1", Value.new(.{ .uint = 2 }, 0));
     try testLastValue("1 + -1", Value.new(.{ .int = 0 }, 0));
     try testLastValue("1 + 1.0", Value.new(.{ .float = 2 }, 0));
@@ -515,7 +515,7 @@ test "Vm eval infix add" {
     try testLastValue("1.0 + \"1\"", Value.new(.{ .float = 2 }, 0));
 }
 
-test "Vm eval infix subtract" {
+test "Vm infix subtract" {
     try testLastValue("1 - 1", Value.new(.{ .uint = 0 }, 0));
     try testLastValue("1 - -1", Value.new(.{ .int = 2 }, 0));
     try testLastValue("1 - 1.0", Value.new(.{ .float = 0 }, 0));
@@ -530,7 +530,7 @@ test "Vm eval infix subtract" {
     try testLastValue("1.0 - \"1\"", Value.new(.{ .float = 0 }, 0));
 }
 
-test "Vm eval infix multiply" {
+test "Vm infix multiply" {
     try testLastValue("1 * 1", Value.new(.{ .uint = 1 }, 0));
     try testLastValue("1 * -1", Value.new(.{ .int = -1 }, 0));
     try testLastValue("1 * 1.0", Value.new(.{ .float = 1 }, 0));
@@ -545,7 +545,7 @@ test "Vm eval infix multiply" {
     try testLastValue("1.0 * \"1\"", Value.new(.{ .float = 1 }, 0));
 }
 
-test "Vm eval infix divide" {
+test "Vm infix divide" {
     try testLastValue("1 / 1", Value.new(.{ .uint = 1 }, 0));
     try testLastValue("1 / -1", Value.new(.{ .int = -1 }, 0));
     try testLastValue("1 / 1.0", Value.new(.{ .float = 1 }, 0));
@@ -560,7 +560,7 @@ test "Vm eval infix divide" {
     try testLastValue("1.0 / \"1\"", Value.new(.{ .float = 1 }, 0));
 }
 
-test "Vm eval infix modulo" {
+test "Vm infix modulo" {
     try testLastValue("1 % 1", Value.new(.{ .uint = 0 }, 0));
     try testLastValue("1 % 1.0", Value.new(.{ .float = 0 }, 0));
     try testLastValue("1 % \"1\"", Value.new(.{ .uint = 0 }, 0));
@@ -572,7 +572,7 @@ test "Vm eval infix modulo" {
     try testLastValue("1.0 % \"1\"", Value.new(.{ .float = 0 }, 0));
 }
 
-test "Vm eval infix comparisons" {
+test "Vm infix comparisons" {
     try testLastValue("1 == 1", Value.new(.{ .boolean = true }, 0));
     try testLastValue("1 != 1", Value.new(.{ .boolean = false }, 0));
     try testLastValue("1 < 1", Value.new(.{ .boolean = false }, 0));
@@ -581,11 +581,11 @@ test "Vm eval infix comparisons" {
     try testLastValue("1 >= 1", Value.new(.{ .boolean = true }, 0));
 }
 
-test "Vm eval infix mix" {
+test "Vm infix mix" {
     try testLastValue("1 + 2 * 5 % 2 / 1 * \"1.0\" == 1", Value.new(.{ .boolean = true }, 0));
 }
 
-test "Vm eval infix logic and / or" {
+test "Vm infix logic and / or" {
     try testLastValue("true and true", Value.new(.{ .boolean = true }, 0));
 }
 
@@ -728,7 +728,20 @@ test "Vm function literal" {
     try testLastValue("", Value.new(.nil, 0));
 }
 
-test "Vm eval function call" {
+test "Vm function call" {
     try testLastValue("{ 1 }()", Value.new(.{ .uint = 1 }, 0));
     try testLastValue("{ return 1 + 1 }() + { 1 }()", Value.new(.{ .uint = 3 }, 0));
+}
+
+test "Vm function recursion" {
+    const input =
+        \\i := 2
+        \\foo := {
+        \\  if (i == 0) return i
+        \\  i = i - 1;
+        \\  return foo()
+        \\}
+        \\foo()
+    ;
+    try testLastValue(input, Value.new(.{ .uint = 0 }, 0));
 }
