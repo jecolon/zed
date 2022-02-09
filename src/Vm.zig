@@ -346,26 +346,17 @@ pub fn run(self: *Vm) !void {
                 }
 
                 // Push the function's frame.
-                try self.call_stack.append(.{ .instructions = callee.ty.func.instructions, .scope = func_scope_ptr });
-                self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
-                self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
-                self.scope = self.call_stack.items[self.call_stack.items.len - 1].scope;
+                try self.pushFrame(callee.ty.func.instructions, func_scope_ptr);
             },
             .func_return => {
                 if (self.call_stack.items.len == 1) {
+                    // Return from main.
                     self.last_popped = self.value_stack.pop();
                     break;
                 }
 
                 // Pop the function's frame.
-                //TODO: Try this.
-                //self.Scope.deinit();
-                //self.allocator.destroy(self.scope);
-                _ = self.call_stack.pop();
-                self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
-                self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
-                self.scope = self.call_stack.items[self.call_stack.items.len - 1].scope;
-
+                self.popFrame();
                 self.ip.* += 1;
             },
         }
@@ -388,6 +379,23 @@ fn isTruthy(value: Value) bool {
 fn jump(self: *Vm) void {
     const index = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
     self.ip.* = index;
+}
+
+fn pushFrame(self: *Vm, instructions: []const u8, scope: *Scope) anyerror!void {
+    try self.call_stack.append(.{ .instructions = instructions, .scope = scope });
+    self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
+    self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
+    self.scope = self.call_stack.items[self.call_stack.items.len - 1].scope;
+}
+
+fn popFrame(self: *Vm) void {
+    //TODO: Try this.
+    //self.Scope.deinit();
+    //self.allocator.destroy(self.scope);
+    _ = self.call_stack.pop();
+    self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
+    self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
+    self.scope = self.call_stack.items[self.call_stack.items.len - 1].scope;
 }
 
 pub fn dump(self: Vm) void {
