@@ -18,14 +18,91 @@ ty: Type,
 
 const Value = @This();
 
-pub const Function = struct {
-    instructions: []const u8,
-    name: []const u8 = "",
-    params: [][]const u8,
-};
-
 pub fn new(ty: Type, offset: u16) Value {
     return .{ .offset = offset, .ty = ty };
+}
+
+pub fn copy(self: Value, allocator: std.mem.Allocator) anyerror!Value {
+    return switch (self.ty) {
+        .boolean => self,
+        .float => self,
+        .func => try self.copyFunc(allocator),
+        .int => self,
+        .list => try self.copyList(allocator),
+        .map => try self.copyMap(allocator),
+        .nil => self,
+        .range => self,
+        .string => try self.copyString(allocator),
+        .uint => self,
+    };
+}
+fn copyFunc(self: Value, allocator: std.mem.Allocator) anyerror!Value {
+    const instructions_copy = try allocator.dupe(u8, self.ty.func.instructions);
+    const name_copy = try allocator.dupe(u8, self.ty.func.name);
+    var params_copy = try allocator.alloc([]const u8, self.ty.func.params.len);
+    for (self.ty.func.params) |param, i| params_copy[i] = try allocator.dupe(u8, param);
+    return Value.new(.{ .func = .{
+        .instructions = instructions_copy,
+        .name = name_copy,
+        .params = params_copy,
+    } }, self.offset);
+}
+fn copyList(self: Value, allocator: std.mem.Allocator) anyerror!Value {
+    var copy_ptr = try allocator.create(std.ArrayList(Value));
+    copy_ptr.* = try std.ArrayList(Value).initCapacity(allocator, self.ty.list.items.len);
+    for (self.ty.list.items) |item| copy_ptr.appendAssumeCapacity(try item.copy(allocator));
+    return Value.new(.{ .list = copy_ptr }, self.offset);
+}
+fn copyMap(self: Value, allocator: std.mem.Allocator) anyerror!Value {
+    const copy_ptr = try allocator.create(std.StringHashMap(Value));
+    copy_ptr.* = std.StringHashMap(Value).init(allocator);
+    try copy_ptr.ensureTotalCapacity(self.ty.map.count());
+    var iter = self.ty.map.iterator();
+
+    while (iter.next()) |entry| {
+        const key_copy = try allocator.dupe(u8, entry.key_ptr.*);
+        try copy_ptr.put(key_copy, try entry.value_ptr.copy(allocator));
+    }
+
+    return Value.new(.{ .map = copy_ptr }, self.offset);
+}
+fn copyString(self: Value, allocator: std.mem.Allocator) anyerror!Value {
+    const str_copy = try allocator.dupe(u8, self.ty.string);
+    return Value.new(.{ .string = str_copy }, self.offset);
+}
+
+pub fn deinit(self: Value, allocator: std.mem.Allocator) void {
+    return switch (self.ty) {
+        .func => self.deinitFunc(allocator),
+        .list => self.deinitList(allocator),
+        .map => self.deinitMap(allocator),
+        .string => self.deinitString(allocator),
+
+        else => {},
+    };
+}
+fn deinitFunc(self: Value, allocator: std.mem.Allocator) void {
+    allocator.free(self.ty.func.instructions);
+    allocator.free(self.ty.func.name);
+    for (self.ty.func.params) |param| allocator.free(param);
+    allocator.free(self.ty.func.params);
+}
+fn deinitList(self: Value, allocator: std.mem.Allocator) void {
+    for (self.ty.list.items) |*item| item.deinit(allocator);
+    self.ty.list.deinit();
+    allocator.destroy(self.ty.list);
+}
+fn deinitMap(self: Value, allocator: std.mem.Allocator) void {
+    var iter = self.ty.map.iterator();
+    while (iter.next()) |entry| {
+        entry.value_ptr.deinit(allocator);
+        allocator.free(entry.key_ptr.*);
+    }
+    self.ty.map.deinit();
+    allocator.destroy(self.ty.map);
+}
+fn deinitString(self: Value, allocator: std.mem.Allocator) void {
+    allocator.free(self.ty.string);
 }
 
 pub fn eql(self: Value, other: Value) bool {
@@ -424,3 +501,9 @@ fn printMap(map: *std.StringHashMap(Value), writer: anytype) !void {
 
     try writer.writeByte(']');
 }
+
+pub const Function = struct {
+    instructions: []const u8,
+    name: []const u8 = "",
+    params: [][]const u8,
+};

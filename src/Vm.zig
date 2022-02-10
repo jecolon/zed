@@ -382,7 +382,7 @@ fn evalMapSubscript(self: *Vm, container: Value) anyerror!void {
     const key = self.value_stack.pop();
     if (key.ty != .string) {
         const location = Location.getLocation(self.filename, self.src, key.offset);
-        std.log.err("Subscript key must evaluate to string; {}", .{location});
+        std.log.err("Map subscript cannot be {s}; {}", .{ @tagName(key.ty), location });
         return error.InvalidSubscript;
     }
 
@@ -395,18 +395,33 @@ fn evalMapSubscript(self: *Vm, container: Value) anyerror!void {
 
 fn evalListSubscript(self: *Vm, container: Value) anyerror!void {
     const index = self.value_stack.pop();
-    if (index.ty != .uint) {
+    if (index.ty != .uint and index.ty != .range) {
         const location = Location.getLocation(self.filename, self.src, index.offset);
-        std.log.err("Subscript index must evaluate to unsigned integer; {}", .{location});
-        return error.InvalidSubscript;
-    }
-    if (index.ty.uint >= container.ty.list.items.len) {
-        const location = Location.getLocation(self.filename, self.src, index.offset);
-        std.log.err("Subscript index out of bounds; {}", .{location});
+        std.log.err("List subscript cannot be {s}; {}", .{ @tagName(index.ty), location });
         return error.InvalidSubscript;
     }
 
-    try self.value_stack.append(container.ty.list.items[index.ty.uint]);
+    if (index.ty == .uint) {
+        if (index.ty.uint >= container.ty.list.items.len) {
+            const location = Location.getLocation(self.filename, self.src, index.offset);
+            std.log.err("Subscript index out of bounds; {}", .{location});
+            return error.InvalidSubscript;
+        }
+        try self.value_stack.append(container.ty.list.items[index.ty.uint]);
+    } else {
+        if (index.ty.range[1] > container.ty.list.items.len) {
+            const location = Location.getLocation(self.filename, self.src, index.offset);
+            std.log.err("Range end index out of bounds; {}", .{location});
+            return error.InvalidSubscript;
+        }
+
+        var new_list_ptr = try self.allocator.create(std.ArrayList(Value));
+        new_list_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, index.ty.range[1] - index.ty.range[0]);
+        for (container.ty.list.items[index.ty.range[0]..index.ty.range[1]]) |item|
+            new_list_ptr.appendAssumeCapacity(try item.copy(self.allocator));
+
+        try self.value_stack.append(Value.new(.{ .list = new_list_ptr }, 0));
+    }
 }
 
 fn evalLogicNot(self: *Vm) anyerror!void {
@@ -1012,4 +1027,5 @@ test "Vm subscript" {
     try testLastValue(
         \\["a": 1, "b": 2112, "c": 3]["d"]
     , Value.new(.nil, 0));
+    try testLastValue("[1, 2112, 3][1..<3][0]", Value.new(.{ .uint = 2112 }, 0));
 }
