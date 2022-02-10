@@ -76,10 +76,16 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
 
 // Eval functions
 fn compileAssign(self: *Compiler, node: Node) anyerror!void {
-    try self.compile(node.ty.assign.value.*);
-    //TODO: Handle other lvalue types.
-    try self.pushConstant(Value.new(.{ .string = node.ty.assign.name.ty.ident }, node.ty.assign.name.offset));
-    try self.pushInstruction(.store);
+    try self.compile(node.ty.assign.rvalue.*);
+
+    if (node.ty.assign.lvalue.ty == .ident) {
+        try self.pushConstant(Value.new(.{ .string = node.ty.assign.lvalue.ty.ident }, node.ty.assign.lvalue.offset));
+        try self.pushInstruction(.store);
+    } else {
+        try self.compile(node.ty.assign.lvalue.ty.subscript.index.*);
+        try self.compile(node.ty.assign.lvalue.ty.subscript.container.*);
+        try self.pushInstruction(.set);
+    }
 }
 
 fn compileBreak(self: *Compiler) anyerror!void {
@@ -131,8 +137,8 @@ fn compileContinue(self: *Compiler) anyerror!void {
 }
 
 fn compileDefine(self: *Compiler, node: Node) anyerror!void {
-    try self.compile(node.ty.define.value.*);
-    try self.pushConstant(Value.new(.{ .string = node.ty.define.name.ty.ident }, node.ty.define.name.offset));
+    try self.compile(node.ty.define.rvalue.*);
+    try self.pushConstant(Value.new(.{ .string = node.ty.define.lvalue.ty.ident }, node.ty.define.lvalue.offset));
     try self.pushInstruction(.define);
 }
 

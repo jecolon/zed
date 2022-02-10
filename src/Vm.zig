@@ -186,6 +186,11 @@ pub fn run(self: *Vm) !void {
                 try self.evalSubscript();
                 self.ip.* += 1;
             },
+
+            .set => {
+                try self.evalSet();
+                self.ip.* += 1;
+            },
         }
     }
 }
@@ -516,6 +521,53 @@ fn evalScopeOut(self: *Vm) anyerror!void {
     } else {
         self.scope = self.scope.parent.?;
     }
+}
+
+fn evalSet(self: *Vm) anyerror!void {
+    const container = self.value_stack.pop();
+    if (container.ty != .list and container.ty != .map) {
+        const location = Location.getLocation(self.filename, self.src, container.offset);
+        std.log.err("Subscript assign not allowed on {s}; {}", .{ @tagName(container.ty), location });
+        return error.InvalidSet;
+    }
+
+    switch (container.ty) {
+        .list => try self.evalListSet(container),
+        .map => try self.evalMapSet(container),
+        else => unreachable,
+    }
+}
+fn evalListSet(self: *Vm, container: Value) anyerror!void {
+    const index = self.value_stack.pop();
+    if (index.ty != .uint) {
+        const location = Location.getLocation(self.filename, self.src, index.offset);
+        std.log.err("List subscript assign index cannot be {s}; {}", .{ @tagName(index.ty), location });
+        return error.InvalidSet;
+    }
+
+    if (index.ty.uint >= container.ty.list.items.len) {
+        const location = Location.getLocation(self.filename, self.src, index.offset);
+        std.log.err("Subscript assign index out of bounds; {}", .{location});
+        return error.InvalidSet;
+    }
+
+    const rvalue = self.value_stack.pop();
+    container.ty.list.items[index.ty.uint] = rvalue;
+
+    try self.value_stack.append(rvalue);
+}
+fn evalMapSet(self: *Vm, container: Value) anyerror!void {
+    const key = self.value_stack.pop();
+    if (key.ty != .string) {
+        const location = Location.getLocation(self.filename, self.src, key.offset);
+        std.log.err("Map subscript assign key cannot be {s}; {}", .{ @tagName(key.ty), location });
+        return error.InvalidSet;
+    }
+
+    const rvalue = self.value_stack.pop();
+    try container.ty.map.put(key.ty.string, rvalue);
+
+    try self.value_stack.append(rvalue);
 }
 
 fn evalSubscript(self: *Vm) anyerror!void {
@@ -1028,4 +1080,11 @@ test "Vm subscript" {
         \\["a": 1, "b": 2112, "c": 3]["d"]
     , Value.new(.nil, 0));
     try testLastValue("[1, 2112, 3][1..<3][0]", Value.new(.{ .uint = 2112 }, 0));
+}
+
+test "Vm subscript assign" {
+    try testLastValue("l := [1, 2, 3]; l[1] = 2112; l[1]", Value.new(.{ .uint = 2112 }, 0));
+    try testLastValue(
+        \\m := ["a": 1, "b": 2, "c": 3]; m["b"] = 2112; m["b"]
+    , Value.new(.{ .uint = 2112 }, 0));
 }

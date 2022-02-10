@@ -209,20 +209,20 @@ fn parseExpression(self: *Parser, precedence: Precedence) anyerror!Node {
 }
 
 // Parse functions.
-fn parseAssign(self: *Parser, name: Node) anyerror!Node {
-    if (name.ty != .ident) {
-        const location = Location.getLocation(self.filename, self.src, name.offset);
-        std.log.err("Invalid assignment left hand side {s}; {}", .{ @tagName(name.ty), location });
+fn parseAssign(self: *Parser, lvalue: Node) anyerror!Node {
+    if (lvalue.ty != .ident and lvalue.ty != .subscript) {
+        const location = Location.getLocation(self.filename, self.src, lvalue.offset);
+        std.log.err("Invalid assignment left hand side {s}; {}", .{ @tagName(lvalue.ty), location });
         return error.InvalidAssign;
     }
 
     var node = Node.new(
-        .{ .assign = .{ .name = try self.allocator.create(Node), .value = try self.allocator.create(Node) } },
+        .{ .assign = .{ .lvalue = try self.allocator.create(Node), .rvalue = try self.allocator.create(Node) } },
         self.currentOffset(),
     );
-    node.ty.assign.name.* = name;
+    node.ty.assign.lvalue.* = lvalue;
     try self.expectNext();
-    node.ty.assign.value.* = try self.parseExpression(.lowest);
+    node.ty.assign.rvalue.* = try self.parseExpression(.lowest);
     return node;
 }
 
@@ -279,15 +279,15 @@ fn parseDefine(self: *Parser, name: Node) anyerror!Node {
     }
 
     var node = Node.new(
-        .{ .define = .{ .name = try self.allocator.create(Node), .value = try self.allocator.create(Node) } },
+        .{ .define = .{ .lvalue = try self.allocator.create(Node), .rvalue = try self.allocator.create(Node) } },
         self.currentOffset(),
     );
-    node.ty.define.name.* = name;
+    node.ty.define.lvalue.* = name;
     try self.expectNext();
-    node.ty.define.value.* = try self.parseExpression(.lowest);
+    node.ty.define.rvalue.* = try self.parseExpression(.lowest);
 
     // Self-references
-    if (node.ty.define.value.ty == .func) node.ty.define.value.ty.func.name = name.ty.ident;
+    if (node.ty.define.rvalue.ty == .func) node.ty.define.rvalue.ty.func.name = name.ty.ident;
 
     return node;
 }

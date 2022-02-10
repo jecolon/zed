@@ -15,10 +15,10 @@ pub const Type = union(enum) {
     string: []const u8,
     uint: usize,
 
-    assign: Define,
+    assign: Assign,
     call: Call,
     conditional: Conditional,
-    define: Define,
+    define: Assign,
     func: Function,
     infix: Infix,
     loop: Loop,
@@ -47,9 +47,9 @@ const Conditional = struct {
     else_branch: []Node,
 };
 
-const Define = struct {
-    name: *Node,
-    value: *Node,
+const Assign = struct {
+    lvalue: *Node,
+    rvalue: *Node,
 };
 
 pub const Entry = struct {

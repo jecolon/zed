@@ -27,6 +27,7 @@ pub const Opcode = enum(u8) {
     range,
     scope_in,
     scope_out,
+    set,
     store,
     sub,
     subscript,
@@ -66,9 +67,10 @@ pub const Opcode = enum(u8) {
             25 => .{ .opcode = .range, .bytes = 2 },
             26 => .{ .opcode = .scope_in, .bytes = 2 },
             27 => .{ .opcode = .scope_out, .bytes = 2 },
-            28 => .{ .opcode = .store, .bytes = 1 },
-            29 => .{ .opcode = .sub, .bytes = 1 },
-            30 => .{ .opcode = .subscript, .bytes = 1 },
+            28 => .{ .opcode = .set, .bytes = 1 },
+            29 => .{ .opcode = .store, .bytes = 1 },
+            30 => .{ .opcode = .sub, .bytes = 1 },
+            31 => .{ .opcode = .subscript, .bytes = 1 },
             else => null,
         };
     }
