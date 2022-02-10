@@ -378,6 +378,21 @@ fn evalList(self: *Vm) anyerror!void {
     try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
 }
 
+fn evalMapSubscript(self: *Vm, container: Value) anyerror!void {
+    const key = self.value_stack.pop();
+    if (key.ty != .string) {
+        const location = Location.getLocation(self.filename, self.src, key.offset);
+        std.log.err("Subscript key must evaluate to string; {}", .{location});
+        return error.InvalidSubscript;
+    }
+
+    if (container.ty.map.get(key.ty.string)) |value| {
+        try self.value_stack.append(value);
+    } else {
+        try self.value_stack.append(Value.new(.nil, 0));
+    }
+}
+
 fn evalListSubscript(self: *Vm, container: Value) anyerror!void {
     const index = self.value_stack.pop();
     if (index.ty != .uint) {
@@ -490,12 +505,17 @@ fn evalScopeOut(self: *Vm) anyerror!void {
 
 fn evalSubscript(self: *Vm) anyerror!void {
     const container = self.value_stack.pop();
-    if (container.ty != .list) {
+    if (container.ty != .list and container.ty != .map) {
         const location = Location.getLocation(self.filename, self.src, container.offset);
         std.log.err("Subscript op not allowed on {s}; {}", .{ @tagName(container.ty), location });
         return error.InvalidSubscript;
     }
-    try self.evalListSubscript(container);
+
+    switch (container.ty) {
+        .list => try self.evalListSubscript(container),
+        .map => try self.evalMapSubscript(container),
+        else => unreachable,
+    }
 }
 
 fn isTruthy(value: Value) bool {
@@ -986,4 +1006,10 @@ test "Vm range" {
 
 test "Vm subscript" {
     try testLastValue("[1, 2112, 3][1]", Value.new(.{ .uint = 2112 }, 0));
+    try testLastValue(
+        \\["a": 1, "b": 2112, "c": 3]["b"]
+    , Value.new(.{ .uint = 2112 }, 0));
+    try testLastValue(
+        \\["a": 1, "b": 2112, "c": 3]["d"]
+    , Value.new(.nil, 0));
 }
