@@ -404,6 +404,23 @@ pub fn run(self: *Vm) !void {
                 }
                 try self.value_stack.append(Value.new(.{ .map = map_ptr }, 0));
             },
+
+            .range => {
+                const inclusive = self.instructions.*[self.ip.* + 1] == 1;
+                self.ip.* += 2;
+                const end = self.value_stack.pop();
+                const start = self.value_stack.pop();
+                if (start.ty != .uint or end.ty != .uint) {
+                    const location = Location.getLocation(self.filename, self.src, start.offset);
+                    std.log.err("Range indexes must evaluate to unsigned integers; {}", .{location});
+                    return error.InvalidRange;
+                }
+
+                const start_uint = start.ty.uint;
+                const end_uint = if (inclusive) end.ty.uint + 1 else end.ty.uint;
+
+                try self.value_stack.append(Value.new(.{ .range = [2]usize{ start_uint, end_uint } }, start.offset));
+            },
         }
     }
 }
@@ -533,6 +550,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         .func,
         .list,
         .map,
+        .range,
         => try std.testing.expect(expected.eql(last_popped)),
     }
 
@@ -887,4 +905,9 @@ test "Vm list literal" {
         \\[ "a": 1, "b": 2, "c": 3 ]
     ;
     try testLastValue(input, map);
+}
+
+test "Vm range" {
+    try testLastValue("21 ..< 12", Value.new(.{ .range = [2]usize{ 21, 12 } }, 0));
+    try testLastValue("21 ..= 12", Value.new(.{ .range = [2]usize{ 21, 13 } }, 0));
 }

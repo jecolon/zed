@@ -23,20 +23,16 @@ pub const Type = union(enum) {
     infix: Infix,
     loop: Loop,
     prefix: Prefix,
+    range: Range,
 };
 
 offset: u16,
-token_index: u16,
 ty: Type,
 
 const Node = @This();
 
-pub fn new(ty: Type, token_index: u16, offset: u16) Node {
-    return .{
-        .offset = offset,
-        .token_index = token_index,
-        .ty = ty,
-    };
+pub fn new(ty: Type, offset: u16) Node {
+    return .{ .offset = offset, .ty = ty };
 }
 
 const Call = struct {
@@ -66,6 +62,12 @@ const Function = struct {
     body: []Node,
 };
 
+const Infix = struct {
+    left: *Node,
+    op: Token.Tag,
+    right: *Node,
+};
+
 const Loop = struct {
     condition: *Node,
     body: []Node,
@@ -76,8 +78,8 @@ const Prefix = struct {
     operand: *Node,
 };
 
-const Infix = struct {
-    left: *Node,
-    op: Token.Tag,
-    right: *Node,
+const Range = struct {
+    inclusive: bool,
+    from: *Node,
+    to: *Node,
 };

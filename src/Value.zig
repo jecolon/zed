@@ -8,6 +8,7 @@ pub const Type = union(enum) {
     list: *std.ArrayList(Value),
     map: *std.StringHashMap(Value),
     nil,
+    range: [2]usize,
     string: []const u8,
     uint: usize,
 };
@@ -57,6 +58,7 @@ pub fn eql(self: Value, other: Value) bool {
                 }
             } else true;
         },
+        .range => |r| r[0] == other.ty.range[0] and r[1] == other.ty.range[1],
         .string => |s| std.mem.eql(u8, s, other.ty.string),
         .nil => other.ty == .nil,
         else => unreachable,
@@ -72,7 +74,7 @@ pub fn eqlType(self: Value, other: Value) bool {
         .int => other.ty == .int,
         .list => other.ty == .list,
         .map => other.ty == .map,
-        //.range => other.ty == .range,
+        .range => other.ty == .range,
         //.rec_range_map => other.ty == .rec_range_map,
         .string => other.ty == .string,
         .uint => other.ty == .uint,

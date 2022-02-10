@@ -64,11 +64,12 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .ident => try self.compileIdent(node),
         .infix => try self.compileInfix(node),
         .list => try self.compileList(node),
-        .map => try self.compileMap(node),
         .loop => try self.compileLoop(node),
         .loop_break => try self.compileBreak(),
         .loop_continue => try self.compileContinue(),
+        .map => try self.compileMap(node),
         .prefix => try self.compilePrefix(node),
+        .range => try self.compileRange(node),
     }
 }
 
@@ -224,6 +225,13 @@ fn compileLoop(self: *Compiler, node: Node) anyerror!void {
 
     // while loops always return nul.
     try self.pushConstant(Value.new(.nil, node.offset));
+}
+
+fn compileRange(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.range.from.*);
+    try self.compile(node.ty.range.to.*);
+    try self.pushInstruction(.range);
+    try self.instructions.append(@boolToInt(node.ty.range.inclusive));
 }
 
 fn compileReturn(self: *Compiler, node: Node) anyerror!void {

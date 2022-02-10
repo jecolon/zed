@@ -22,7 +22,7 @@ pub fn parse(self: *Parser) !Program {
 
     while (try self.next()) |node| {
         try rules.append(node);
-        try rules.append(Node.new(.stmt_end, 0, 0)); // Stack clean up.
+        try rules.append(Node.new(.stmt_end, 0)); // Stack clean up.
     }
 
     return Program{ .rules = rules.items };
@@ -176,6 +176,7 @@ fn infixFn(self: Parser) InfixFn {
         => Parser.parseInfix,
 
         .op_define => Parser.parseDefine,
+        .op_range_ex, .op_range_in => Parser.parseRange,
         .punct_equals => Parser.parseAssign,
         .punct_lparen => Parser.parseCall,
 
@@ -216,7 +217,6 @@ fn parseAssign(self: *Parser, name: Node) anyerror!Node {
 
     var node = Node.new(
         .{ .assign = .{ .name = try self.allocator.create(Node), .value = try self.allocator.create(Node) } },
-        self.token_index.?,
         self.currentOffset(),
     );
     node.ty.assign.name.* = name;
@@ -226,11 +226,7 @@ fn parseAssign(self: *Parser, name: Node) anyerror!Node {
 }
 
 fn parseBoolean(self: *Parser) anyerror!Node {
-    return Node.new(
-        .{ .boolean = self.currentIs(.pd_true) },
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    return Node.new(.{ .boolean = self.currentIs(.pd_true) }, self.currentOffset());
 }
 
 fn parseBreak(self: *Parser) anyerror!Node {
@@ -240,17 +236,12 @@ fn parseBreak(self: *Parser) anyerror!Node {
         return error.InvalidBreak;
     }
 
-    return Node.new(
-        .loop_break,
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    return Node.new(.loop_break, self.currentOffset());
 }
 
 fn parseCall(self: *Parser, callee: Node) anyerror!Node {
     var node = Node.new(
         .{ .call = .{ .args = &[_]Node{}, .callee = try self.allocator.create(Node) } },
-        self.token_index.?,
         self.currentOffset(),
     );
     node.ty.call.callee.* = callee;
@@ -276,11 +267,7 @@ fn parseContinue(self: *Parser) anyerror!Node {
         return error.InvalidContinue;
     }
 
-    return Node.new(
-        .loop_continue,
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    return Node.new(.loop_continue, self.currentOffset());
 }
 
 fn parseDefine(self: *Parser, name: Node) anyerror!Node {
@@ -292,7 +279,6 @@ fn parseDefine(self: *Parser, name: Node) anyerror!Node {
 
     var node = Node.new(
         .{ .define = .{ .name = try self.allocator.create(Node), .value = try self.allocator.create(Node) } },
-        self.token_index.?,
         self.currentOffset(),
     );
     node.ty.define.name.* = name;
@@ -310,17 +296,12 @@ fn parseFloat(self: *Parser) anyerror!Node {
     const end = self.currentOffset() + self.currentLen();
     const float = try std.fmt.parseFloat(f64, self.src[start..end]);
 
-    return Node.new(
-        .{ .float = float },
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    return Node.new(.{ .float = float }, self.currentOffset());
 }
 
 fn parseFunc(self: *Parser) anyerror!Node {
     var node = Node.new(
         .{ .func = .{ .body = undefined, .params = &[_][]const u8{} } }, //TODO: Parse params.
-        self.token_index.?,
         self.currentOffset(),
     );
 
@@ -351,7 +332,6 @@ fn parseFunc(self: *Parser) anyerror!Node {
     if (body_list.items[body_list.items.len - 1].ty != .func_return) {
         var synth_return = Node.new(
             .{ .func_return = try self.allocator.create(Node) },
-            self.token_index.?,
             self.currentOffset(),
         );
         synth_return.ty.func_return.* = body_list.pop();
@@ -365,13 +345,13 @@ fn parseFunc(self: *Parser) anyerror!Node {
 fn parseGlobal(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
-    return Node.new(.{ .ident = self.src[start..end] }, self.token_index.?, start);
+    return Node.new(.{ .ident = self.src[start..end] }, start);
 }
 
 fn parseIdent(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
-    return Node.new(.{ .ident = self.src[start..end] }, self.token_index.?, start);
+    return Node.new(.{ .ident = self.src[start..end] }, start);
 }
 
 fn parseIf(self: *Parser) anyerror!Node {
@@ -403,14 +383,14 @@ fn parseIf(self: *Parser) anyerror!Node {
         }
     } else {
         // Synthetic nil if no else branch provided.
-        try else_branch_list.append(Node.new(.nil, self.token_index.?, self.currentOffset()));
+        try else_branch_list.append(Node.new(.nil, self.currentOffset()));
     }
 
     return Node.new(.{ .conditional = .{
         .condition = condition_ptr,
         .then_branch = then_branch_list.items,
         .else_branch = else_branch_list.items,
-    } }, self.token_index.?, self.currentOffset());
+    } }, self.currentOffset());
 }
 
 fn parseInfix(self: *Parser, left: Node) anyerror!Node {
@@ -423,7 +403,6 @@ fn parseInfix(self: *Parser, left: Node) anyerror!Node {
             .op = self.currentTag(),
             .right = undefined,
         } },
-        self.token_index.?,
         self.currentOffset(),
     );
     try self.expectNext();
@@ -439,19 +418,11 @@ fn parseInt(self: *Parser) anyerror!Node {
     const end = self.currentOffset() + self.currentLen();
     const int = try std.fmt.parseInt(isize, self.src[start..end], 0);
 
-    return Node.new(
-        .{ .int = int },
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    return Node.new(.{ .int = int }, self.currentOffset());
 }
 
 fn parseList(self: *Parser) anyerror!Node {
-    var node = Node.new(
-        .{ .list = &[_]Node{} },
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    var node = Node.new(.{ .list = &[_]Node{} }, self.currentOffset());
     if (self.skipTag(.punct_rbracket)) return node; // Empty list.
 
     if (self.skipTag(.punct_colon)) {
@@ -503,39 +474,43 @@ fn parseMap(self: *Parser, info_node: Node, first_key: Node) anyerror!Node {
         _ = self.skipTag(.punct_comma);
     }
 
-    return Node.new(
-        .{ .map = entry_list.items },
-        info_node.token_index,
-        info_node.offset,
-    );
+    return Node.new(.{ .map = entry_list.items }, info_node.offset);
 }
 
 fn parseNil(self: *Parser) anyerror!Node {
-    return Node.new(
-        .nil,
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    return Node.new(.nil, self.currentOffset());
 }
 
 fn parsePrefix(self: *Parser) anyerror!Node {
-    var node = Node.new(
-        .{ .prefix = .{ .op = self.currentTag(), .operand = undefined } },
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    var node = Node.new(.{ .prefix = .{ .op = self.currentTag(), .operand = undefined } }, self.currentOffset());
     try self.expectNext();
     node.ty.prefix.operand = try self.allocator.create(Node);
     node.ty.prefix.operand.* = try self.parseExpression(.prefix);
     return node;
 }
 
-fn parseReturn(self: *Parser) anyerror!Node {
+fn parseRange(self: *Parser, from: Node) anyerror!Node {
+    var from_ptr = try self.allocator.create(Node);
+    from_ptr.* = from;
+
     var node = Node.new(
-        .{ .func_return = try self.allocator.create(Node) },
-        self.token_index.?,
+        .{ .range = .{
+            .inclusive = self.currentIs(.op_range_in),
+            .from = from_ptr,
+            .to = undefined,
+        } },
         self.currentOffset(),
     );
+
+    try self.expectNext();
+    node.ty.range.to = try self.allocator.create(Node);
+    node.ty.range.to.* = try self.parseExpression(.range);
+
+    return node;
+}
+
+fn parseReturn(self: *Parser) anyerror!Node {
+    var node = Node.new(.{ .func_return = try self.allocator.create(Node) }, self.currentOffset());
 
     if (!self.peekIs(.punct_semicolon) and
         !self.peekIs(.punct_rbrace) and
@@ -544,7 +519,7 @@ fn parseReturn(self: *Parser) anyerror!Node {
         _ = self.advance();
         node.ty.func_return.* = try self.parseExpression(.lowest);
     } else {
-        node.ty.func_return.* = Node.new(.nil, self.token_index.?, self.currentOffset());
+        node.ty.func_return.* = Node.new(.nil, self.currentOffset());
     }
 
     return node;
@@ -554,11 +529,7 @@ fn parseString(self: *Parser) anyerror!Node {
     const start = self.currentOffset() + 1;
     const end = self.currentOffset() + self.currentLen() - 1;
 
-    return Node.new(
-        .{ .string = self.src[start..end] },
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    return Node.new(.{ .string = self.src[start..end] }, self.currentOffset());
 }
 
 fn parseUint(self: *Parser) anyerror!Node {
@@ -566,22 +537,14 @@ fn parseUint(self: *Parser) anyerror!Node {
     const end = self.currentOffset() + self.currentLen();
     const uint = try std.fmt.parseUnsigned(usize, self.src[start..end], 0);
 
-    return Node.new(
-        .{ .uint = uint },
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    return Node.new(.{ .uint = uint }, self.currentOffset());
 }
 
 fn parseWhile(self: *Parser) anyerror!Node {
     self.can_break = true;
     defer self.can_break = false;
 
-    var node = Node.new(
-        .{ .loop = .{ .condition = undefined, .body = undefined } },
-        self.token_index.?,
-        self.currentOffset(),
-    );
+    var node = Node.new(.{ .loop = .{ .condition = undefined, .body = undefined } }, self.currentOffset());
     // Condition
     try self.expectTag(.punct_lparen);
     try self.expectNext();
@@ -600,7 +563,7 @@ fn parseWhile(self: *Parser) anyerror!Node {
     }
 
     // while loops need to clean up the stack after every iteration.
-    try body_list.append(Node.new(.stmt_end, 0, 0));
+    try body_list.append(Node.new(.stmt_end, 0));
 
     node.ty.loop.body = body_list.items;
 
@@ -684,7 +647,7 @@ fn parseNodes(self: *Parser, list: *std.ArrayList(Node), stop: Token.Tag, skip: 
         try self.expectNext();
         const node = try self.parseExpression(.lowest);
         try list.append(node);
-        try list.append(Node.new(.stmt_end, 0, 0)); // Stack clean up.
+        try list.append(Node.new(.stmt_end, 0)); // Stack clean up.
         _ = self.skipTag(skip);
     }
 
