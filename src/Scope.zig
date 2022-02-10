@@ -21,8 +21,8 @@ pub fn deinit(self: *Scope) void {
     var iter = self.map.iterator();
     while (iter.next()) |entry| {
         if (entry.value_ptr.ty == .func) self.funcDeinit(entry.value_ptr.*);
-        //if (entry.value_ptr.ty == .list) self.listDeinit(entry.value_ptr.ty.list);
-        //if (entry.value_ptr.ty == .map) self.mapDeinit(entry.value_ptr.ty.map);
+        if (entry.value_ptr.ty == .list) self.listDeinit(entry.value_ptr.ty.list);
+        if (entry.value_ptr.ty == .map) self.mapDeinit(entry.value_ptr.ty.map);
         if (entry.value_ptr.ty == .string) self.allocator.free(entry.value_ptr.ty.string);
         self.allocator.free(entry.key_ptr.*);
     }
@@ -41,17 +41,17 @@ fn funcCopy(self: *Scope, func: Value) !Value {
     } }, func.offset);
 }
 
-fn listCopy(self: *Scope, list: Value) !Value {
+fn listCopy(self: *Scope, list: Value) anyerror!Value {
     var copy_ptr = try self.allocator.create(std.ArrayList(Value));
     copy_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, list.ty.list.items.len);
 
     for (list.ty.list.items) |item| {
         if (item.ty == .string) {
-            copy_ptr.appendAssumeCapacity(self.stringCopy(item));
+            copy_ptr.appendAssumeCapacity(try self.stringCopy(item));
         } else if (item.ty == .list) {
-            copy_ptr.appendAssumeCapacity(self.listCopy(item));
+            copy_ptr.appendAssumeCapacity(try self.listCopy(item));
         } else if (item.ty == .map) {
-            copy_ptr.appendAssumeCapacity(self.mapCopy(item));
+            copy_ptr.appendAssumeCapacity(try self.mapCopy(item));
         } else {
             copy_ptr.appendAssumeCapacity(item);
         }
@@ -60,7 +60,7 @@ fn listCopy(self: *Scope, list: Value) !Value {
     return Value.new(.{ .list = copy_ptr }, list.offset);
 }
 
-fn mapCopy(self: *Scope, map: Value) !Value {
+fn mapCopy(self: *Scope, map: Value) anyerror!Value {
     const copy_ptr = try self.allocator.create(std.StringHashMap(Value));
     copy_ptr.* = std.StringHashMap(Value).init(self.allocator);
     var iter = map.ty.map.iterator();
@@ -68,9 +68,9 @@ fn mapCopy(self: *Scope, map: Value) !Value {
     while (iter.next()) |entry| {
         const key_copy = try self.allocator.dupe(u8, entry.key_ptr.*);
         const value_copy = switch (entry.value_ptr.ty) {
-            .string => self.stringCopy(entry.value_ptr.*),
-            .list => self.listCopy(entry.value_ptr.*),
-            .map => self.mapCopy(entry.value_ptr.*),
+            .string => try self.stringCopy(entry.value_ptr.*),
+            .list => try self.listCopy(entry.value_ptr.*),
+            .map => try self.mapCopy(entry.value_ptr.*),
             else => entry.value_ptr.*,
         };
         try copy_ptr.put(key_copy, value_copy);
@@ -138,10 +138,10 @@ pub fn store(self: *Scope, key: []const u8, value: Value) !void {
 
     if (value.ty == .func) {
         try self.map.put(key_copy, try self.funcCopy(value));
-        //} else if (value.ty == .list) {
-        //    try self.map.put(key_copy, try self.listCopy(value));
-        //} else if (value.ty == .map) {
-        //    try self.map.put(key_copy, try self.mapCopy(value));
+    } else if (value.ty == .list) {
+        try self.map.put(key_copy, try self.listCopy(value));
+    } else if (value.ty == .map) {
+        try self.map.put(key_copy, try self.mapCopy(value));
     } else if (value.ty == .string) {
         try self.map.put(key_copy, try self.stringCopy(value));
     } else {
@@ -152,16 +152,16 @@ pub fn store(self: *Scope, key: []const u8, value: Value) !void {
 pub fn update(self: *Scope, key: []const u8, value: Value) !void {
     if (self.map.get(key)) |old_value| {
         if (old_value.ty == .func) self.funcDeinit(old_value);
-        //if (old_value.ty == .list) self.listDeinit(old_value.ty.list);
-        //if (old_value.ty == .map) self.mapDeinit(old_value.ty.map);
+        if (old_value.ty == .list) self.listDeinit(old_value.ty.list);
+        if (old_value.ty == .map) self.mapDeinit(old_value.ty.map);
         if (old_value.ty == .string) self.allocator.free(old_value.ty.string);
 
         if (value.ty == .func) {
             try self.map.put(key, try self.funcCopy(value));
-            //} else if (value.ty == .list) {
-            //    try self.map.put(key, try self.listCopy(value));
-            //} else if (value.ty == .map) {
-            //    try self.map.put(key, try self.mapCopy(value));
+        } else if (value.ty == .list) {
+            try self.map.put(key, try self.listCopy(value));
+        } else if (value.ty == .map) {
+            try self.map.put(key, try self.mapCopy(value));
         } else if (value.ty == .string) {
             try self.map.put(key, try self.stringCopy(value));
         } else {

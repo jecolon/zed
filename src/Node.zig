@@ -7,6 +7,7 @@ pub const Type = union(enum) {
     ident: []const u8,
     int: isize,
     list: []Node,
+    map: []Entry,
     loop_break,
     loop_continue,
     nil,
@@ -52,6 +53,11 @@ const Conditional = struct {
 const Define = struct {
     name: *Node,
     value: *Node,
+};
+
+pub const Entry = struct {
+    key: Node,
+    value: Node,
 };
 
 const Function = struct {

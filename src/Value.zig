@@ -6,6 +6,7 @@ pub const Type = union(enum) {
     func: Function,
     int: isize,
     list: *std.ArrayList(Value),
+    map: *std.StringHashMap(Value),
     nil,
     string: []const u8,
     uint: usize,
@@ -47,15 +48,15 @@ pub fn eql(self: Value, other: Value) bool {
                 if (!item.eql(other.ty.list.items[i])) break false;
             } else true;
         },
-        //.map => |m| mp: {
-        //    if (m.count() != other.ty.map.count()) break :mp false;
-        //    var iter = m.iterator();
-        //    break :mp while (iter.next()) |entry| {
-        //        if (other.ty.map.get(entry.key_ptr.*)) |ov| {
-        //            if (!entry.value_ptr.eql(ov)) break false;
-        //        }
-        //    } else true;
-        //},
+        .map => |m| mp: {
+            if (m.count() != other.ty.map.count()) break :mp false;
+            var iter = m.iterator();
+            break :mp while (iter.next()) |entry| {
+                if (other.ty.map.get(entry.key_ptr.*)) |ov| {
+                    if (!entry.value_ptr.eql(ov)) break false;
+                }
+            } else true;
+        },
         .string => |s| std.mem.eql(u8, s, other.ty.string),
         .nil => other.ty == .nil,
         else => unreachable,
@@ -70,7 +71,7 @@ pub fn eqlType(self: Value, other: Value) bool {
         .func => other.ty == .func,
         .int => other.ty == .int,
         .list => other.ty == .list,
-        //.map => other.ty == .map,
+        .map => other.ty == .map,
         //.range => other.ty == .range,
         //.rec_range_map => other.ty == .rec_range_map,
         .string => other.ty == .string,
@@ -156,7 +157,7 @@ pub fn add(self: Value, other: Value) anyerror!Value {
         .int => self.addInt(other),
         .uint => self.addUint(other),
         .string => self.addString(other),
-        //.list => self.addList(other),
+        .list => self.addList(other),
         else => error.InvalidAddition,
     };
 }
@@ -390,7 +391,7 @@ pub fn format(self: Value, comptime fmt: []const u8, options: std.fmt.FormatOpti
         .float => |f| _ = try writer.print("{d}", .{f}),
         .int => |i| _ = try writer.print("{}", .{i}),
         .list => |l| try printList(l, writer),
-        //.map => |m| try printMap(m, writer),
+        .map => |m| try printMap(m, writer),
         .string => |s| _ = try writer.print("{s}", .{s}),
         .uint => |u| _ = try writer.print("{}", .{u}),
 
@@ -409,15 +410,15 @@ fn printList(list: *std.ArrayList(Value), writer: anytype) !void {
     try writer.writeByte(']');
 }
 
-//fn printMap(map: *std.StringHashMap(Value), writer: anytype) !void {
-//    try writer.writeByte('[');
-//    var iter = map.iterator();
-//    var i: usize = 0;
-//
-//    while (iter.next()) |entry| : (i += 1) {
-//        if (i != 0) try writer.writeAll(", ");
-//        _ = try writer.print("{s}: {}", .{ entry.key_ptr.*, entry.value_ptr.* });
-//    }
-//
-//    try writer.writeByte(']');
-//}
+fn printMap(map: *std.StringHashMap(Value), writer: anytype) !void {
+    try writer.writeByte('[');
+    var iter = map.iterator();
+    var i: usize = 0;
+
+    while (iter.next()) |entry| : (i += 1) {
+        if (i != 0) try writer.writeAll(", ");
+        _ = try writer.print("{s}: {}", .{ entry.key_ptr.*, entry.value_ptr.* });
+    }
+
+    try writer.writeByte(']');
+}

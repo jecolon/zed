@@ -376,6 +376,34 @@ pub fn run(self: *Vm) !void {
                 while (i < num_items) : (i += 1) try list_ptr.append(self.value_stack.pop());
                 try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
             },
+
+            .map => {
+                const num_entries = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+                self.ip.* += 3;
+
+                var map_ptr = try self.allocator.create(std.StringHashMap(Value));
+                map_ptr.* = std.StringHashMap(Value).init(self.allocator);
+
+                if (num_entries == 0) {
+                    try self.value_stack.append(Value.new(.{ .map = map_ptr }, 0));
+                    continue;
+                }
+
+                try map_ptr.ensureTotalCapacity(num_entries);
+                var i: usize = 0;
+                while (i < num_entries) : (i += 1) {
+                    const value = self.value_stack.pop();
+                    const key_val = self.value_stack.pop();
+                    if (key_val.ty != .string) {
+                        const location = Location.getLocation(self.filename, self.src, key_val.offset);
+                        std.log.err("Map key must evaluate to a string; {}", .{location});
+                        return error.InvalidMapKey;
+                    }
+
+                    try map_ptr.put(key_val.ty.string, value);
+                }
+                try self.value_stack.append(Value.new(.{ .map = map_ptr }, 0));
+            },
         }
     }
 }
@@ -502,7 +530,10 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         .string => |s| try std.testing.expectEqualStrings(s, last_popped.ty.string),
         .uint => |u| try std.testing.expectEqual(u, last_popped.ty.uint),
 
-        .func, .list => try std.testing.expect(expected.eql(last_popped)),
+        .func,
+        .list,
+        .map,
+        => try std.testing.expect(expected.eql(last_popped)),
     }
 
     arena.deinit();
@@ -838,4 +869,22 @@ test "Vm list literal" {
         \\[ 1, 2, 3 ]
     ;
     try testLastValue(input, list);
+}
+
+test "Vm list literal" {
+    const allocator = std.testing.allocator;
+    var map_ptr = try allocator.create(std.StringHashMap(Value));
+    defer allocator.destroy(map_ptr);
+    map_ptr.* = std.StringHashMap(Value).init(allocator);
+    defer map_ptr.deinit();
+    try map_ptr.ensureTotalCapacity(3);
+    map_ptr.putAssumeCapacity("a", Value.new(.{ .uint = 1 }, 0));
+    map_ptr.putAssumeCapacity("b", Value.new(.{ .uint = 2 }, 0));
+    map_ptr.putAssumeCapacity("c", Value.new(.{ .uint = 3 }, 0));
+    const map = Value.new(.{ .map = map_ptr }, 0);
+
+    const input =
+        \\[ "a": 1, "b": 2, "c": 3 ]
+    ;
+    try testLastValue(input, map);
 }

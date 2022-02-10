@@ -452,18 +452,62 @@ fn parseList(self: *Parser) anyerror!Node {
         self.token_index.?,
         self.currentOffset(),
     );
-    if (self.skipTag(.punct_rbracket)) return node;
+    if (self.skipTag(.punct_rbracket)) return node; // Empty list.
+
+    if (self.skipTag(.punct_colon)) {
+        // Empty map.
+        try self.expectTag(.punct_rbracket);
+        node.ty = .{ .map = &[_]Node.Entry{} };
+        return node;
+    }
+
+    try self.expectNext();
+    var next_node = try self.parseExpression(.lowest);
+    if (self.skipTag(.punct_colon)) return self.parseMap(node, next_node);
 
     var node_list = std.ArrayList(Node).init(self.allocator);
+    try node_list.append(next_node);
+    _ = self.skipTag(.punct_comma);
+
     while (!self.skipTag(.punct_rbracket)) {
         try self.expectNext();
-        const item_node = try self.parseExpression(.lowest);
-        try node_list.append(item_node);
+        next_node = try self.parseExpression(.lowest);
+        try node_list.append(next_node);
         _ = self.skipTag(.punct_comma);
     }
     node.ty.list = node_list.items;
 
     return node;
+}
+
+fn parseMap(self: *Parser, info_node: Node, first_key: Node) anyerror!Node {
+    // Have to complete the first entry.
+    try self.expectNext();
+    var value_node = try self.parseExpression(.lowest);
+    var entry = Node.Entry{ .key = first_key, .value = value_node };
+    var entry_list = std.ArrayList(Node.Entry).init(self.allocator);
+    try entry_list.append(entry);
+    _ = self.skipTag(.punct_comma);
+
+    while (!self.skipTag(.punct_rbracket)) {
+        // Key
+        try self.expectNext();
+        const key_node = try self.parseExpression(.lowest);
+        try self.expectTag(.punct_colon);
+        // Value
+        try self.expectNext();
+        value_node = try self.parseExpression(.lowest);
+        // Entry
+        entry = Node.Entry{ .key = key_node, .value = value_node };
+        try entry_list.append(entry);
+        _ = self.skipTag(.punct_comma);
+    }
+
+    return Node.new(
+        .{ .map = entry_list.items },
+        info_node.token_index,
+        info_node.offset,
+    );
 }
 
 fn parseNil(self: *Parser) anyerror!Node {

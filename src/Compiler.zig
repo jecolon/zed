@@ -64,6 +64,7 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .ident => try self.compileIdent(node),
         .infix => try self.compileInfix(node),
         .list => try self.compileList(node),
+        .map => try self.compileMap(node),
         .loop => try self.compileLoop(node),
         .loop_break => try self.compileBreak(),
         .loop_continue => try self.compileContinue(),
@@ -174,6 +175,14 @@ fn compileList(self: *Compiler, node: Node) anyerror!void {
     const list_len = node.ty.list.len;
     while (i <= list_len) : (i += 1) try self.compile(node.ty.list[list_len - i]);
     try self.pushInstructionAndOperands(u16, .list, &[_]u16{@intCast(u16, node.ty.list.len)});
+}
+
+fn compileMap(self: *Compiler, node: Node) anyerror!void {
+    for (node.ty.map) |entry| {
+        try self.compile(entry.key);
+        try self.compile(entry.value);
+    }
+    try self.pushInstructionAndOperands(u16, .map, &[_]u16{@intCast(u16, node.ty.map.len)});
 }
 
 fn compilePrefix(self: *Compiler, node: Node) anyerror!void {
