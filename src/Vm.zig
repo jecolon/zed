@@ -61,55 +61,23 @@ pub fn run(self: *Vm) !void {
         switch (opcode) {
             // Instruction pointer movements.
             .jump => self.jump(),
-            .jump_false => {
-                const condition = self.value_stack.pop();
-                if (!isTruthy(condition)) self.jump() else self.ip.* += 3;
-            },
-            .jump_true => {
-                const condition = self.value_stack.pop();
-                if (isTruthy(condition)) self.jump() else self.ip.* += 3;
-            },
+            .jump_false => self.evalJumpFalse(),
+            .jump_true => self.evalJumpTrue(),
+
             // Stack clean up.
             .pop => {
                 self.last_popped = self.value_stack.pop();
                 self.ip.* += 1;
             },
+
             // Scope
             .scope_in => {
-                var child_scope_ptr = try self.allocator.create(Scope);
-                child_scope_ptr.* = Scope.init(self.allocator, self.scope);
-                self.scope = child_scope_ptr;
-                self.ip.* += 1;
+                try self.evalScopeIn();
+                self.ip.* += 2;
             },
             .scope_out => {
-                // TODO: Try this
-                //var child_scope_ptr = self.scope;
-                //self.scope = child_scope_ptr.parent.?;
-                //child_scope_ptr.deinit();
-                //self.allocator.destroy(child_scope_ptr);
-                self.scope = self.scope.parent.?;
-                self.ip.* += 1;
-            },
-            .scope_in_loop => {
-                var child_scope_ptr = try self.allocator.create(Scope);
-                child_scope_ptr.* = Scope.init(self.allocator, self.scope);
-                self.scope = child_scope_ptr;
-                self.scope.break_point = true;
-                self.ip.* += 1;
-            },
-            .scope_out_loop => {
-                // TODO: Try this
-                //var child_scope_ptr = self.scope;
-                //self.scope = child_scope_ptr.parent.?;
-                //child_scope_ptr.deinit();
-                //self.allocator.destroy(child_scope_ptr);
-                while (true) {
-                    const child_scope = self.scope;
-                    self.scope = child_scope.parent.?;
-                    if (child_scope.break_point) break;
-                }
-
-                self.ip.* += 1;
+                try self.evalScopeOut();
+                self.ip.* += 2;
             },
 
             // Normal opcodes.
@@ -120,131 +88,39 @@ pub fn run(self: *Vm) !void {
             },
 
             .logic_and, .logic_or => {
-                const right = self.value_stack.pop();
-                const left = self.value_stack.pop();
-
-                if (left.ty != .boolean) {
-                    const location = Location.getLocation(self.filename, self.src, left.offset);
-                    std.log.err("Logical op on {s}; {}", .{ @tagName(left.ty), location });
-                    return error.InvalidLogicOp;
-                }
-                if (right.ty != .boolean) {
-                    const location = Location.getLocation(self.filename, self.src, right.offset);
-                    std.log.err("Logical op on {s}; {}", .{ @tagName(right.ty), location });
-                    return error.InvalidLogicOp;
-                }
-
-                switch (opcode) {
-                    .logic_and => try self.value_stack.append(Value.new(.{ .boolean = left.ty.boolean and right.ty.boolean }, left.offset)),
-                    .logic_or => try self.value_stack.append(Value.new(.{ .boolean = left.ty.boolean or right.ty.boolean }, left.offset)),
-                    else => unreachable,
-                }
-
+                try self.evalLogicAndOr(opcode);
                 self.ip.* += 1;
             },
 
             .logic_not => {
-                const value = self.value_stack.pop();
-
-                if (value.ty != .boolean) {
-                    const location = Location.getLocation(self.filename, self.src, value.offset);
-                    std.log.err("Logical not op `!` not allowed on {s}; {}", .{ @tagName(value.ty), location });
-                    return error.InvalidLogicNot;
-                }
-
-                try self.value_stack.append(Value.new(.{ .boolean = !value.ty.boolean }, value.offset));
+                try self.evalLogicNot();
                 self.ip.* += 1;
             },
 
             .negative => {
-                const value = self.value_stack.pop();
-
-                switch (value.ty) {
-                    .float => |f| try self.value_stack.append(Value.new(.{ .float = -f }, value.offset)),
-                    .int => |i| try self.value_stack.append(Value.new(.{ .int = -i }, value.offset)),
-                    .uint => |u| try self.value_stack.append(Value.new(.{ .int = -@intCast(isize, u) }, value.offset)),
-                    else => {
-                        const location = Location.getLocation(self.filename, self.src, value.offset);
-                        std.log.err("Negative op `-` not allowed on {s}; {}", .{ @tagName(value.ty), location });
-                        return error.InvalidNegative;
-                    },
-                }
-
+                try self.evalNegative();
                 self.ip.* += 1;
             },
 
-            .add => {
+            .add,
+            .sub,
+            .mul,
+            .div,
+            .mod,
+            .eq,
+            .neq,
+            => {
                 const right = self.value_stack.pop();
                 const left = self.value_stack.pop();
-                if (left.add(right)) |sum| {
-                    try self.value_stack.append(sum);
-                } else |err| {
-                    const location = Location.getLocation(self.filename, self.src, left.offset);
-                    std.log.err("Unable to add {s} and {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
-                    return err;
+                switch (opcode) {
+                    .add => try self.evalAdd(left, right),
+                    .sub => try self.evalSub(left, right),
+                    .mul => try self.evalMul(left, right),
+                    .div => try self.evalDiv(left, right),
+                    .mod => try self.evalMod(left, right),
+                    .eq, .neq => try self.evalEqNeq(left, right, opcode),
+                    else => unreachable,
                 }
-
-                self.ip.* += 1;
-            },
-            .sub => {
-                const right = self.value_stack.pop();
-                const left = self.value_stack.pop();
-                if (left.sub(right)) |diff| {
-                    try self.value_stack.append(diff);
-                } else |err| {
-                    const location = Location.getLocation(self.filename, self.src, left.offset);
-                    std.log.err("Unable to subtract {s} from {s}; {}", .{ @tagName(right.ty), @tagName(left.ty), location });
-                    return err;
-                }
-
-                self.ip.* += 1;
-            },
-            .mul => {
-                const right = self.value_stack.pop();
-                const left = self.value_stack.pop();
-                if (left.mul(right)) |product| {
-                    try self.value_stack.append(product);
-                } else |err| {
-                    const location = Location.getLocation(self.filename, self.src, left.offset);
-                    std.log.err("Unable to multiply {s} and {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
-                    return err;
-                }
-
-                self.ip.* += 1;
-            },
-            .div => {
-                const right = self.value_stack.pop();
-                const left = self.value_stack.pop();
-                if (left.div(right)) |quotient| {
-                    try self.value_stack.append(quotient);
-                } else |err| {
-                    const location = Location.getLocation(self.filename, self.src, left.offset);
-                    std.log.err("Unable to divide {s} by {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
-                    return err;
-                }
-
-                self.ip.* += 1;
-            },
-            .mod => {
-                const right = self.value_stack.pop();
-                const left = self.value_stack.pop();
-                if (left.mod(right)) |remainder| {
-                    try self.value_stack.append(remainder);
-                } else |err| {
-                    const location = Location.getLocation(self.filename, self.src, left.offset);
-                    std.log.err("Unable to get remainder of {s} by {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
-                    return err;
-                }
-
-                self.ip.* += 1;
-            },
-
-            .eq, .neq => {
-                const right = self.value_stack.pop();
-                const left = self.value_stack.pop();
-                var comparison = left.eql(right);
-                if (opcode == .neq) comparison = !comparison;
-                try self.value_stack.append(Value.new(.{ .boolean = comparison }, left.offset));
 
                 self.ip.* += 1;
             },
@@ -256,97 +132,28 @@ pub fn run(self: *Vm) !void {
             => {
                 const right = self.value_stack.pop();
                 const left = self.value_stack.pop();
-                const comparison = left.cmp(right) catch |err| {
-                    const location = Location.getLocation(self.filename, self.src, left.offset);
-                    std.log.err("Unable to compare {s} with {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
-                    return err;
-                };
-
-                const result = switch (opcode) {
-                    .lt => Value.new(.{ .boolean = comparison == .lt }, left.offset),
-                    .lte => Value.new(.{ .boolean = comparison == .lt or comparison == .eq }, left.offset),
-                    .gt => Value.new(.{ .boolean = comparison == .gt }, left.offset),
-                    .gte => Value.new(.{ .boolean = comparison == .gt or comparison == .eq }, left.offset),
-
-                    else => unreachable,
-                };
-
-                try self.value_stack.append(result);
-
+                try self.evalComparison(left, right, opcode);
                 self.ip.* += 1;
             },
 
             // Names
             .define => {
-                const name = self.value_stack.pop();
-                const value = self.value_stack.pop();
-                if (self.scope.isDefined(name.ty.string)) {
-                    const location = Location.getLocation(self.filename, self.src, name.offset);
-                    std.log.err("{s} already defined; {}", .{ name.ty.string, location });
-                    return error.NameAlreadyDefined;
-                }
-                try self.scope.store(name.ty.string, value);
-                try self.value_stack.append(value);
+                try self.evalDefine();
                 self.ip.* += 1;
             },
             .load => {
-                const name = self.value_stack.pop();
-
-                if (self.scope.load(name.ty.string)) |value| {
-                    try self.value_stack.append(value);
-                } else {
-                    const location = Location.getLocation(self.filename, self.src, name.offset);
-                    std.log.err("{s} not defined; {}", .{ name.ty.string, location });
-                    return error.NameNotDefined;
-                }
-
+                try self.evalLoad();
                 self.ip.* += 1;
             },
             .store => {
-                const name = self.value_stack.pop();
-                const value = self.value_stack.pop();
-                if (!self.scope.isDefined(name.ty.string)) {
-                    const location = Location.getLocation(self.filename, self.src, name.offset);
-                    std.log.err("{s} not defined; {}", .{ name.ty.string, location });
-                    return error.NameNotDefined;
-                }
-                try self.scope.update(name.ty.string, value);
-                try self.value_stack.append(value);
+                try self.evalStore();
                 self.ip.* += 1;
             },
 
             // Functions
             .call => {
-                // Get the function.
-                const callee = self.value_stack.pop();
-                if (callee.ty != .func) {
-                    const location = Location.getLocation(self.filename, self.src, callee.offset);
-                    std.log.err("Call op on {s}; {}", .{ @tagName(callee.ty), location });
-                    return error.InvalidCall;
-                }
-
-                // Prepare the child scope.
-                var func_scope_ptr = try self.allocator.create(Scope);
-                func_scope_ptr.* = Scope.init(self.allocator, self.global_scope);
-
-                // Self-references
-                if (callee.ty.func.name.len != 0) try func_scope_ptr.store(callee.ty.func.name, callee);
-
-                // Process args
-                self.ip.* += 1;
-                const num_args = self.instructions.*[self.ip.*];
-                var i: usize = 0;
-                while (i < num_args) : (i += 1) {
-                    const arg = self.value_stack.pop();
-                    if (i == 0) try func_scope_ptr.store("it", arg); // it
-                    var buf: [4]u8 = undefined;
-                    const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{i});
-                    try func_scope_ptr.store(auto_arg_name, arg); // @0, @1, ...
-                    if (i < callee.ty.func.params.len) try func_scope_ptr.store(callee.ty.func.params[i], arg);
-                }
-
-                // Push the function's frame.
-                try self.pushFrame(callee.ty.func.instructions, func_scope_ptr);
+                try self.evalCall();
+                // self.ip.* += 1; is done in evalCall before pushing new frame.
             },
             .func_return => {
                 if (self.call_stack.items.len == 1) {
@@ -361,71 +168,336 @@ pub fn run(self: *Vm) !void {
             },
 
             .list => {
-                const num_items = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+                try self.evalList();
                 self.ip.* += 3;
-
-                var list_ptr = try self.allocator.create(std.ArrayList(Value));
-                list_ptr.* = std.ArrayList(Value).init(self.allocator);
-
-                if (num_items == 0) {
-                    try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
-                    continue;
-                }
-
-                var i: usize = 0;
-                while (i < num_items) : (i += 1) try list_ptr.append(self.value_stack.pop());
-                try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
             },
 
             .map => {
-                const num_entries = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+                try self.evalMap();
                 self.ip.* += 3;
-
-                var map_ptr = try self.allocator.create(std.StringHashMap(Value));
-                map_ptr.* = std.StringHashMap(Value).init(self.allocator);
-
-                if (num_entries == 0) {
-                    try self.value_stack.append(Value.new(.{ .map = map_ptr }, 0));
-                    continue;
-                }
-
-                try map_ptr.ensureTotalCapacity(num_entries);
-                var i: usize = 0;
-                while (i < num_entries) : (i += 1) {
-                    const value = self.value_stack.pop();
-                    const key_val = self.value_stack.pop();
-                    if (key_val.ty != .string) {
-                        const location = Location.getLocation(self.filename, self.src, key_val.offset);
-                        std.log.err("Map key must evaluate to a string; {}", .{location});
-                        return error.InvalidMapKey;
-                    }
-
-                    try map_ptr.put(key_val.ty.string, value);
-                }
-                try self.value_stack.append(Value.new(.{ .map = map_ptr }, 0));
             },
 
             .range => {
-                const inclusive = self.instructions.*[self.ip.* + 1] == 1;
+                try self.evalRange();
                 self.ip.* += 2;
-                const end = self.value_stack.pop();
-                const start = self.value_stack.pop();
-                if (start.ty != .uint or end.ty != .uint) {
-                    const location = Location.getLocation(self.filename, self.src, start.offset);
-                    std.log.err("Range indexes must evaluate to unsigned integers; {}", .{location});
-                    return error.InvalidRange;
-                }
+            },
 
-                const start_uint = start.ty.uint;
-                const end_uint = if (inclusive) end.ty.uint + 1 else end.ty.uint;
-
-                try self.value_stack.append(Value.new(.{ .range = [2]usize{ start_uint, end_uint } }, start.offset));
+            .subscript => {
+                try self.evalSubscript();
+                self.ip.* += 1;
             },
         }
     }
 }
 
 // Helpers
+fn evalAdd(self: *Vm, left: Value, right: Value) anyerror!void {
+    if (left.add(right)) |sum| {
+        try self.value_stack.append(sum);
+    } else |err| {
+        const location = Location.getLocation(self.filename, self.src, left.offset);
+        std.log.err("Unable to add {s} and {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
+        return err;
+    }
+}
+fn evalSub(self: *Vm, left: Value, right: Value) anyerror!void {
+    if (left.sub(right)) |diff| {
+        try self.value_stack.append(diff);
+    } else |err| {
+        const location = Location.getLocation(self.filename, self.src, left.offset);
+        std.log.err("Unable to subtract {s} from {s}; {}", .{ @tagName(right.ty), @tagName(left.ty), location });
+        return err;
+    }
+}
+fn evalMul(self: *Vm, left: Value, right: Value) anyerror!void {
+    if (left.mul(right)) |product| {
+        try self.value_stack.append(product);
+    } else |err| {
+        const location = Location.getLocation(self.filename, self.src, left.offset);
+        std.log.err("Unable to multiply {s} and {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
+        return err;
+    }
+}
+fn evalDiv(self: *Vm, left: Value, right: Value) anyerror!void {
+    if (left.div(right)) |quotient| {
+        try self.value_stack.append(quotient);
+    } else |err| {
+        const location = Location.getLocation(self.filename, self.src, left.offset);
+        std.log.err("Unable to divide {s} by {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
+        return err;
+    }
+}
+fn evalMod(self: *Vm, left: Value, right: Value) anyerror!void {
+    if (left.mod(right)) |remainder| {
+        try self.value_stack.append(remainder);
+    } else |err| {
+        const location = Location.getLocation(self.filename, self.src, left.offset);
+        std.log.err("Unable to get remainder of {s} by {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
+        return err;
+    }
+}
+fn evalEqNeq(self: *Vm, left: Value, right: Value, opcode: Bytecode.Opcode) anyerror!void {
+    var comparison = left.eql(right);
+    if (opcode == .neq) comparison = !comparison;
+    try self.value_stack.append(Value.new(.{ .boolean = comparison }, left.offset));
+}
+fn evalComparison(self: *Vm, left: Value, right: Value, opcode: Bytecode.Opcode) anyerror!void {
+    const comparison = left.cmp(right) catch |err| {
+        const location = Location.getLocation(self.filename, self.src, left.offset);
+        std.log.err("Unable to compare {s} with {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
+        return err;
+    };
+
+    const result = switch (opcode) {
+        .lt => Value.new(.{ .boolean = comparison == .lt }, left.offset),
+        .lte => Value.new(.{ .boolean = comparison == .lt or comparison == .eq }, left.offset),
+        .gt => Value.new(.{ .boolean = comparison == .gt }, left.offset),
+        .gte => Value.new(.{ .boolean = comparison == .gt or comparison == .eq }, left.offset),
+
+        else => unreachable,
+    };
+
+    try self.value_stack.append(result);
+}
+
+fn evalCall(self: *Vm) anyerror!void {
+    // Get the function.
+    const callee = self.value_stack.pop();
+    if (callee.ty != .func) {
+        const location = Location.getLocation(self.filename, self.src, callee.offset);
+        std.log.err("Call op on {s}; {}", .{ @tagName(callee.ty), location });
+        return error.InvalidCall;
+    }
+
+    // Prepare the child scope.
+    var func_scope_ptr = try self.allocator.create(Scope);
+    func_scope_ptr.* = Scope.init(self.allocator, self.global_scope);
+
+    // Self-references
+    if (callee.ty.func.name.len != 0) try func_scope_ptr.store(callee.ty.func.name, callee);
+
+    // Process args
+    const num_args = self.instructions.*[self.ip.* + 1];
+    self.ip.* += 1;
+
+    var i: usize = 0;
+    while (i < num_args) : (i += 1) {
+        const arg = self.value_stack.pop();
+        if (i == 0) try func_scope_ptr.store("it", arg); // it
+        var buf: [4]u8 = undefined;
+        const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{i});
+        try func_scope_ptr.store(auto_arg_name, arg); // @0, @1, ...
+        if (i < callee.ty.func.params.len) try func_scope_ptr.store(callee.ty.func.params[i], arg);
+    }
+
+    // Push the function's frame.
+    try self.pushFrame(callee.ty.func.instructions, func_scope_ptr);
+}
+
+fn evalDefine(self: *Vm) anyerror!void {
+    const name = self.value_stack.pop();
+    const value = self.value_stack.pop();
+    if (self.scope.isDefined(name.ty.string)) {
+        const location = Location.getLocation(self.filename, self.src, name.offset);
+        std.log.err("{s} already defined; {}", .{ name.ty.string, location });
+        return error.NameAlreadyDefined;
+    }
+    try self.scope.store(name.ty.string, value);
+    try self.value_stack.append(value);
+}
+
+fn evalLoad(self: *Vm) anyerror!void {
+    const name = self.value_stack.pop();
+
+    if (self.scope.load(name.ty.string)) |value| {
+        try self.value_stack.append(value);
+    } else {
+        const location = Location.getLocation(self.filename, self.src, name.offset);
+        std.log.err("{s} not defined; {}", .{ name.ty.string, location });
+        return error.NameNotDefined;
+    }
+}
+
+fn evalStore(self: *Vm) anyerror!void {
+    const name = self.value_stack.pop();
+    const value = self.value_stack.pop();
+    if (!self.scope.isDefined(name.ty.string)) {
+        const location = Location.getLocation(self.filename, self.src, name.offset);
+        std.log.err("{s} not defined; {}", .{ name.ty.string, location });
+        return error.NameNotDefined;
+    }
+    try self.scope.update(name.ty.string, value);
+    try self.value_stack.append(value);
+}
+
+fn evalLogicAndOr(self: *Vm, opcode: Bytecode.Opcode) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+
+    if (left.ty != .boolean) {
+        const location = Location.getLocation(self.filename, self.src, left.offset);
+        std.log.err("Logical op on {s}; {}", .{ @tagName(left.ty), location });
+        return error.InvalidLogicOp;
+    }
+    if (right.ty != .boolean) {
+        const location = Location.getLocation(self.filename, self.src, right.offset);
+        std.log.err("Logical op on {s}; {}", .{ @tagName(right.ty), location });
+        return error.InvalidLogicOp;
+    }
+
+    switch (opcode) {
+        .logic_and => try self.value_stack.append(Value.new(.{ .boolean = left.ty.boolean and right.ty.boolean }, left.offset)),
+        .logic_or => try self.value_stack.append(Value.new(.{ .boolean = left.ty.boolean or right.ty.boolean }, left.offset)),
+        else => unreachable,
+    }
+}
+
+fn evalJumpFalse(self: *Vm) void {
+    const condition = self.value_stack.pop();
+    if (!isTruthy(condition)) self.jump() else self.ip.* += 3;
+}
+
+fn evalJumpTrue(self: *Vm) void {
+    const condition = self.value_stack.pop();
+    if (isTruthy(condition)) self.jump() else self.ip.* += 3;
+}
+
+fn evalList(self: *Vm) anyerror!void {
+    const num_items = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+
+    var list_ptr = try self.allocator.create(std.ArrayList(Value));
+    list_ptr.* = std.ArrayList(Value).init(self.allocator);
+
+    if (num_items == 0) {
+        try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
+        return;
+    }
+
+    var i: usize = 0;
+    while (i < num_items) : (i += 1) try list_ptr.append(self.value_stack.pop());
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
+}
+
+fn evalListSubscript(self: *Vm, container: Value) anyerror!void {
+    const index = self.value_stack.pop();
+    if (index.ty != .uint) {
+        const location = Location.getLocation(self.filename, self.src, index.offset);
+        std.log.err("Subscript index must evaluate to unsigned integer; {}", .{location});
+        return error.InvalidSubscript;
+    }
+    if (index.ty.uint >= container.ty.list.items.len) {
+        const location = Location.getLocation(self.filename, self.src, index.offset);
+        std.log.err("Subscript index out of bounds; {}", .{location});
+        return error.InvalidSubscript;
+    }
+
+    try self.value_stack.append(container.ty.list.items[index.ty.uint]);
+}
+
+fn evalLogicNot(self: *Vm) anyerror!void {
+    const value = self.value_stack.pop();
+
+    if (value.ty != .boolean) {
+        const location = Location.getLocation(self.filename, self.src, value.offset);
+        std.log.err("Logical not op `!` not allowed on {s}; {}", .{ @tagName(value.ty), location });
+        return error.InvalidLogicNot;
+    }
+
+    try self.value_stack.append(Value.new(.{ .boolean = !value.ty.boolean }, value.offset));
+}
+
+fn evalMap(self: *Vm) anyerror!void {
+    const num_entries = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+
+    var map_ptr = try self.allocator.create(std.StringHashMap(Value));
+    map_ptr.* = std.StringHashMap(Value).init(self.allocator);
+
+    if (num_entries == 0) {
+        try self.value_stack.append(Value.new(.{ .map = map_ptr }, 0));
+        return;
+    }
+
+    try map_ptr.ensureTotalCapacity(num_entries);
+    var i: usize = 0;
+    while (i < num_entries) : (i += 1) {
+        const value = self.value_stack.pop();
+        const key_val = self.value_stack.pop();
+        if (key_val.ty != .string) {
+            const location = Location.getLocation(self.filename, self.src, key_val.offset);
+            std.log.err("Map key must evaluate to a string; {}", .{location});
+            return error.InvalidMapKey;
+        }
+
+        try map_ptr.put(key_val.ty.string, value);
+    }
+    try self.value_stack.append(Value.new(.{ .map = map_ptr }, 0));
+}
+
+fn evalNegative(self: *Vm) anyerror!void {
+    const value = self.value_stack.pop();
+
+    switch (value.ty) {
+        .float => |f| try self.value_stack.append(Value.new(.{ .float = -f }, value.offset)),
+        .int => |i| try self.value_stack.append(Value.new(.{ .int = -i }, value.offset)),
+        .uint => |u| try self.value_stack.append(Value.new(.{ .int = -@intCast(isize, u) }, value.offset)),
+        else => {
+            const location = Location.getLocation(self.filename, self.src, value.offset);
+            std.log.err("Negative op `-` not allowed on {s}; {}", .{ @tagName(value.ty), location });
+            return error.InvalidNegative;
+        },
+    }
+}
+
+fn evalRange(self: *Vm) anyerror!void {
+    const inclusive = self.instructions.*[self.ip.* + 1] == 1;
+    const end = self.value_stack.pop();
+    const start = self.value_stack.pop();
+    if (start.ty != .uint or end.ty != .uint) {
+        const location = Location.getLocation(self.filename, self.src, start.offset);
+        std.log.err("Range indexes must evaluate to unsigned integers; {}", .{location});
+        return error.InvalidRange;
+    }
+
+    const start_uint = start.ty.uint;
+    const end_uint = if (inclusive) end.ty.uint + 1 else end.ty.uint;
+
+    try self.value_stack.append(Value.new(.{ .range = [2]usize{ start_uint, end_uint } }, start.offset));
+}
+
+fn evalScopeIn(self: *Vm) anyerror!void {
+    var child_scope_ptr = try self.allocator.create(Scope);
+    child_scope_ptr.* = Scope.init(self.allocator, self.scope);
+    self.scope = child_scope_ptr;
+    self.scope.break_point = self.instructions.*[self.ip.* + 1] == 1;
+}
+
+fn evalScopeOut(self: *Vm) anyerror!void {
+    // TODO: Try this
+    //var child_scope_ptr = self.scope;
+    //self.scope = child_scope_ptr.parent.?;
+    //child_scope_ptr.deinit();
+    //self.allocator.destroy(child_scope_ptr);
+    if (self.instructions.*[self.ip.* + 1] == 1) {
+        while (true) {
+            const child_scope = self.scope;
+            self.scope = child_scope.parent.?;
+            if (child_scope.break_point) break;
+        }
+    } else {
+        self.scope = self.scope.parent.?;
+    }
+}
+
+fn evalSubscript(self: *Vm) anyerror!void {
+    const container = self.value_stack.pop();
+    if (container.ty != .list) {
+        const location = Location.getLocation(self.filename, self.src, container.offset);
+        std.log.err("Subscript op not allowed on {s}; {}", .{ @tagName(container.ty), location });
+        return error.InvalidSubscript;
+    }
+    try self.evalListSubscript(container);
+}
+
 fn isTruthy(value: Value) bool {
     return switch (value.ty) {
         .boolean => |b| b,
@@ -910,4 +982,8 @@ test "Vm list literal" {
 test "Vm range" {
     try testLastValue("21 ..< 12", Value.new(.{ .range = [2]usize{ 21, 12 } }, 0));
     try testLastValue("21 ..= 12", Value.new(.{ .range = [2]usize{ 21, 13 } }, 0));
+}
+
+test "Vm subscript" {
+    try testLastValue("[1, 2112, 3][1]", Value.new(.{ .uint = 2112 }, 0));
 }

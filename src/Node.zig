@@ -24,6 +24,7 @@ pub const Type = union(enum) {
     loop: Loop,
     prefix: Prefix,
     range: Range,
+    subscript: Subscript,
 };
 
 offset: u16,
@@ -82,4 +83,9 @@ const Range = struct {
     inclusive: bool,
     from: *Node,
     to: *Node,
+};
+
+const Subscript = struct {
+    container: *Node,
+    index: *Node,
 };

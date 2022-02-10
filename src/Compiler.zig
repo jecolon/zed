@@ -70,6 +70,7 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .map => try self.compileMap(node),
         .prefix => try self.compilePrefix(node),
         .range => try self.compileRange(node),
+        .subscript => try self.compileSubscript(node),
     }
 }
 
@@ -82,7 +83,8 @@ fn compileAssign(self: *Compiler, node: Node) anyerror!void {
 }
 
 fn compileBreak(self: *Compiler) anyerror!void {
-    try self.pushInstruction(.scope_out_loop);
+    try self.pushInstruction(.scope_out);
+    try self.instructions.append(1);
     try self.pushInstruction(.jump);
     try self.jump_updates.?.updates.append(try self.pushZeroes(2));
 }
@@ -104,22 +106,27 @@ fn compileConditional(self: *Compiler, node: Node) anyerror!void {
     const jump_false_operand_index = try self.pushZeroes(2);
     // Then branch
     try self.pushInstruction(.scope_in);
+    try self.instructions.append(0);
     for (node.ty.conditional.then_branch) |n| try self.compile(n);
     try self.pushInstruction(.scope_out);
+    try self.instructions.append(0);
     // Unconditional jump
     try self.pushInstruction(.jump);
     const jump_operand_index = try self.pushZeroes(2);
     self.updateJumpIndex(jump_false_operand_index);
     // Else branch
     try self.pushInstruction(.scope_in);
+    try self.instructions.append(0);
     for (node.ty.conditional.else_branch) |n| try self.compile(n);
     try self.pushInstruction(.scope_out);
+    try self.instructions.append(0);
 
     self.updateJumpIndex(jump_operand_index);
 }
 
 fn compileContinue(self: *Compiler) anyerror!void {
-    try self.pushInstruction(.scope_out_loop);
+    try self.pushInstruction(.scope_out);
+    try self.instructions.append(1);
     try self.pushInstructionAndOperands(u16, .jump, &[_]u16{self.current_loop_start.?.index});
 }
 
@@ -213,9 +220,11 @@ fn compileLoop(self: *Compiler, node: Node) anyerror!void {
     try self.jump_updates.?.updates.append(try self.pushZeroes(2));
 
     // Body
-    try self.pushInstruction(.scope_in_loop);
+    try self.pushInstruction(.scope_in);
+    try self.instructions.append(1);
     for (node.ty.loop.body) |n| try self.compile(n);
-    try self.pushInstruction(.scope_out_loop);
+    try self.pushInstruction(.scope_out);
+    try self.instructions.append(1);
 
     // Unconditional jump
     try self.pushInstructionAndOperands(u16, .jump, &[_]u16{self.current_loop_start.?.index});
@@ -237,6 +246,12 @@ fn compileRange(self: *Compiler, node: Node) anyerror!void {
 fn compileReturn(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.func_return.*);
     try self.pushInstruction(.func_return);
+}
+
+fn compileSubscript(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.subscript.index.*);
+    try self.compile(node.ty.subscript.container.*);
+    try self.pushInstruction(.subscript);
 }
 
 // Helpers

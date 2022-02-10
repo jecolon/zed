@@ -26,11 +26,10 @@ pub const Opcode = enum(u8) {
     pop,
     range,
     scope_in,
-    scope_in_loop,
     scope_out,
-    scope_out_loop,
     store,
     sub,
+    subscript,
 
     pub const Def = struct {
         opcode: Opcode,
@@ -65,12 +64,11 @@ pub const Opcode = enum(u8) {
             23 => .{ .opcode = .neq, .bytes = 1 },
             24 => .{ .opcode = .pop, .bytes = 1 },
             25 => .{ .opcode = .range, .bytes = 2 },
-            26 => .{ .opcode = .scope_in, .bytes = 1 },
-            27 => .{ .opcode = .scope_in_loop, .bytes = 1 },
-            28 => .{ .opcode = .scope_out, .bytes = 1 },
-            29 => .{ .opcode = .scope_out_loop, .bytes = 1 },
-            30 => .{ .opcode = .store, .bytes = 1 },
-            31 => .{ .opcode = .sub, .bytes = 1 },
+            26 => .{ .opcode = .scope_in, .bytes = 2 },
+            27 => .{ .opcode = .scope_out, .bytes = 2 },
+            28 => .{ .opcode = .store, .bytes = 1 },
+            29 => .{ .opcode = .sub, .bytes = 1 },
+            30 => .{ .opcode = .subscript, .bytes = 1 },
             else => null,
         };
     }

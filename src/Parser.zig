@@ -178,6 +178,7 @@ fn infixFn(self: Parser) InfixFn {
         .op_define => Parser.parseDefine,
         .op_range_ex, .op_range_in => Parser.parseRange,
         .punct_equals => Parser.parseAssign,
+        .punct_lbracket => Parser.parseSubscript,
         .punct_lparen => Parser.parseCall,
 
         else => unreachable,
@@ -522,6 +523,19 @@ fn parseReturn(self: *Parser) anyerror!Node {
         node.ty.func_return.* = Node.new(.nil, self.currentOffset());
     }
 
+    return node;
+}
+
+fn parseSubscript(self: *Parser, container: Node) anyerror!Node {
+    var node = Node.new(.{ .subscript = .{
+        .container = try self.allocator.create(Node),
+        .index = undefined,
+    } }, self.currentOffset());
+    node.ty.subscript.container.* = container;
+    try self.expectNext();
+    node.ty.subscript.index = try self.allocator.create(Node);
+    node.ty.subscript.index.* = try self.parseExpression(.lowest);
+    _ = try self.expectTag(.punct_rbracket);
     return node;
 }
 
