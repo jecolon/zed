@@ -184,9 +184,12 @@ fn infixFn(self: Parser) InfixFn {
         => Parser.parseAssign,
 
         .op_define => Parser.parseDefine,
+        .op_elvis => Parser.parseElvis,
+        .op_elvis_eq => Parser.parseElvisAssign,
         .op_range_ex, .op_range_in => Parser.parseRange,
         .punct_lbracket => Parser.parseSubscript,
         .punct_lparen => Parser.parseCall,
+        .punct_question => Parser.parseTernary,
 
         else => unreachable,
     };
@@ -311,6 +314,51 @@ fn parseDefine(self: *Parser, name: Node) anyerror!Node {
     if (node.ty.define.rvalue.ty == .func) node.ty.define.rvalue.ty.func.name = name.ty.ident;
 
     return node;
+}
+
+fn parseElvis(self: *Parser, condition: Node) anyerror!Node {
+    const offset = self.currentOffset();
+    // Condition
+    var conditon_ptr = try self.allocator.create(Node);
+    conditon_ptr.* = condition;
+    // Then branch
+    var then_slice = try self.allocator.alloc(Node, 1);
+    then_slice[0] = condition;
+    // Else branch
+    var else_slice = try self.allocator.alloc(Node, 1);
+    try self.expectNext();
+    else_slice[0] = try self.parseExpression(.ternary);
+
+    return Node.new(.{ .conditional = .{
+        .condition = conditon_ptr,
+        .then_branch = then_slice,
+        .else_branch = else_slice,
+    } }, offset);
+}
+
+fn parseElvisAssign(self: *Parser, condition: Node) anyerror!Node {
+    const offset = self.currentOffset();
+    // Condition
+    var conditon_ptr = try self.allocator.create(Node);
+    conditon_ptr.* = condition;
+    // Then branch
+    var then_slice = try self.allocator.alloc(Node, 1);
+    then_slice[0] = condition;
+    // Else branch
+    const assign_node = Node.new(.{ .assign = .{
+        .lvalue = conditon_ptr,
+        .rvalue = try self.allocator.create(Node),
+    } }, offset);
+    try self.expectNext();
+    assign_node.ty.assign.rvalue.* = try self.parseExpression(.ternary);
+    var else_slice = try self.allocator.alloc(Node, 1);
+    else_slice[0] = assign_node;
+
+    return Node.new(.{ .conditional = .{
+        .condition = conditon_ptr,
+        .then_branch = then_slice,
+        .else_branch = else_slice,
+    } }, offset);
 }
 
 fn parseFloat(self: *Parser) anyerror!Node {
@@ -565,6 +613,28 @@ fn parseString(self: *Parser) anyerror!Node {
     const end = self.currentOffset() + self.currentLen() - 1;
 
     return Node.new(.{ .string = self.src[start..end] }, self.currentOffset());
+}
+
+fn parseTernary(self: *Parser, condition: Node) anyerror!Node {
+    const offset = self.currentOffset();
+    // Condition
+    var conditon_ptr = try self.allocator.create(Node);
+    conditon_ptr.* = condition;
+    // Then branch
+    try self.expectNext();
+    var then_slice = try self.allocator.alloc(Node, 1);
+    then_slice[0] = try self.parseExpression(.ternary);
+    // Else branch
+    try self.expectTag(.punct_colon);
+    var else_slice = try self.allocator.alloc(Node, 1);
+    try self.expectNext();
+    else_slice[0] = try self.parseExpression(.ternary);
+
+    return Node.new(.{ .conditional = .{
+        .condition = conditon_ptr,
+        .then_branch = then_slice,
+        .else_branch = else_slice,
+    } }, offset);
 }
 
 fn parseUint(self: *Parser) anyerror!Node {

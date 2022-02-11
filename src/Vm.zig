@@ -1177,3 +1177,18 @@ test "Vm combo assign" {
         \\m := ["a": 1, "b": 2]; m["a"] %= 1; m["a"]
     , Value.new(.{ .uint = 0 }, 0));
 }
+
+test "Vm ternary" {
+    try testLastValue("true ? 1 : 0", Value.new(.{ .uint = 1 }, 6));
+    try testLastValue("false ? 1 : 0", Value.new(.{ .uint = 0 }, 6));
+}
+
+test "Vm Elvis" {
+    try testLastValue("foo := 3; bar := foo ?: 2", Value.new(.{ .uint = 3 }, 6));
+    try testLastValue("foo := 0; bar := foo ?: 2", Value.new(.{ .uint = 2 }, 6));
+}
+
+test "Vm Elvis assign" {
+    try testLastValue("foo := 0; foo ?= 2; foo", Value.new(.{ .uint = 2 }, 6));
+    try testLastValue("foo := 2; foo ?= 3; foo", Value.new(.{ .uint = 2 }, 6));
+}
