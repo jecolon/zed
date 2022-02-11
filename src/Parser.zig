@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const Lexer = @import("Lexer.zig");
 const Location = @import("Location.zig");
 const Node = @import("Node.zig");
 const Token = @import("Token.zig");
@@ -758,12 +759,204 @@ fn parseSubscript(self: *Parser, container: Node) anyerror!Node {
     return node;
 }
 
-fn parseString(self: *Parser) anyerror!Node {
-    const start = self.currentOffset() + 1;
-    const end = self.currentOffset() + self.currentLen() - 1;
+// Strings
+fn processEscapes(self: *Parser, str: []const u8) anyerror![]const u8 {
+    if (!std.mem.containsAtLeast(u8, str, 1, "\\")) return str;
+    var copy = std.ArrayList(u8).init(self.allocator);
+    var i: usize = 0;
 
-    return Node.new(.{ .string = self.src[start..end] }, self.currentOffset());
+    while (i < str.len) : (i += 1) {
+        const byte = str[i];
+
+        if ('\\' == byte) {
+            if (i + 1 < str.len) {
+                const peek_byte = str[i + 1];
+
+                switch (peek_byte) {
+                    '"' => {
+                        i += 1;
+                        try copy.append('"');
+                    },
+                    'n' => {
+                        i += 1;
+                        try copy.append('\n');
+                    },
+                    'r' => {
+                        i += 1;
+                        try copy.append('\r');
+                    },
+                    't' => {
+                        i += 1;
+                        try copy.append('\t');
+                    },
+                    'u' => {
+                        i += 1;
+                        const ustart = i + 1; // 1 past u
+                        var j: usize = ustart;
+                        while (j < str.len) : (j += 1) {
+                            const ubyte = str[j];
+
+                            switch (ubyte) {
+                                '0'...'9',
+                                'a'...'f',
+                                'A'...'F',
+                                => i += 1,
+                                else => break,
+                            }
+                        }
+
+                        const code = try std.fmt.parseInt(u21, str[ustart..j], 16);
+
+                        var ubuf: [4]u8 = undefined;
+                        if (std.unicode.utf8Encode(code, &ubuf)) |ulen| {
+                            try copy.appendSlice(ubuf[0..ulen]);
+                        } else |_| {
+                            const ulen = std.unicode.utf8Encode(0xFFFD, &ubuf) catch unreachable;
+                            try copy.appendSlice(ubuf[0..ulen]);
+                        }
+                    },
+
+                    else => continue,
+                }
+            }
+        } else try copy.append(byte);
+    }
+
+    return copy.items;
 }
+
+fn parseIpol(self: *Parser, src: []const u8, offset: u16) anyerror!Node.Ipol {
+    var parsable = src;
+    var format: ?[]const u8 = null;
+
+    if ('#' == src[0]) {
+        var end: usize = 1;
+        var reached_eof = true;
+
+        while (end < src.len) : (end += 1) {
+            if ('#' == src[end]) {
+                reached_eof = false;
+                break;
+            }
+        }
+
+        if (reached_eof) {
+            const location = Location.getLocation(self.filename, self.src, offset);
+            std.log.err("Incomplete format spec; {}", .{location});
+            return error.InvalidFormat;
+        }
+
+        format = src[1..end];
+        parsable = src[end + 1 ..];
+    }
+
+    var sub_lexer = Lexer{
+        .allocator = self.allocator,
+        .filename = self.filename,
+        .src = parsable,
+    };
+    const sub_tokens = try sub_lexer.lex();
+    var sub_parser = Parser{
+        .allocator = self.allocator,
+        .filename = self.filename,
+        .src = parsable,
+        .tokens = sub_tokens,
+    };
+    const sub_program = try sub_parser.parse();
+    const sub_nodes = sub_program.rules;
+
+    // Avoid format of stmt_end bug.
+    var end = sub_nodes.len;
+    if (sub_nodes[end - 1].ty == .stmt_end) end = end - 1;
+
+    return Node.Ipol{ .format = format, .nodes = sub_nodes[0..end] };
+}
+
+fn parseString(self: *Parser) anyerror!Node {
+    const offset = self.currentOffset();
+    const src = try self.processEscapes(self.src[self.currentOffset() + 1 .. self.currentOffset() + self.currentLen() - 1]);
+
+    const src_len = src.len;
+    var start: usize = 0;
+    var i: usize = 0;
+
+    var segments = std.ArrayList(Node.Segment).init(self.allocator);
+
+    while (i < src_len) {
+        const byte = src[i];
+
+        if ('{' == byte and i + 1 < src_len and '{' == src[i + 1]) {
+            i += 2;
+            continue;
+        }
+        if ('}' == byte and i + 1 < src_len and '}' == src[i + 1]) {
+            i += 2;
+            continue;
+        }
+
+        if ('{' == byte) {
+            if (i > start) {
+                const str_segment = Node.Segment{ .plain = src[start..i] };
+                try segments.append(str_segment);
+            }
+
+            start = i + 1;
+            var end: usize = i + 1;
+            var nest_level: usize = 0;
+            var reached_eof = false;
+
+            while (end < src_len) {
+                const ibyte = src[end];
+
+                if ('{' == ibyte and end + 1 < src_len and '{' == src[end + 1]) {
+                    end += 2;
+                    continue;
+                }
+                if ('}' == ibyte and end + 1 < src_len and '}' == src[end + 1]) {
+                    end += 2;
+                    continue;
+                }
+
+                if ('{' == ibyte) nest_level += 1;
+
+                if ('}' == ibyte) {
+                    if (nest_level > 0) {
+                        nest_level -= 1;
+                    } else {
+                        reached_eof = false;
+                        break;
+                    }
+                }
+
+                end += 1;
+            }
+
+            if (reached_eof) {
+                const location = Location.getLocation(self.filename, self.src, offset);
+                std.log.err("Incomplete string interpolation; {}", .{location});
+                return error.InvalidInterpolation;
+            }
+
+            const ipol_segment = Node.Segment{ .ipol = try self.parseIpol(src[start..end], offset + @intCast(u16, start)) };
+            try segments.append(ipol_segment);
+
+            i = end + 1;
+            start = i;
+            continue;
+        }
+
+        i += 1;
+    }
+
+    if (start < src_len) {
+        const str_segment = Node.Segment{ .plain = src[start..src_len] };
+        try segments.append(str_segment);
+    }
+
+    return Node.new(.{ .string = segments.items }, offset);
+}
+
+// End Strings
 
 fn parseTernary(self: *Parser, condition: Node) anyerror!Node {
     const offset = self.currentOffset();
@@ -916,9 +1109,12 @@ test "Parser booleans" {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const input = "false true";
-    const Lexer = @import("Lexer.zig");
-    var lexer = Lexer{ .filename = "inline", .src = input };
-    var tokens = try lexer.lex(arena.allocator());
+    var lexer = Lexer{
+        .allocator = arena.allocator(),
+        .filename = "inline",
+        .src = input,
+    };
+    var tokens = try lexer.lex();
     var parser = Parser{
         .allocator = arena.allocator(),
         .filename = "inline",

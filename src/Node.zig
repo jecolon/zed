@@ -12,7 +12,7 @@ pub const Type = union(enum) {
     loop_continue,
     nil,
     stmt_end,
-    string: []const u8,
+    string: []const Segment,
     uint: usize,
 
     assign: Assign,
@@ -93,6 +93,16 @@ const Range = struct {
     inclusive: bool,
     from: *Node,
     to: *Node,
+};
+
+pub const Ipol = struct {
+    format: ?[]const u8,
+    nodes: []Node,
+};
+
+pub const Segment = union(enum) {
+    ipol: Ipol,
+    plain: []const u8,
 };
 
 const Subscript = struct {

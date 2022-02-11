@@ -3,6 +3,7 @@ const std = @import("std");
 const Location = @import("Location.zig");
 const Token = @import("Token.zig");
 
+allocator: std.mem.Allocator,
 filename: []const u8,
 offset: ?u16 = null,
 src: []const u8,
@@ -10,9 +11,9 @@ src: []const u8,
 const Lexer = @This();
 
 // API
-pub fn lex(self: *Lexer, allocator: std.mem.Allocator) !std.MultiArrayList(Token) {
+pub fn lex(self: *Lexer) !std.MultiArrayList(Token) {
     var tokens = std.MultiArrayList(Token){};
-    errdefer tokens.deinit(allocator);
+    errdefer tokens.deinit(self.allocator);
     var after_newline = false;
 
     while (true) {
@@ -23,11 +24,11 @@ pub fn lex(self: *Lexer, allocator: std.mem.Allocator) !std.MultiArrayList(Token
                 after_newline = true;
             } else {
                 if (after_newline) {
-                    if (token.is(.punct_lparen) or token.is(.punct_lbracket)) try tokens.append(allocator, self.oneChar(.punct_semicolon));
+                    if (token.is(.punct_lparen) or token.is(.punct_lbracket)) try tokens.append(self.allocator, self.oneChar(.punct_semicolon));
                     after_newline = false;
                 }
 
-                try tokens.append(allocator, token);
+                try tokens.append(self.allocator, token);
             }
         } else break;
     }
@@ -449,8 +450,12 @@ fn reportErr(self: Lexer, err: anyerror, offset: u16) anyerror {
 
 // Tests
 fn testLex(allocator: std.mem.Allocator, input: []const u8) !std.MultiArrayList(Token) {
-    var lexer = Lexer{ .filename = "inline", .src = input };
-    return try lexer.lex(allocator);
+    var lexer = Lexer{
+        .allocator = allocator,
+        .filename = "inline",
+        .src = input,
+    };
+    return try lexer.lex();
 }
 
 fn singleTokenTests(tokens: std.MultiArrayList(Token), tag: Token.Tag, len: u16) !void {

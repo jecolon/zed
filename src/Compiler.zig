@@ -52,7 +52,6 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .int => |int| try self.pushConstant(Value.new(.{ .int = int }, node.offset)),
         .nil => try self.pushConstant(Value.new(.nil, node.offset)),
         .stmt_end => try self.pushInstruction(.pop),
-        .string => |s| try self.pushConstant(Value.new(.{ .string = s }, node.offset)),
         .uint => |u| try self.pushConstant(Value.new(.{ .uint = u }, node.offset)),
 
         .assign => try self.compileAssign(node),
@@ -70,6 +69,7 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .map => try self.compileMap(node),
         .prefix => try self.compilePrefix(node),
         .range => try self.compileRange(node),
+        .string => try self.compileString(node),
         .subscript => try self.compileSubscript(node),
     }
 }
@@ -256,6 +256,35 @@ fn compileReturn(self: *Compiler, node: Node) anyerror!void {
     try self.pushInstruction(.func_return);
 }
 
+fn compileString(self: *Compiler, node: Node) anyerror!void {
+    const len = node.ty.string.len;
+    var i: usize = 1;
+    while (i <= len) : (i += 1) {
+        const segment = node.ty.string[len - i];
+
+        switch (segment) {
+            .plain => |plain| {
+                const value = Value.new(.{ .string = plain }, node.offset);
+                try self.pushConstant(value);
+            },
+            .ipol => |ipol| {
+                try self.pushInstruction(.scope_in);
+                try self.instructions.append(0);
+                for (ipol.nodes) |n| try self.compile(n);
+                try self.pushInstruction(.scope_out);
+                try self.instructions.append(0);
+
+                if (ipol.format) |spec| {
+                    try self.pushConstant(Value.new(.{ .string = spec }, node.offset));
+                    try self.pushInstruction(.format);
+                }
+            },
+        }
+    }
+
+    try self.pushInstructionAndOperands(u16, .string, &[_]u16{@intCast(u16, len)});
+}
+
 fn compileSubscript(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.subscript.index.*);
     try self.compile(node.ty.subscript.container.*);
@@ -351,8 +380,12 @@ test "Compiler booleans" {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const input = "false true";
-    var lexer = Lexer{ .filename = "inline", .src = input };
-    var tokens = try lexer.lex(arena.allocator());
+    var lexer = Lexer{
+        .allocator = arena.allocator(),
+        .filename = "inline",
+        .src = input,
+    };
+    var tokens = try lexer.lex();
     var parser = Parser{
         .allocator = arena.allocator(),
         .filename = "inline",

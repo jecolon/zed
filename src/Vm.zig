@@ -6,6 +6,7 @@ const Node = @import("Node.zig");
 const Scope = @import("Scope.zig");
 const Value = @import("Value.zig");
 const GraphemeIterator = @import("ziglyph").GraphemeIterator;
+const runtimePrint = @import("fmt.zig").runtimePrint;
 
 const Frame = struct {
     instructions: []const u8,
@@ -194,6 +195,41 @@ pub fn run(self: *Vm) !void {
             .set => {
                 try self.evalSet();
                 self.ip.* += 2;
+            },
+
+            .string => {
+                const len = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+                var buf = std.ArrayList(u8).init(self.allocator);
+                var writer = buf.writer();
+                var i: usize = 0;
+                while (i < len) : (i += 1) _ = try writer.print("{}", .{self.value_stack.pop()});
+                try self.value_stack.append(Value.new(.{ .string = buf.items }, 0));
+
+                self.ip.* += 3;
+            },
+
+            .format => {
+                const spec = self.value_stack.pop();
+                if (spec.ty != .string) {
+                    const location = Location.getLocation(self.filename, self.src, spec.offset);
+                    std.log.err("Invalid format spec; {}", .{location});
+                    return error.InvalidFormat;
+                }
+
+                const value = self.value_stack.pop();
+                var buf = std.ArrayList(u8).init(self.allocator);
+                var writer = buf.writer();
+                try runtimePrint(
+                    self.allocator,
+                    self.filename,
+                    self.src,
+                    spec.ty.string,
+                    value,
+                    writer,
+                    spec.offset,
+                );
+                try self.value_stack.append(Value.new(.{ .string = buf.items }, value.offset));
+                self.ip.* += 1;
             },
         }
     }
@@ -1492,8 +1528,12 @@ fn testLastValue(input: []const u8, expected: Value) !void {
     const allocator = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
-    var lexer = Lexer{ .filename = "inline", .src = input };
-    var tokens = try lexer.lex(arena.allocator());
+    var lexer = Lexer{
+        .allocator = arena.allocator(),
+        .filename = "inline",
+        .src = input,
+    };
+    var tokens = try lexer.lex();
     var parser = Parser{
         .allocator = arena.allocator(),
         .filename = "inline",
@@ -1556,8 +1596,12 @@ fn testLastValueWithOutput(input: []const u8, expected: Value, output: []const u
     const allocator = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
-    var lexer = Lexer{ .filename = "inline", .src = input };
-    var tokens = try lexer.lex(arena.allocator());
+    var lexer = Lexer{
+        .allocator = arena.allocator(),
+        .filename = "inline",
+        .src = input,
+    };
+    var tokens = try lexer.lex();
     var parser = Parser{
         .allocator = arena.allocator(),
         .filename = "inline",
@@ -2099,12 +2143,12 @@ test "Vm method builtins" {
     , Value.new(.{ .boolean = true }, 0));
     try testLastValue("[2, 3, 1].indexOf(1)", Value.new(.{ .uint = 2 }, 0));
     try testLastValue("[2, 3, 1].indexOf(4)", Value.new(.nil, 0));
-    //    testLastValue(
-    //        \\"H\u65\u301llo".indexOf("l")
-    //    , Value.new(.{ .uint = 2 }, 0));
-    //    testLastValue(
-    //        \\"H\u65\u301llo".lastIndexOf("l")
-    //    , Value.new(.{ .uint = 3 }, 0));
+    try testLastValue(
+        \\"H\u65\u301llo".indexOf("l")
+    , Value.new(.{ .uint = 2 }, 0));
+    try testLastValue(
+        \\"H\u65\u301llo".lastIndexOf("l")
+    , Value.new(.{ .uint = 3 }, 0));
     try testLastValue(
         \\"foo,bar,baz".split(",")[1]
     , Value.new(.{ .string = "bar" }, 0));
@@ -2126,13 +2170,16 @@ test "Vm method builtins" {
     try testLastValue(
         \\[1, 2, 3].reduce(1) { acc * it }
     , Value.new(.{ .uint = 6 }, 0));
-    //    testLastValue(
-    //        \\"H\u65\u301llo".chars()[1]
-    //    , Value.new(.{ .string = "\u{65}\u{301}" }, 0));
-    //try testLastValueWithOutput(
-    //    \\print("foo", 1, 2, 3.14, "{#d:0>3# 1}")
-    //, Value.new(.nil, 0), "foo 1 2 3.14 001");
     try testLastValueWithOutput(
         \\print("foo", 1, 2, 3.14)
     , Value.new(.nil, 0), "foo 1 2 3.14");
+    try testLastValueWithOutput(
+        \\print("foo", 1, 2, 3.14, "foo {1}")
+    , Value.new(.nil, 0), "foo 1 2 3.14 foo 1");
+    try testLastValueWithOutput(
+        \\print("foo", 1, 2, 3.14, "{#d:0>3# 1}")
+    , Value.new(.nil, 0), "foo 1 2 3.14 001");
+    try testLastValue(
+        \\"H\u65\u301llo".chars()[1]
+    , Value.new(.{ .string = "\u{65}\u{301}" }, 0));
 }
