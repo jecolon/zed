@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Bytecode = @import("Bytecode.zig");
 const Location = @import("Location.zig");
+const Node = @import("Node.zig");
 const Scope = @import("Scope.zig");
 const Value = @import("Value.zig");
 
@@ -147,7 +148,7 @@ pub fn run(self: *Vm) !void {
             },
             .store => {
                 try self.evalStore();
-                self.ip.* += 1;
+                self.ip.* += 2;
             },
 
             // Functions
@@ -189,7 +190,7 @@ pub fn run(self: *Vm) !void {
 
             .set => {
                 try self.evalSet();
-                self.ip.* += 1;
+                self.ip.* += 2;
             },
         }
     }
@@ -325,14 +326,36 @@ fn evalLoad(self: *Vm) anyerror!void {
 
 fn evalStore(self: *Vm) anyerror!void {
     const name = self.value_stack.pop();
-    const value = self.value_stack.pop();
-    if (!self.scope.isDefined(name.ty.string)) {
-        const location = Location.getLocation(self.filename, self.src, name.offset);
-        std.log.err("{s} not defined; {}", .{ name.ty.string, location });
-        return error.NameNotDefined;
+    const rvalue = self.value_stack.pop();
+    const combo = @intToEnum(Node.Combo, self.instructions.*[self.ip.* + 1]);
+
+    if (combo == .none) {
+        if (!self.scope.isDefined(name.ty.string)) {
+            const location = Location.getLocation(self.filename, self.src, name.offset);
+            std.log.err("{s} not defined; {}", .{ name.ty.string, location });
+            return error.NameNotDefined;
+        }
+        try self.scope.update(name.ty.string, rvalue);
+        try self.value_stack.append(rvalue);
+    } else {
+        const old_value = self.scope.load(name.ty.string) orelse {
+            const location = Location.getLocation(self.filename, self.src, name.offset);
+            std.log.err("{s} not defined; {}", .{ name.ty.string, location });
+            return error.NameNotDefined;
+        };
+
+        const new_value = switch (combo) {
+            .none => unreachable,
+            .add => try old_value.add(rvalue),
+            .sub => try old_value.sub(rvalue),
+            .mul => try old_value.mul(rvalue),
+            .div => try old_value.div(rvalue),
+            .mod => try old_value.mod(rvalue),
+        };
+
+        try self.scope.update(name.ty.string, new_value);
+        try self.value_stack.append(new_value);
     }
-    try self.scope.update(name.ty.string, value);
-    try self.value_stack.append(value);
 }
 
 fn evalLogicAndOr(self: *Vm, opcode: Bytecode.Opcode) anyerror!void {
@@ -551,10 +574,26 @@ fn evalListSet(self: *Vm, container: Value) anyerror!void {
         return error.InvalidSet;
     }
 
-    const rvalue = self.value_stack.pop();
-    container.ty.list.items[index.ty.uint] = rvalue;
+    const combo = @intToEnum(Node.Combo, self.instructions.*[self.ip.* + 1]);
 
-    try self.value_stack.append(rvalue);
+    if (combo == .none) {
+        const rvalue = self.value_stack.pop();
+        container.ty.list.items[index.ty.uint] = rvalue;
+        try self.value_stack.append(rvalue);
+    } else {
+        const old_value = container.ty.list.items[index.ty.uint];
+        const rvalue = self.value_stack.pop();
+        const new_value = switch (combo) {
+            .none => unreachable,
+            .add => try old_value.add(rvalue),
+            .sub => try old_value.sub(rvalue),
+            .mul => try old_value.mul(rvalue),
+            .div => try old_value.div(rvalue),
+            .mod => try old_value.mod(rvalue),
+        };
+        container.ty.list.items[index.ty.uint] = new_value;
+        try self.value_stack.append(new_value);
+    }
 }
 fn evalMapSet(self: *Vm, container: Value) anyerror!void {
     const key = self.value_stack.pop();
@@ -564,10 +603,30 @@ fn evalMapSet(self: *Vm, container: Value) anyerror!void {
         return error.InvalidSet;
     }
 
+    const combo = @intToEnum(Node.Combo, self.instructions.*[self.ip.* + 1]);
     const rvalue = self.value_stack.pop();
-    try container.ty.map.put(key.ty.string, rvalue);
 
-    try self.value_stack.append(rvalue);
+    if (combo == .none) {
+        try container.ty.map.put(key.ty.string, rvalue);
+        try self.value_stack.append(rvalue);
+    } else {
+        if (container.ty.map.get(key.ty.string)) |old_value| {
+            const new_value = switch (combo) {
+                .none => unreachable,
+                .add => try old_value.add(rvalue),
+                .sub => try old_value.sub(rvalue),
+                .mul => try old_value.mul(rvalue),
+                .div => try old_value.div(rvalue),
+                .mod => try old_value.mod(rvalue),
+            };
+            try container.ty.map.put(key.ty.string, new_value);
+            try self.value_stack.append(new_value);
+        } else {
+            const location = Location.getLocation(self.filename, self.src, key.offset);
+            std.log.err("{s} not found in map; {}", .{ key.ty.string, location });
+            return error.KeyNotFound;
+        }
+    }
 }
 
 fn evalSubscript(self: *Vm) anyerror!void {
@@ -1087,4 +1146,34 @@ test "Vm subscript assign" {
     try testLastValue(
         \\m := ["a": 1, "b": 2, "c": 3]; m["b"] = 2112; m["b"]
     , Value.new(.{ .uint = 2112 }, 0));
+}
+
+test "Vm combo assign" {
+    try testLastValue("i := 0; i += 1; i", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("i := 1; i -= 1; i", Value.new(.{ .uint = 0 }, 0));
+    try testLastValue("i := 1; i *= 1; i", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("i := 1; i /= 1; i", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("i := 1; i %= 1; i", Value.new(.{ .uint = 0 }, 0));
+
+    try testLastValue("l := [0,1,2]; l[0] += 1; l[0]", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("l := [1,2,3]; l[0] -= 1; l[0]", Value.new(.{ .uint = 0 }, 0));
+    try testLastValue("l := [1,2,3]; l[0] *= 1; l[0]", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("l := [1,2,3]; l[0] /= 1; l[0]", Value.new(.{ .uint = 1 }, 0));
+    try testLastValue("l := [1,2,3]; l[0] %= 1; l[0]", Value.new(.{ .uint = 0 }, 0));
+
+    try testLastValue(
+        \\m := ["a": 1, "b": 2]; m["a"] += 1; m["a"]
+    , Value.new(.{ .uint = 2 }, 0));
+    try testLastValue(
+        \\m := ["a": 1, "b": 2]; m["a"] -= 1; m["a"]
+    , Value.new(.{ .uint = 0 }, 0));
+    try testLastValue(
+        \\m := ["a": 1, "b": 2]; m["a"] *= 1; m["a"]
+    , Value.new(.{ .uint = 1 }, 0));
+    try testLastValue(
+        \\m := ["a": 1, "b": 2]; m["a"] /= 1; m["a"]
+    , Value.new(.{ .uint = 1 }, 0));
+    try testLastValue(
+        \\m := ["a": 1, "b": 2]; m["a"] %= 1; m["a"]
+    , Value.new(.{ .uint = 0 }, 0));
 }

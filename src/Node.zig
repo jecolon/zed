@@ -47,7 +47,17 @@ const Conditional = struct {
     else_branch: []Node,
 };
 
+pub const Combo = enum {
+    none,
+    add,
+    sub,
+    mul,
+    div,
+    mod,
+};
+
 const Assign = struct {
+    combo: Combo = .none,
     lvalue: *Node,
     rvalue: *Node,
 };

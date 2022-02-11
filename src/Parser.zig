@@ -175,9 +175,16 @@ fn infixFn(self: Parser) InfixFn {
         .kw_or,
         => Parser.parseInfix,
 
+        .punct_equals,
+        .op_add_eq,
+        .op_sub_eq,
+        .op_mul_eq,
+        .op_div_eq,
+        .op_mod_eq,
+        => Parser.parseAssign,
+
         .op_define => Parser.parseDefine,
         .op_range_ex, .op_range_in => Parser.parseRange,
-        .punct_equals => Parser.parseAssign,
         .punct_lbracket => Parser.parseSubscript,
         .punct_lparen => Parser.parseCall,
 
@@ -216,8 +223,22 @@ fn parseAssign(self: *Parser, lvalue: Node) anyerror!Node {
         return error.InvalidAssign;
     }
 
+    const combo: Node.Combo = switch (self.currentTag()) {
+        .punct_equals => .none,
+        .op_add_eq => .add,
+        .op_sub_eq => .sub,
+        .op_mul_eq => .mul,
+        .op_div_eq => .div,
+        .op_mod_eq => .mod,
+        else => unreachable,
+    };
+
     var node = Node.new(
-        .{ .assign = .{ .lvalue = try self.allocator.create(Node), .rvalue = try self.allocator.create(Node) } },
+        .{ .assign = .{
+            .combo = combo,
+            .lvalue = try self.allocator.create(Node),
+            .rvalue = try self.allocator.create(Node),
+        } },
         self.currentOffset(),
     );
     node.ty.assign.lvalue.* = lvalue;

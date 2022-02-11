@@ -81,10 +81,12 @@ fn compileAssign(self: *Compiler, node: Node) anyerror!void {
     if (node.ty.assign.lvalue.ty == .ident) {
         try self.pushConstant(Value.new(.{ .string = node.ty.assign.lvalue.ty.ident }, node.ty.assign.lvalue.offset));
         try self.pushInstruction(.store);
+        try self.instructions.append(@enumToInt(node.ty.assign.combo));
     } else {
         try self.compile(node.ty.assign.lvalue.ty.subscript.index.*);
         try self.compile(node.ty.assign.lvalue.ty.subscript.container.*);
         try self.pushInstruction(.set);
+        try self.instructions.append(@enumToInt(node.ty.assign.combo));
     }
 }
 
