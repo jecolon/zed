@@ -1,7 +1,41 @@
 const std = @import("std");
 
+const Builtin = enum {
+    atan2,
+    chars,
+    contains,
+    cos,
+    each,
+    exp,
+    filter,
+    indexOf,
+    int,
+    join,
+    keys,
+    lastIndexOf,
+    len,
+    log,
+    map,
+    max,
+    mean,
+    median,
+    min,
+    mode,
+    print,
+    rand,
+    reduce,
+    reverse,
+    sin,
+    sort,
+    sqrt,
+    split,
+    stdev,
+    values,
+};
+
 pub const Type = union(enum) {
     boolean: bool,
+    builtin: Builtin,
     float: f64,
     func: Function,
     int: isize,
@@ -25,6 +59,7 @@ pub fn new(ty: Type, offset: u16) Value {
 pub fn copy(self: Value, allocator: std.mem.Allocator) anyerror!Value {
     return switch (self.ty) {
         .boolean => self,
+        .builtin => self,
         .float => self,
         .func => try self.copyFunc(allocator),
         .int => self,
@@ -145,7 +180,7 @@ pub fn eql(self: Value, other: Value) bool {
 pub fn eqlType(self: Value, other: Value) bool {
     return switch (self.ty) {
         .boolean => other.ty == .boolean,
-        //.builtin => other.ty == .builtin,
+        .builtin => other.ty == .builtin,
         .float => other.ty == .float,
         .func => other.ty == .func,
         .int => other.ty == .int,

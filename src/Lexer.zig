@@ -475,6 +475,26 @@ test "Lex booleans" {
     try std.testing.expectEqual(@as(usize, 5), tokens.items(.len)[2]);
 }
 
+test "Lex auto semicolons" {
+    const allocator = std.testing.allocator;
+    var tokens = try testLex(allocator, "}\n[");
+    errdefer tokens.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 3), tokens.items(.tag).len);
+    try std.testing.expectEqual(Token.Tag.punct_rbrace, tokens.items(.tag)[0]);
+    try std.testing.expectEqual(Token.Tag.punct_semicolon, tokens.items(.tag)[1]);
+    try std.testing.expectEqual(Token.Tag.punct_lbracket, tokens.items(.tag)[2]);
+    tokens.deinit(allocator);
+
+    tokens = try testLex(allocator, "}\n(");
+
+    try std.testing.expectEqual(@as(usize, 3), tokens.items(.tag).len);
+    try std.testing.expectEqual(Token.Tag.punct_rbrace, tokens.items(.tag)[0]);
+    try std.testing.expectEqual(Token.Tag.punct_semicolon, tokens.items(.tag)[1]);
+    try std.testing.expectEqual(Token.Tag.punct_lparen, tokens.items(.tag)[2]);
+    tokens.deinit(allocator);
+}
+
 test "Lex ident" {
     const allocator = std.testing.allocator;
     var tokens = try testLex(allocator, "foo");

@@ -28,8 +28,11 @@ pub fn parse(self: *Parser) !Program {
     return Program{ .rules = rules.items };
 }
 
-fn next(self: *Parser) !?Node {
-    return if (self.advance()) try self.parseExpression(.lowest) else null;
+fn next(self: *Parser) anyerror!?Node {
+    return if (self.advance()) switch (self.currentTag()) {
+        .punct_semicolon => try self.next(),
+        else => try self.parseExpression(.lowest),
+    } else null;
 }
 
 // Pratt Parser
@@ -153,6 +156,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
 
         .punct_lbrace => Parser.parseFunc,
         .punct_lbracket => Parser.parseList,
+        .punct_lparen => Parser.parseGrouped,
 
         else => null,
     };
@@ -187,6 +191,8 @@ fn infixFn(self: Parser) InfixFn {
         .op_elvis => Parser.parseElvis,
         .op_elvis_eq => Parser.parseElvisAssign,
         .op_range_ex, .op_range_in => Parser.parseRange,
+
+        .punct_dot => Parser.parseBuiltin,
         .punct_lbracket => Parser.parseSubscript,
         .punct_lparen => Parser.parseCall,
         .punct_question => Parser.parseTernary,
@@ -212,8 +218,6 @@ fn parseExpression(self: *Parser, precedence: Precedence) anyerror!Node {
         const ifn = self.infixFn();
         left = try ifn(self, left);
     }
-
-    _ = self.skipTag(.punct_semicolon);
 
     return left;
 }
@@ -262,6 +266,145 @@ fn parseBreak(self: *Parser) anyerror!Node {
     }
 
     return Node.new(.loop_break, self.currentOffset());
+}
+
+fn parseBuiltin(self: *Parser, object: Node) anyerror!Node {
+    try self.expectNext();
+
+    return switch (self.currentTag()) {
+        .pd_chars => return self.parseNoArgBuiltin(object),
+        .pd_contains => self.parseOneArgBuiltin(object),
+        .pd_each => self.parseOneArgBuiltin(object),
+        .pd_filter => self.parseOneArgBuiltin(object),
+        .pd_indexOf => self.parseOneArgBuiltin(object),
+        .pd_join => self.parseOneArgBuiltin(object),
+        .pd_keys => return self.parseNoArgBuiltin(object),
+        .pd_lastIndexOf => self.parseOneArgBuiltin(object),
+        .pd_len => self.parseNoArgBuiltin(object),
+        .pd_map => self.parseOneArgBuiltin(object),
+        .pd_max => self.parseNoArgBuiltin(object),
+        .pd_mean => self.parseNoArgBuiltin(object),
+        .pd_median => self.parseNoArgBuiltin(object),
+        .pd_min => self.parseNoArgBuiltin(object),
+        .pd_mode => self.parseNoArgBuiltin(object),
+        .pd_reduce => self.parseTwoArgBuiltin(object),
+        .pd_reverse => self.parseNoArgBuiltin(object),
+        .pd_sort => self.parseNoArgBuiltin(object),
+        .pd_split => self.parseOneArgBuiltin(object),
+        .pd_stdev => self.parseNoArgBuiltin(object),
+        .pd_values => self.parseNoArgBuiltin(object),
+
+        else => {
+            const location = Location.getLocation(self.filename, self.src, self.currentOffset());
+            std.log.err("Undefined builtin call; {}", .{location});
+            return error.InvalidBuiltin;
+        },
+    };
+}
+fn parseNoArgBuiltin(self: *Parser, object: Node) anyerror!Node {
+    const tag = self.currentTag();
+    const offset = self.currentOffset();
+
+    try self.expectTag(.punct_lparen);
+    try self.expectTag(.punct_rparen);
+
+    const func_ptr = try self.allocator.create(Node);
+    const bi_name = switch (tag) {
+        .pd_chars => "chars",
+        .pd_len => "len",
+        .pd_keys => "keys",
+        .pd_max => "max",
+        .pd_mean => "mean",
+        .pd_median => "median",
+        .pd_min => "min",
+        .pd_mode => "mode",
+        .pd_reverse => "reverse",
+        .pd_sort => "sort",
+        .pd_stdev => "stdev",
+        .pd_values => "values",
+        else => unreachable,
+    };
+
+    func_ptr.* = Node.new(.{ .ident = bi_name }, offset);
+    const args = try self.allocator.alloc(Node, 1);
+    args[0] = object;
+
+    return Node.new(.{ .call = .{ .callee = func_ptr, .args = args } }, offset);
+}
+
+fn parseOneArgBuiltin(self: *Parser, object: Node) anyerror!Node {
+    const tag = self.currentTag();
+    const offset = self.currentOffset();
+
+    try self.expectTag(.punct_lparen);
+    try self.expectNext();
+    var arg: Node = undefined;
+
+    if (self.currentIs(.punct_rparen)) {
+        try self.expectTag(.punct_lbrace);
+        arg = try self.parseExpression(.call);
+    } else {
+        arg = try self.parseExpression(.lowest);
+        try self.expectTag(.punct_rparen);
+    }
+
+    const bi_ptr = try self.allocator.create(Node);
+    const bi_name = switch (tag) {
+        .pd_contains => "contains",
+        .pd_each => "each",
+        .pd_filter => "filter",
+        .pd_indexOf => "indexOf",
+        .pd_join => "join",
+        .pd_lastIndexOf => "lastIndexOf",
+        .pd_map => "map",
+        .pd_split => "split",
+        else => unreachable,
+    };
+    bi_ptr.* = Node.new(.{ .ident = bi_name }, offset);
+
+    const args = try self.allocator.alloc(Node, 2);
+    args[0] = object;
+    args[1] = arg;
+
+    return Node.new(.{ .call = .{ .callee = bi_ptr, .args = args } }, offset);
+}
+
+fn parseTwoArgBuiltin(self: *Parser, object: Node) anyerror!Node {
+    const tag = self.currentTag();
+    const offset = self.currentOffset();
+
+    try self.expectTag(.punct_lparen);
+    try self.expectNext();
+    const arg_1 = try self.parseExpression(.lowest);
+    try self.expectNext();
+    var arg_2: Node = undefined;
+
+    if (self.currentIs(.punct_comma)) {
+        try self.expectNext();
+        arg_2 = try self.parseExpression(.lowest);
+        try self.expectTag(.punct_rparen);
+    } else if (self.currentIs(.punct_rparen)) {
+        try self.expectTag(.punct_lbrace);
+        arg_2 = try self.parseExpression(.call);
+    } else {
+        const location = Location.getLocation(self.filename, self.src, offset);
+        std.log.err("Expected comma or right paren; {}", .{location});
+        return error.InvalidBuiltin;
+    }
+
+    const bi_ptr = try self.allocator.create(Node);
+    const bi_name = switch (tag) {
+        .pd_reduce => "reduce",
+        else => unreachable,
+    };
+    bi_ptr.* = Node.new(.{ .ident = bi_name }, offset);
+
+    const args = try self.allocator.alloc(Node, 3);
+    args[0] = object;
+    args[1] = arg_1;
+    args[2] = arg_2;
+
+    return Node.new(.{ .call = .{ .callee = bi_ptr, .args = args } }, offset);
 }
 
 fn parseCall(self: *Parser, callee: Node) anyerror!Node {
@@ -416,6 +559,13 @@ fn parseGlobal(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
     return Node.new(.{ .ident = self.src[start..end] }, start);
+}
+
+fn parseGrouped(self: *Parser) anyerror!Node {
+    try self.expectNext();
+    const node = try self.parseExpression(.lowest);
+    try self.expectTag(.punct_rparen);
+    return node;
 }
 
 fn parseIdent(self: *Parser) anyerror!Node {
