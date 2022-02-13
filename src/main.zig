@@ -13,9 +13,10 @@ pub fn main() anyerror!void {
     // TODO: Replace with command line flags.
     const program_filename = "run/program.zed";
     const filenames = [_][]const u8{
-        "run/data_1.csv",
-        "run/data_2.csv",
+        //"run/data_1.csv",
+        //"run/data_2.csv",
         "run/lang_mix.txt",
+        //"run/hungarian.xml",
     };
     const ifs = ",";
     const irs = "\n";
@@ -132,7 +133,7 @@ pub fn main() anyerror!void {
 
         // Sime state
         var frow: usize = 1;
-        var record_buf: [4096]u8 = undefined; //TODO: Is 4K too much?
+        var record_buf: [1024 * 64]u8 = undefined; //TODO: Is 4K too much?
 
         // Loop over records.
         while (try data_reader.readUntilDelimiterOrEof(&record_buf, global_scope.map.get("@irs").?.ty.string[0])) |record| : ({
