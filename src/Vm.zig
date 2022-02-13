@@ -649,19 +649,27 @@ fn evalScopeIn(self: *Vm) anyerror!void {
 }
 
 fn evalScopeOut(self: *Vm) anyerror!void {
-    // TODO: Try this
-    //var child_scope_ptr = self.scope;
-    //self.scope = child_scope_ptr.parent.?;
-    //child_scope_ptr.deinit();
-    //self.allocator.destroy(child_scope_ptr);
     if (self.instructions.*[self.ip.* + 1] == 1) {
         while (true) {
-            const child_scope = self.scope;
-            self.scope = child_scope.parent.?;
-            if (child_scope.break_point) break;
+            var child_scope_ptr = self.scope;
+            const break_point = child_scope_ptr.break_point;
+            self.scope = child_scope_ptr.parent.?;
+            child_scope_ptr.deinit();
+            self.allocator.destroy(child_scope_ptr);
+            if (break_point) break;
+
+            //const child_scope = self.scope;
+            //self.scope = child_scope.parent.?;
+            //if (child_scope.break_point) break;
         }
     } else {
-        self.scope = self.scope.parent.?;
+        // TODO: Try this
+        var child_scope_ptr = self.scope;
+        self.scope = child_scope_ptr.parent.?;
+        child_scope_ptr.deinit();
+        self.allocator.destroy(child_scope_ptr);
+
+        //self.scope = self.scope.parent.?;
     }
 }
 
@@ -811,8 +819,8 @@ fn pushFrame(self: *Vm, instructions: []const u8, scope: *Scope) anyerror!void {
 
 fn popFrame(self: *Vm) void {
     //TODO: Try this.
-    //self.Scope.deinit();
-    //self.allocator.destroy(self.scope);
+    self.scope.deinit();
+    self.allocator.destroy(self.scope);
     _ = self.call_stack.pop();
     self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
     self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
@@ -1443,9 +1451,14 @@ fn listReduce(self: *Vm, offset: u16) anyerror!void {
         return;
     }
 
+    // Set up sub-VM arena.
+    var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer vm_arena.deinit();
+    const vm_allocator = vm_arena.allocator();
+
     for (l.ty.list.items) |item, i| {
         // Set up function scope.
-        var func_scope = Scope.init(self.allocator, self.scope);
+        var func_scope = Scope.init(vm_allocator, self.scope);
 
         // Assign args as locals in function scope.
         try func_scope.store("acc", acc);
@@ -1456,7 +1469,7 @@ fn listReduce(self: *Vm, offset: u16) anyerror!void {
         try func_scope.store("index", Value.new(.{ .uint = i }, 0));
 
         var vm = try init(
-            self.allocator,
+            vm_allocator,
             self.filename,
             self.src,
             self.constants,
@@ -1508,8 +1521,13 @@ fn listPush(self: *Vm, offset: u16) anyerror!void {
 }
 
 fn evalListPredicate(self: Vm, func: Value, item: Value, index: usize) anyerror!Value {
+    // Set up Sub-VM arena.
+    var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer vm_arena.deinit();
+    const vm_allocator = vm_arena.allocator();
+
     // Set up function scope.
-    var func_scope = Scope.init(self.allocator, self.scope);
+    var func_scope = Scope.init(vm_allocator, self.scope);
 
     // Assign args as locals in function scope.
     try func_scope.store("it", item);
@@ -1518,7 +1536,7 @@ fn evalListPredicate(self: Vm, func: Value, item: Value, index: usize) anyerror!
     try func_scope.store("index", Value.new(.{ .uint = index }, 0));
 
     var vm = try init(
-        self.allocator,
+        vm_allocator,
         self.filename,
         self.src,
         self.constants,

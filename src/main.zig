@@ -15,6 +15,7 @@ pub fn main() anyerror!void {
     const filenames = [_][]const u8{
         "run/data_1.csv",
         "run/data_2.csv",
+        "run/lang_mix.txt",
     };
     const ifs = ",";
     const irs = "\n";
@@ -22,7 +23,10 @@ pub fn main() anyerror!void {
     const ors = "\n";
 
     // Allocation
-    var allocator = std.testing.allocator;
+    //var allocator = std.testing.allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
     var static_arena = std.heap.ArenaAllocator.init(allocator);
     defer static_arena.deinit();
     const static_allocator = static_arena.allocator();
