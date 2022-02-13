@@ -447,17 +447,17 @@ test "Compiler booleans" {
     };
     const program = try parser.parse();
     var compiler = try init(arena.allocator());
-    try compiler.compileProgram(program);
+    const compiled = try compiler.compileProgram(arena.allocator(), program);
 
-    try std.testing.expectEqual(@as(usize, 8), compiler.instructions.items.len);
-    try std.testing.expectEqual(Bytecode.Opcode.constant, @intToEnum(Bytecode.Opcode, compiler.instructions.items[0]));
-    var index = std.mem.bytesAsSlice(u16, compiler.instructions.items[1..3])[0];
+    try std.testing.expectEqual(@as(usize, 8), compiled.rules.instructions.len);
+    try std.testing.expectEqual(Bytecode.Opcode.constant, @intToEnum(Bytecode.Opcode, compiled.rules.instructions[0]));
+    var index = std.mem.bytesAsSlice(u16, compiled.rules.instructions[1..3])[0];
     try std.testing.expectEqual(@as(u16, 0), index);
-    try std.testing.expectEqual(Bytecode.Opcode.pop, @intToEnum(Bytecode.Opcode, compiler.instructions.items[3]));
-    try std.testing.expectEqual(@as(usize, 2), compiler.constants.items.len);
-    index = std.mem.bytesAsSlice(u16, compiler.instructions.items[5..7])[0];
+    try std.testing.expectEqual(Bytecode.Opcode.pop, @intToEnum(Bytecode.Opcode, compiled.rules.instructions[3]));
+    try std.testing.expectEqual(@as(usize, 2), compiled.rules.constants.len);
+    index = std.mem.bytesAsSlice(u16, compiled.rules.instructions[5..7])[0];
     try std.testing.expectEqual(@as(u16, 1), index);
-    try std.testing.expectEqual(Bytecode.Opcode.pop, @intToEnum(Bytecode.Opcode, compiler.instructions.items[3]));
-    try std.testing.expectEqual(false, compiler.constants.items[0].ty.boolean);
-    try std.testing.expectEqual(true, compiler.constants.items[1].ty.boolean);
+    try std.testing.expectEqual(Bytecode.Opcode.pop, @intToEnum(Bytecode.Opcode, compiled.rules.instructions[3]));
+    try std.testing.expectEqual(false, compiled.rules.constants[0].ty.boolean);
+    try std.testing.expectEqual(true, compiled.rules.constants[1].ty.boolean);
 }

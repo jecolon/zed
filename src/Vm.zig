@@ -695,6 +695,7 @@ fn evalListSet(self: *Vm, container: Value) anyerror!void {
 
     const combo = @intToEnum(Node.Combo, self.instructions.*[self.ip.* + 1]);
 
+    //TODO: Check if clobber requres old_value.deinit()
     if (combo == .none) {
         const rvalue = self.value_stack.pop();
         container.ty.list.items[index.ty.uint] = try rvalue.copy(container.ty.list.allocator);
@@ -727,19 +728,30 @@ fn evalMapSet(self: *Vm, container: Value) anyerror!void {
     const key_copy = try container.ty.map.allocator.dupe(u8, key.ty.string);
 
     if (combo == .none) {
+        if (container.ty.map.fetchRemove(key.ty.string)) |old_kv| {
+            // Free old entry
+            container.ty.map.allocator.free(old_kv.key);
+            old_kv.value.deinit(container.ty.map.allocator);
+        }
+
         const value_copy = try rvalue.copy(container.ty.map.allocator);
         try container.ty.map.put(key_copy, value_copy);
         try self.value_stack.append(rvalue);
     } else {
-        if (container.ty.map.get(key.ty.string)) |old_value| {
+        if (container.ty.map.fetchRemove(key.ty.string)) |old_kv| {
             const new_value = switch (combo) {
                 .none => unreachable,
-                .add => try old_value.add(rvalue),
-                .sub => try old_value.sub(rvalue),
-                .mul => try old_value.mul(rvalue),
-                .div => try old_value.div(rvalue),
-                .mod => try old_value.mod(rvalue),
+                .add => try old_kv.value.add(rvalue),
+                .sub => try old_kv.value.sub(rvalue),
+                .mul => try old_kv.value.mul(rvalue),
+                .div => try old_kv.value.div(rvalue),
+                .mod => try old_kv.value.mod(rvalue),
             };
+
+            // Free old entry
+            container.ty.map.allocator.free(old_kv.key);
+            old_kv.value.deinit(container.ty.map.allocator);
+
             const value_copy = try new_value.copy(container.ty.map.allocator);
             try container.ty.map.put(key_copy, value_copy);
             try self.value_stack.append(new_value);
@@ -1548,7 +1560,7 @@ pub fn dump(self: Vm) void {
 }
 
 // Tests
-const debug_dumps = true;
+const debug_dumps = false;
 
 fn testLastValue(input: []const u8, expected: Value) !void {
     const Lexer = @import("Lexer.zig");
@@ -1572,23 +1584,25 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         .src = input,
         .tokens = tokens,
     };
-    const program = try parser.parse();
-    var compiler = try Compiler.init(compiler_allocator);
-    try compiler.compileProgram(program);
-
-    var scope = Scope.init(allocator, null);
-    defer scope.deinit();
-    try addBuiltins(&scope);
 
     var vm_arena = std.heap.ArenaAllocator.init(allocator);
     errdefer vm_arena.deinit();
     const vm_allocator = vm_arena.allocator();
 
-    const constants = try vm_allocator.alloc(Value, compiler.constants.items.len);
-    for (compiler.constants.items) |value, i| constants[i] = try value.copy(vm_allocator);
-    const instructions = try vm_allocator.dupe(u8, compiler.instructions.items);
+    const program = try parser.parse();
+    var compiler = try Compiler.init(compiler_allocator);
+    const compiled = try compiler.compileProgram(vm_allocator, program);
+
+    var scope = Scope.init(allocator, null);
+    defer scope.deinit();
+    try addBuiltins(&scope);
+
+    const constants = compiled.rules.constants;
+    const instructions = compiled.rules.instructions;
 
     compiler_arena.deinit();
+
+    var output = std.ArrayList(u8).init(vm_allocator);
 
     var vm = try init(
         vm_allocator,
@@ -1597,6 +1611,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         constants,
         instructions,
         &scope,
+        &output,
     );
     if (debug_dumps) vm.dump();
     try vm.run();
@@ -1623,6 +1638,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         .list,
         .map,
         .range,
+        .rec_range_map,
         => try std.testing.expect(expected.eql(last_popped)),
     }
 
@@ -1630,7 +1646,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
 
     if (debug_dumps) scope.dump();
 }
-fn testLastValueWithOutput(input: []const u8, expected: Value, output: []const u8) !void {
+fn testLastValueWithOutput(input: []const u8, expected: Value, expected_output: []const u8) !void {
     const Lexer = @import("Lexer.zig");
     const Parser = @import("Parser.zig");
     const Compiler = @import("Compiler.zig");
@@ -1652,24 +1668,27 @@ fn testLastValueWithOutput(input: []const u8, expected: Value, output: []const u
     };
     const program = try parser.parse();
     var compiler = try Compiler.init(arena.allocator());
-    try compiler.compileProgram(program);
+    const compiled = try compiler.compileProgram(arena.allocator(), program);
 
     var scope = Scope.init(allocator, null);
     defer scope.deinit();
     try addBuiltins(&scope);
 
+    var output = std.ArrayList(u8).init(arena.allocator());
+
     var vm = try init(
         arena.allocator(),
         "inline",
         input,
-        compiler.constants.items,
-        compiler.instructions.items,
+        compiled.rules.constants,
+        compiled.rules.instructions,
         &scope,
+        &output,
     );
     if (debug_dumps) vm.dump();
     try vm.run();
 
-    try std.testing.expectEqualStrings(output, vm.output.items);
+    try std.testing.expectEqualStrings(expected_output, vm.output.items);
 
     const last_popped = vm.last_popped;
 
@@ -1693,6 +1712,7 @@ fn testLastValueWithOutput(input: []const u8, expected: Value, output: []const u
         .list,
         .map,
         .range,
+        .rec_range_map,
         => try std.testing.expect(expected.eql(last_popped)),
     }
 
