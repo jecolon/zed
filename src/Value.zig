@@ -22,6 +22,7 @@ const Builtin = enum {
     min,
     mode,
     print,
+    push,
     rand,
     reduce,
     reverse,
@@ -43,6 +44,7 @@ pub const Type = union(enum) {
     map: *std.StringHashMap(Value),
     nil,
     range: [2]usize,
+    rec_range_map: *std.AutoHashMap(usize, void),
     string: []const u8,
     uint: usize,
 };
@@ -67,6 +69,7 @@ pub fn copy(self: Value, allocator: std.mem.Allocator) anyerror!Value {
         .map => try self.copyMap(allocator),
         .nil => self,
         .range => self,
+        .rec_range_map => self,
         .string => try self.copyString(allocator),
         .uint => self,
     };
@@ -187,7 +190,7 @@ pub fn eqlType(self: Value, other: Value) bool {
         .list => other.ty == .list,
         .map => other.ty == .map,
         .range => other.ty == .range,
-        //.rec_range_map => other.ty == .rec_range_map,
+        .rec_range_map => other.ty == .rec_range_map,
         .string => other.ty == .string,
         .uint => other.ty == .uint,
         .nil => other.ty == .nil,
@@ -255,23 +258,12 @@ fn addUint(self: Value, other: Value) anyerror!Value {
     };
 }
 
-fn addList(self: Value, other: Value) anyerror!Value {
-    if (other.ty == .list) {
-        try self.ty.list.appendSlice(other.ty.list.items);
-    } else {
-        try self.ty.list.append(other);
-    }
-
-    return self;
-}
-
 pub fn add(self: Value, other: Value) anyerror!Value {
     return switch (self.ty) {
         .float => self.addFloat(other),
         .int => self.addInt(other),
         .uint => self.addUint(other),
         .string => self.addString(other),
-        .list => self.addList(other),
         else => error.InvalidAddition,
     };
 }

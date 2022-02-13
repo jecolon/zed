@@ -22,7 +22,7 @@ global_scope: *Scope,
 instructions: *[]const u8,
 ip: *u16,
 last_popped: Value = Value.new(.nil, 0),
-output: std.ArrayList(u8),
+output: *std.ArrayList(u8),
 scope: *Scope,
 src: []const u8,
 value_stack: std.ArrayList(Value),
@@ -36,6 +36,7 @@ pub fn init(
     constants: []const Value,
     insts: []const u8,
     scope: *Scope,
+    output: *std.ArrayList(u8),
 ) !Vm {
     var self = Vm{
         .allocator = allocator,
@@ -45,7 +46,7 @@ pub fn init(
         .global_scope = scope,
         .instructions = undefined,
         .ip = undefined,
-        .output = std.ArrayList(u8).init(allocator),
+        .output = output,
         .scope = undefined,
         .src = src,
         .value_stack = std.ArrayList(Value).init(allocator),
@@ -236,7 +237,7 @@ pub fn run(self: *Vm) !void {
 }
 
 // Helpers
-fn addBuiltins(scope: *Scope) anyerror!void {
+pub fn addBuiltins(scope: *Scope) anyerror!void {
     try scope.store("atan2", Value.new(.{ .builtin = .atan2 }, 0));
     try scope.store("chars", Value.new(.{ .builtin = .chars }, 0));
     try scope.store("contains", Value.new(.{ .builtin = .contains }, 0));
@@ -258,6 +259,7 @@ fn addBuiltins(scope: *Scope) anyerror!void {
     try scope.store("min", Value.new(.{ .builtin = .min }, 0));
     try scope.store("mode", Value.new(.{ .builtin = .mode }, 0));
     try scope.store("print", Value.new(.{ .builtin = .print }, 0));
+    try scope.store("push", Value.new(.{ .builtin = .push }, 0));
     try scope.store("rand", Value.new(.{ .builtin = .rand }, 0));
     try scope.store("reduce", Value.new(.{ .builtin = .reduce }, 0));
     try scope.store("reverse", Value.new(.{ .builtin = .reverse }, 0));
@@ -365,6 +367,7 @@ fn evalCall(self: *Vm) anyerror!void {
             .min => try self.listMin(callee.offset),
             .mode => try self.listMode(callee.offset),
             .print => try self.print(callee.offset, self.output.writer()),
+            .push => try self.listPush(callee.offset),
             .rand => try self.rand(callee.offset),
             .reduce => try self.listReduce(callee.offset),
             .reverse => try self.listReverse(callee.offset),
@@ -510,7 +513,12 @@ fn evalList(self: *Vm) anyerror!void {
     }
 
     var i: usize = 0;
-    while (i < num_items) : (i += 1) try list_ptr.append(self.value_stack.pop());
+    while (i < num_items) : (i += 1) {
+        const rvalue = self.value_stack.pop();
+        const value_copy = try rvalue.copy(self.allocator);
+        try list_ptr.append(value_copy);
+    }
+
     try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
 }
 
@@ -586,7 +594,7 @@ fn evalMap(self: *Vm) anyerror!void {
     try map_ptr.ensureTotalCapacity(num_entries);
     var i: usize = 0;
     while (i < num_entries) : (i += 1) {
-        const value = self.value_stack.pop();
+        const rvalue = self.value_stack.pop();
         const key_val = self.value_stack.pop();
         if (key_val.ty != .string) {
             const location = Location.getLocation(self.filename, self.src, key_val.offset);
@@ -594,7 +602,10 @@ fn evalMap(self: *Vm) anyerror!void {
             return error.InvalidMapKey;
         }
 
-        try map_ptr.put(key_val.ty.string, value);
+        const key_copy = try self.allocator.dupe(u8, key_val.ty.string);
+        const value_copy = try rvalue.copy(self.allocator);
+
+        try map_ptr.put(key_copy, value_copy);
     }
     try self.value_stack.append(Value.new(.{ .map = map_ptr }, 0));
 }
@@ -686,7 +697,7 @@ fn evalListSet(self: *Vm, container: Value) anyerror!void {
 
     if (combo == .none) {
         const rvalue = self.value_stack.pop();
-        container.ty.list.items[index.ty.uint] = rvalue;
+        container.ty.list.items[index.ty.uint] = try rvalue.copy(container.ty.list.allocator);
         try self.value_stack.append(rvalue);
     } else {
         const old_value = container.ty.list.items[index.ty.uint];
@@ -699,7 +710,7 @@ fn evalListSet(self: *Vm, container: Value) anyerror!void {
             .div => try old_value.div(rvalue),
             .mod => try old_value.mod(rvalue),
         };
-        container.ty.list.items[index.ty.uint] = new_value;
+        container.ty.list.items[index.ty.uint] = try new_value.copy(container.ty.list.allocator);
         try self.value_stack.append(new_value);
     }
 }
@@ -713,9 +724,11 @@ fn evalMapSet(self: *Vm, container: Value) anyerror!void {
 
     const combo = @intToEnum(Node.Combo, self.instructions.*[self.ip.* + 1]);
     const rvalue = self.value_stack.pop();
+    const key_copy = try container.ty.map.allocator.dupe(u8, key.ty.string);
 
     if (combo == .none) {
-        try container.ty.map.put(key.ty.string, rvalue);
+        const value_copy = try rvalue.copy(container.ty.map.allocator);
+        try container.ty.map.put(key_copy, value_copy);
         try self.value_stack.append(rvalue);
     } else {
         if (container.ty.map.get(key.ty.string)) |old_value| {
@@ -727,9 +740,11 @@ fn evalMapSet(self: *Vm, container: Value) anyerror!void {
                 .div => try old_value.div(rvalue),
                 .mod => try old_value.mod(rvalue),
             };
-            try container.ty.map.put(key.ty.string, new_value);
+            const value_copy = try new_value.copy(container.ty.map.allocator);
+            try container.ty.map.put(key_copy, value_copy);
             try self.value_stack.append(new_value);
         } else {
+            //TODO: Handle set of new entry.
             const location = Location.getLocation(self.filename, self.src, key.offset);
             std.log.err("{s} not found in map; {}", .{ key.ty.string, location });
             return error.KeyNotFound;
@@ -1429,6 +1444,7 @@ fn listReduce(self: *Vm, offset: u16) anyerror!void {
             self.constants,
             f.ty.func.instructions,
             &func_scope,
+            self.output,
         );
         try vm.run();
 
@@ -1459,6 +1475,19 @@ fn rand(self: *Vm, offset: u16) anyerror!void {
     try self.value_stack.append(result);
     self.ip.* += 1;
 }
+fn listPush(self: *Vm, offset: u16) anyerror!void {
+    const l = self.value_stack.pop();
+    if (l.ty != .list) {
+        const location = Location.getLocation(self.filename, self.src, offset);
+        std.log.err("push not allowed on {s}; {}", .{ @tagName(l.ty), location });
+        return error.InvalidPush;
+    }
+
+    var item = self.value_stack.pop();
+    try l.ty.list.append(try item.copy(l.ty.list.allocator));
+    try self.value_stack.append(item);
+    self.ip.* += 2;
+}
 
 fn evalListPredicate(self: Vm, func: Value, item: Value, index: usize) anyerror!Value {
     // Set up function scope.
@@ -1477,6 +1506,7 @@ fn evalListPredicate(self: Vm, func: Value, item: Value, index: usize) anyerror!
         self.constants,
         func.ty.func.instructions,
         &func_scope,
+        self.output,
     );
     try vm.run();
 
@@ -1518,7 +1548,7 @@ pub fn dump(self: Vm) void {
 }
 
 // Tests
-const debug_dumps = false;
+const debug_dumps = true;
 
 fn testLastValue(input: []const u8, expected: Value) !void {
     const Lexer = @import("Lexer.zig");
@@ -1526,34 +1556,46 @@ fn testLastValue(input: []const u8, expected: Value) !void {
     const Compiler = @import("Compiler.zig");
 
     const allocator = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    errdefer arena.deinit();
+    var compiler_arena = std.heap.ArenaAllocator.init(allocator);
+    errdefer compiler_arena.deinit();
+    const compiler_allocator = compiler_arena.allocator();
+
     var lexer = Lexer{
-        .allocator = arena.allocator(),
+        .allocator = compiler_allocator,
         .filename = "inline",
         .src = input,
     };
     var tokens = try lexer.lex();
     var parser = Parser{
-        .allocator = arena.allocator(),
+        .allocator = compiler_allocator,
         .filename = "inline",
         .src = input,
         .tokens = tokens,
     };
     const program = try parser.parse();
-    var compiler = try Compiler.init(arena.allocator());
+    var compiler = try Compiler.init(compiler_allocator);
     try compiler.compileProgram(program);
 
     var scope = Scope.init(allocator, null);
     defer scope.deinit();
     try addBuiltins(&scope);
 
+    var vm_arena = std.heap.ArenaAllocator.init(allocator);
+    errdefer vm_arena.deinit();
+    const vm_allocator = vm_arena.allocator();
+
+    const constants = try vm_allocator.alloc(Value, compiler.constants.items.len);
+    for (compiler.constants.items) |value, i| constants[i] = try value.copy(vm_allocator);
+    const instructions = try vm_allocator.dupe(u8, compiler.instructions.items);
+
+    compiler_arena.deinit();
+
     var vm = try init(
-        arena.allocator(),
+        vm_allocator,
         "inline",
         input,
-        compiler.constants.items,
-        compiler.instructions.items,
+        constants,
+        instructions,
         &scope,
     );
     if (debug_dumps) vm.dump();
@@ -1584,7 +1626,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         => try std.testing.expect(expected.eql(last_popped)),
     }
 
-    arena.deinit();
+    vm_arena.deinit();
 
     if (debug_dumps) scope.dump();
 }

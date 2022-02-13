@@ -15,18 +15,53 @@ tokens: std.MultiArrayList(Token),
 const Parser = @This();
 
 pub const Program = struct {
+    inits: []Node,
+    files: []Node,
+    recs: []Node,
     rules: []Node,
+    exits: []Node,
 };
 
 pub fn parse(self: *Parser) !Program {
+    var inits = std.ArrayList(Node).init(self.allocator);
+    var files = std.ArrayList(Node).init(self.allocator);
+    var recs = std.ArrayList(Node).init(self.allocator);
     var rules = std.ArrayList(Node).init(self.allocator);
+    var exits = std.ArrayList(Node).init(self.allocator);
 
     while (try self.next()) |node| {
-        try rules.append(node);
-        try rules.append(Node.new(.stmt_end, 0)); // Stack clean up.
+        if (node.ty == .event) {
+            switch (node.ty.event.ty) {
+                .init => for (node.ty.event.nodes) |n| {
+                    try inits.append(n);
+                    try inits.append(Node.new(.stmt_end, 0)); // Stack clean up.
+                },
+                .file => for (node.ty.event.nodes) |n| {
+                    try files.append(n);
+                    try files.append(Node.new(.stmt_end, 0)); // Stack clean up.
+                },
+                .rec => for (node.ty.event.nodes) |n| {
+                    try recs.append(n);
+                    try recs.append(Node.new(.stmt_end, 0)); // Stack clean up.
+                },
+                .exit => for (node.ty.event.nodes) |n| {
+                    try exits.append(n);
+                    try exits.append(Node.new(.stmt_end, 0)); // Stack clean up.
+                },
+            }
+        } else {
+            try rules.append(node);
+            try rules.append(Node.new(.stmt_end, 0)); // Stack clean up.
+        }
     }
 
-    return Program{ .rules = rules.items };
+    return Program{
+        .inits = inits.items,
+        .files = files.items,
+        .recs = recs.items,
+        .rules = rules.items,
+        .exits = exits.items,
+    };
 }
 
 fn next(self: *Parser) anyerror!?Node {
@@ -154,6 +189,12 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
 
         .pd_false, .pd_true => Parser.parseBoolean,
         .pd_nil => Parser.parseNil,
+
+        .pd_onInit,
+        .pd_onFile,
+        .pd_onRec,
+        .pd_onExit,
+        => Parser.parseEvent,
 
         .punct_lbrace => Parser.parseFunc,
         .punct_lbracket => Parser.parseList,
@@ -288,6 +329,7 @@ fn parseBuiltin(self: *Parser, object: Node) anyerror!Node {
         .pd_median => self.parseNoArgBuiltin(object),
         .pd_min => self.parseNoArgBuiltin(object),
         .pd_mode => self.parseNoArgBuiltin(object),
+        .pd_push => self.parseOneArgBuiltin(object),
         .pd_reduce => self.parseTwoArgBuiltin(object),
         .pd_reverse => self.parseNoArgBuiltin(object),
         .pd_sort => self.parseNoArgBuiltin(object),
@@ -358,6 +400,7 @@ fn parseOneArgBuiltin(self: *Parser, object: Node) anyerror!Node {
         .pd_join => "join",
         .pd_lastIndexOf => "lastIndexOf",
         .pd_map => "map",
+        .pd_push => "push",
         .pd_split => "split",
         else => unreachable,
     };
@@ -503,6 +546,34 @@ fn parseElvisAssign(self: *Parser, condition: Node) anyerror!Node {
         .then_branch = then_slice,
         .else_branch = else_slice,
     } }, offset);
+}
+
+fn parseEvent(self: *Parser) anyerror!Node {
+    var node = Node.new(.{ .event = .{
+        .nodes = undefined,
+        .ty = undefined,
+    } }, self.currentOffset());
+
+    node.ty.event.ty = switch (self.currentTag()) {
+        .pd_onInit => .init,
+        .pd_onFile => .file,
+        .pd_onRec => .rec,
+        .pd_onExit => .exit,
+        else => unreachable,
+    };
+
+    try self.expectTag(.punct_lbrace);
+    var list = std.ArrayList(Node).init(self.allocator);
+
+    while (!self.skipTag(.punct_rbrace)) {
+        try self.expectNext();
+        const next_node = try self.parseExpression(.lowest);
+        try list.append(next_node);
+        _ = self.skipTag(.punct_semicolon);
+    }
+
+    node.ty.event.nodes = list.items;
+    return node;
 }
 
 fn parseFloat(self: *Parser) anyerror!Node {

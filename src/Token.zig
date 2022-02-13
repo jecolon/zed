@@ -35,12 +35,18 @@ pub const Tag = enum {
     pd_median,
     pd_min,
     pd_mode,
+    pd_push,
     pd_reduce,
     pd_reverse,
     pd_sort,
     pd_split,
     pd_stdev,
     pd_values,
+
+    pd_onInit,
+    pd_onFile,
+    pd_onRec,
+    pd_onExit,
 
     op_add_eq,
     op_concat,
@@ -120,12 +126,18 @@ pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "mode", .pd_mode },
     .{ "min", .pd_min },
     .{ "max", .pd_max },
+    .{ "push", .pd_push },
     .{ "reduce", .pd_reduce },
     .{ "reverse", .pd_reverse },
     .{ "stdev", .pd_stdev },
     .{ "sort", .pd_sort },
     .{ "split", .pd_split },
     .{ "values", .pd_values },
+
+    .{ "onInit", .pd_onInit },
+    .{ "onFile", .pd_onFile },
+    .{ "onRec", .pd_onRec },
+    .{ "onExit", .pd_onExit },
 });
 
 len: u16,

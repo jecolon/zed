@@ -41,8 +41,59 @@ pub fn init(allocator: std.mem.Allocator) !Compiler {
     return self;
 }
 
-pub fn compileProgram(self: *Compiler, program: Program) anyerror!void {
+pub const Executables = struct {
+    inits: Code,
+    files: Code,
+    recs: Code,
+    rules: Code,
+    exits: Code,
+};
+
+pub const Code = struct {
+    constants: []const Value,
+    instructions: []const u8,
+};
+
+fn genCode(self: *Compiler, allocator: std.mem.Allocator) !Code {
+    const constants = try allocator.alloc(Value, self.constants.items.len);
+    var code = Code{
+        .constants = undefined,
+        .instructions = try allocator.dupe(u8, self.instructions.items),
+    };
+    for (self.constants.items) |constant, i| constants[i] = try constant.copy(allocator);
+    code.constants = constants;
+    return code;
+}
+
+pub fn compileProgram(self: *Compiler, allocator: std.mem.Allocator, program: Program) anyerror!Executables {
+    var exes = Executables{
+        .inits = undefined,
+        .files = undefined,
+        .recs = undefined,
+        .rules = undefined,
+        .exits = undefined,
+    };
+
+    for (program.inits) |node| try self.compile(node);
+    exes.inits = try self.genCode(allocator);
+    self.* = try init(self.allocator);
+
+    for (program.files) |node| try self.compile(node);
+    exes.files = try self.genCode(allocator);
+    self.* = try init(self.allocator);
+
+    for (program.recs) |node| try self.compile(node);
+    exes.recs = try self.genCode(allocator);
+    self.* = try init(self.allocator);
+
     for (program.rules) |node| try self.compile(node);
+    exes.rules = try self.genCode(allocator);
+    self.* = try init(self.allocator);
+
+    for (program.exits) |node| try self.compile(node);
+    exes.exits = try self.genCode(allocator);
+
+    return exes;
 }
 
 fn compile(self: *Compiler, node: Node) anyerror!void {
@@ -71,6 +122,8 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .range => try self.compileRange(node),
         .string => try self.compileString(node),
         .subscript => try self.compileSubscript(node),
+
+        .event => unreachable,
     }
 }
 

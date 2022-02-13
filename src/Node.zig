@@ -19,6 +19,7 @@ pub const Type = union(enum) {
     call: Call,
     conditional: Conditional,
     define: Assign,
+    event: Event,
     func: Function,
     infix: Infix,
     loop: Loop,
@@ -65,6 +66,18 @@ const Assign = struct {
 pub const Entry = struct {
     key: Node,
     value: Node,
+};
+
+const EventType = enum {
+    init,
+    file,
+    rec,
+    exit,
+};
+
+const Event = struct {
+    nodes: []Node,
+    ty: EventType,
 };
 
 const Function = struct {
