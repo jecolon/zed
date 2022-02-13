@@ -695,8 +695,10 @@ fn evalListSet(self: *Vm, container: Value) anyerror!void {
 
     const combo = @intToEnum(Node.Combo, self.instructions.*[self.ip.* + 1]);
 
-    //TODO: Check if clobber requres old_value.deinit()
     if (combo == .none) {
+        // Free old value.
+        container.ty.list.items[index.ty.uint].deinit(container.ty.list.allocator);
+
         const rvalue = self.value_stack.pop();
         container.ty.list.items[index.ty.uint] = try rvalue.copy(container.ty.list.allocator);
         try self.value_stack.append(rvalue);
@@ -711,6 +713,10 @@ fn evalListSet(self: *Vm, container: Value) anyerror!void {
             .div => try old_value.div(rvalue),
             .mod => try old_value.mod(rvalue),
         };
+
+        // Free old value.
+        container.ty.list.items[index.ty.uint].deinit(container.ty.list.allocator);
+
         container.ty.list.items[index.ty.uint] = try new_value.copy(container.ty.list.allocator);
         try self.value_stack.append(new_value);
     }
