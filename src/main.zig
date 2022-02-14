@@ -185,7 +185,7 @@ pub fn main() anyerror!void {
 
             // Output
             if (output.items.len != 0 and output.items.len != prev_output_len) {
-                try output.append(global_scope.map.get("@ors").?.ty.string[0]);
+                try output.appendSlice(global_scope.map.get("@ors").?.ty.string);
             }
 
             // To know if we have new output.

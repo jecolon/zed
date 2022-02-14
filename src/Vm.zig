@@ -752,29 +752,29 @@ fn evalMapSet(self: *Vm, container: Value) anyerror!void {
         try container.ty.map.put(key_copy, value_copy);
         try self.value_stack.append(rvalue);
     } else {
-        if (container.ty.map.fetchRemove(key.ty.string)) |old_kv| {
-            const new_value = switch (combo) {
-                .none => unreachable,
-                .add => try old_kv.value.add(rvalue),
-                .sub => try old_kv.value.sub(rvalue),
-                .mul => try old_kv.value.mul(rvalue),
-                .div => try old_kv.value.div(rvalue),
-                .mod => try old_kv.value.mod(rvalue),
-            };
-
-            // Free old entry
-            container.ty.map.allocator.free(old_kv.key);
-            old_kv.value.deinit(container.ty.map.allocator);
-
-            const value_copy = try new_value.copy(container.ty.map.allocator);
-            try container.ty.map.put(key_copy, value_copy);
-            try self.value_stack.append(new_value);
-        } else {
+        const old_kv = container.ty.map.fetchRemove(key.ty.string) orelse {
             //TODO: Handle set of new entry.
             const location = Location.getLocation(self.filename, self.src, key.offset);
             std.log.err("{s} not found in map; {}", .{ key.ty.string, location });
             return error.KeyNotFound;
-        }
+        };
+
+        const new_value = switch (combo) {
+            .none => unreachable,
+            .add => try old_kv.value.add(rvalue),
+            .sub => try old_kv.value.sub(rvalue),
+            .mul => try old_kv.value.mul(rvalue),
+            .div => try old_kv.value.div(rvalue),
+            .mod => try old_kv.value.mod(rvalue),
+        };
+
+        // Free old entry
+        container.ty.map.allocator.free(old_kv.key);
+        old_kv.value.deinit(container.ty.map.allocator);
+
+        const value_copy = try new_value.copy(container.ty.map.allocator);
+        try container.ty.map.put(key_copy, value_copy);
+        try self.value_stack.append(new_value);
     }
 }
 
@@ -883,8 +883,9 @@ fn print(self: *Vm, offset: u16, writer: anytype) anyerror!void {
     const num_args = self.instructions.*[self.ip.*];
 
     var i: usize = 0;
+    const ofs = if (self.scope.load("@ofs")) |s| s.ty.string else ",";
     while (i < num_args) : (i += 1) {
-        if (i != 0) try writer.writeAll(" ");
+        if (i != 0) try writer.writeAll(ofs);
         _ = try writer.print("{}", .{self.value_stack.pop()});
     }
 
@@ -2258,13 +2259,13 @@ test "Vm method builtins" {
     , Value.new(.{ .uint = 6 }, 0));
     try testLastValueWithOutput(
         \\print("foo", 1, 2, 3.14)
-    , Value.new(.nil, 0), "foo 1 2 3.14");
+    , Value.new(.nil, 0), "foo,1,2,3.14");
     try testLastValueWithOutput(
         \\print("foo", 1, 2, 3.14, "foo {1}")
-    , Value.new(.nil, 0), "foo 1 2 3.14 foo 1");
+    , Value.new(.nil, 0), "foo,1,2,3.14,foo 1");
     try testLastValueWithOutput(
         \\print("foo", 1, 2, 3.14, "{#d:0>3# 1}")
-    , Value.new(.nil, 0), "foo 1 2 3.14 001");
+    , Value.new(.nil, 0), "foo,1,2,3.14,001");
     try testLastValue(
         \\"H\u65\u301llo".chars()[1]
     , Value.new(.{ .string = "\u{65}\u{301}" }, 0));

@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const Token = @import("Token.zig");
 const Value = @import("Value.zig");
 
 const Scope = @This();
@@ -29,7 +30,26 @@ pub fn deinit(self: *Scope) void {
     self.map.deinit();
 }
 
+const globals = std.ComptimeStringMap(void, .{
+    .{ "@rec", {} },
+    .{ "@cols", {} },
+    .{ "@ifs", {} },
+    .{ "@irs", {} },
+    .{ "@ofs", {} },
+    .{ "@ors", {} },
+    .{ "@rnum", {} },
+    .{ "@frnum", {} },
+    .{ "@ranges", {} },
+    .{ "@file", {} },
+});
+
+fn isReserved(key: []const u8) bool {
+    return Token.predef.has(key) or globals.has(key);
+}
+
 pub fn isDefined(self: Scope, key: []const u8) bool {
+    if (isReserved(key)) return true;
+
     if (self.map.contains(key)) {
         return true;
     } else if (self.parent) |parent| {
@@ -64,6 +84,19 @@ pub fn store(self: *Scope, key: []const u8, value: Value) !void {
 }
 
 pub fn update(self: *Scope, key: []const u8, value: Value) !void {
+    if (std.mem.eql(u8, key, "@rec")) {
+        if (self.parent) |parent| return parent.update(key, value);
+        if (value.ty != .string) return error.InvalidAtRec;
+        self.record = value.ty.string;
+        return;
+    }
+    if (std.mem.eql(u8, key, "@cols")) {
+        if (self.parent) |parent| return parent.update(key, value);
+        if (value.ty != .list) return error.InvalidAtCols;
+        self.columns = value.ty.list;
+        return;
+    }
+
     if (self.map.get(key)) |old_value| {
         old_value.deinit(self.allocator);
         try self.map.put(key, try value.copy(self.allocator));
