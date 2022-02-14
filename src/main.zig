@@ -93,7 +93,11 @@ pub fn main() anyerror!void {
         &global_scope,
         &output,
     );
-    try inits_vm.run();
+    inits_vm.run() catch |err| {
+        std.log.err("Error executing onInit blocks: {}.", .{err});
+        return err;
+    };
+
     inits_arena.deinit();
 
     // Global record numbering
@@ -117,7 +121,11 @@ pub fn main() anyerror!void {
             &global_scope,
             &output,
         );
-        try files_vm.run();
+        files_vm.run() catch |err| {
+            std.log.err("Error executing onFile blocls: {}.", .{err});
+            return err;
+        };
+
         files_arena.deinit();
 
         // Data file
@@ -159,7 +167,10 @@ pub fn main() anyerror!void {
                 &global_scope,
                 &output,
             );
-            try recs_vm.run();
+            recs_vm.run() catch |err| {
+                std.log.err("Error executing onRec blocks: {}.", .{err});
+                return err;
+            };
 
             // New record, new fileds.
             global_scope.columns = try recs_allocator.create(std.ArrayList(Value));
@@ -181,7 +192,10 @@ pub fn main() anyerror!void {
                 &global_scope,
                 &output,
             );
-            try rules_vm.run();
+            rules_vm.run() catch |err| {
+                std.log.err("Error executing per-record rules: {}.", .{err});
+                return err;
+            };
 
             // Output
             if (output.items.len != 0 and output.items.len != prev_output_len) {
@@ -206,7 +220,10 @@ pub fn main() anyerror!void {
         &global_scope,
         &output,
     );
-    try exits_vm.run();
+    exits_vm.run() catch |err| {
+        std.log.err("Error executing onExit blocks: {}.", .{err});
+        return err;
+    };
 
     // Print hte output.
     _ = try std.io.getStdOut().writer().print("{s}", .{output.items});

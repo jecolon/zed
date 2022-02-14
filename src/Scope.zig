@@ -1,6 +1,5 @@
 const std = @import("std");
 
-const Token = @import("Token.zig");
 const Value = @import("Value.zig");
 
 const Scope = @This();
@@ -43,12 +42,22 @@ const globals = std.ComptimeStringMap(void, .{
     .{ "@file", {} },
 });
 
-fn isReserved(key: []const u8) bool {
-    return Token.predef.has(key) or globals.has(key);
-}
+const read_only = std.ComptimeStringMap(void, .{
+    .{ "@rnum", {} },
+    .{ "@frnum", {} },
+    .{ "atan2", {} },
+    .{ "cos", {} },
+    .{ "exp", {} },
+    .{ "int", {} },
+    .{ "log", {} },
+    .{ "print", {} },
+    .{ "rand", {} },
+    .{ "sin", {} },
+    .{ "sqrt", {} },
+});
 
 pub fn isDefined(self: Scope, key: []const u8) bool {
-    if (isReserved(key)) return true;
+    if (globals.has(key)) return true;
 
     if (self.map.contains(key)) {
         return true;
@@ -84,6 +93,8 @@ pub fn store(self: *Scope, key: []const u8, value: Value) !void {
 }
 
 pub fn update(self: *Scope, key: []const u8, value: Value) !void {
+    if (read_only.has(key)) return error.ReadOnlyGlobal;
+
     if (std.mem.eql(u8, key, "@rec")) {
         if (self.parent) |parent| return parent.update(key, value);
         if (value.ty != .string) return error.InvalidAtRec;
