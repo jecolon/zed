@@ -120,6 +120,7 @@ fn compile(self: *Compiler, node: Node) anyerror!void {
         .map => try self.compileMap(node),
         .prefix => try self.compilePrefix(node),
         .range => try self.compileRange(node),
+        .rec_range => try self.compileRecRange(node),
         .string => try self.compileString(node),
         .subscript => try self.compileSubscript(node),
 
@@ -302,6 +303,25 @@ fn compileRange(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.range.to.*);
     try self.pushInstruction(.range);
     try self.instructions.append(@boolToInt(node.ty.range.inclusive));
+}
+
+fn compileRecRange(self: *Compiler, node: Node) anyerror!void {
+    var action_instructions = Value.new(.{ .string = "" }, 0);
+
+    if (node.ty.rec_range.action.len > 0) {
+        try self.pushCompileContext();
+        for (node.ty.rec_range.action) |n| try self.compile(n);
+        action_instructions.ty.string = self.instructions.items;
+        self.popCompileContext();
+    }
+
+    const nil_value = Value.new(.nil, 0);
+    try self.pushConstant(action_instructions);
+    if (node.ty.rec_range.to) |to| try self.compile(to.*) else try self.pushConstant(nil_value);
+    if (node.ty.rec_range.from) |from| try self.compile(from.*) else try self.pushConstant(nil_value);
+    try self.pushInstruction(.rec_range);
+    try self.instructions.append(node.ty.rec_range.id);
+    try self.instructions.append(@boolToInt(node.ty.rec_range.exclusive));
 }
 
 fn compileReturn(self: *Compiler, node: Node) anyerror!void {

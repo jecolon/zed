@@ -25,6 +25,7 @@ pub const Type = union(enum) {
     loop: Loop,
     prefix: Prefix,
     range: Range,
+    rec_range: RecRange,
     subscript: Subscript,
 };
 
@@ -106,6 +107,14 @@ const Range = struct {
     inclusive: bool,
     from: *Node,
     to: *Node,
+};
+
+const RecRange = struct {
+    from: ?*Node,
+    to: ?*Node,
+    action: []Node,
+    id: u8,
+    exclusive: bool,
 };
 
 pub const Ipol = struct {

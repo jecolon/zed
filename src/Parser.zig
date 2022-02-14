@@ -8,6 +8,7 @@ const Token = @import("Token.zig");
 allocator: std.mem.Allocator,
 can_break: bool = false, // Parsing something that can be broken out of or continued? (i.e. loops)
 filename: []const u8,
+range_id: u8 = 0,
 token_index: ?u16 = null,
 src: []const u8,
 tokens: std.MultiArrayList(Token),
@@ -183,6 +184,11 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .kw_if => Parser.parseIf,
         .kw_return => Parser.parseReturn,
         .kw_while => Parser.parseWhile,
+
+        .kw_from,
+        .kw_to,
+        .kw_until,
+        => Parser.parseRecRange,
 
         .op_global => Parser.parseGlobal,
         .op_neg, .punct_bang => Parser.parsePrefix,
@@ -796,6 +802,60 @@ fn parseRange(self: *Parser, from: Node) anyerror!Node {
     try self.expectNext();
     node.ty.range.to = try self.allocator.create(Node);
     node.ty.range.to.* = try self.parseExpression(.range);
+
+    return node;
+}
+
+fn parseRecRange(self: *Parser) anyerror!Node {
+    // Ranges must be unique.
+    self.range_id += 1;
+
+    var node = Node.new(.{ .rec_range = .{
+        .from = null,
+        .to = null,
+        .action = &[0]Node{},
+        .id = self.range_id,
+        .exclusive = false,
+    } }, self.currentOffset());
+
+    if (self.currentIs(.kw_from)) {
+        // From
+        try self.expectTag(.punct_lparen);
+        try self.expectNext();
+        node.ty.rec_range.from = try self.allocator.create(Node);
+        node.ty.rec_range.from.?.* = try self.parseExpression(.lowest);
+        try self.expectTag(.punct_rparen);
+
+        // No to or until with default action.
+        if (self.atEnd() or self.peekIs(.punct_semicolon)) return node;
+
+        _ = self.advance();
+    }
+
+    // To or until range?
+    if (self.currentIs(.kw_to) or self.currentIs(.kw_until)) {
+        if (self.currentIs(.kw_until)) node.ty.rec_range.exclusive = true;
+
+        node.ty.rec_range.to = try self.allocator.create(Node);
+        try self.expectTag(.punct_lparen);
+        try self.expectNext();
+        node.ty.rec_range.to.?.* = try self.parseExpression(.lowest);
+        try self.expectTag(.punct_rparen);
+
+        // Default action.
+        if (self.atEnd() or self.peekIs(.punct_semicolon)) return node;
+
+        _ = self.advance();
+    }
+
+    if (self.currentIs(.punct_lbrace)) {
+        var list = std.ArrayList(Node).init(self.allocator);
+        try self.parseNodes(&list, .punct_rbrace, .punct_semicolon);
+        node.ty.rec_range.action = list.items;
+    } else {
+        node.ty.rec_range.action = try self.allocator.alloc(Node, 1);
+        node.ty.rec_range.action[0] = try self.parseExpression(.lowest);
+    }
 
     return node;
 }

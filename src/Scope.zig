@@ -11,6 +11,7 @@ parent: ?*Scope,
 rec_buf: [1024 * 64]u8 = undefined,
 record: []const u8 = undefined,
 columns: *std.ArrayList(Value) = undefined,
+rec_ranges: std.AutoHashMap(u8, void) = undefined,
 
 pub fn init(allocator: std.mem.Allocator, parent: ?*Scope) Scope {
     return Scope{
@@ -119,16 +120,19 @@ pub fn update(self: *Scope, key: []const u8, value: Value) !void {
 }
 
 // Ranges
-pub fn putRange(self: *Scope, key: usize) !void {
-    try self.get("@ranges").?.ty.rec_range_map.put(key, {});
+pub fn putRange(self: *Scope, key: u8) !void {
+    if (self.parent) |parent| return parent.putRange(key);
+    try self.rec_ranges.put(key, {});
 }
 
-pub fn hasRange(self: Scope, key: usize) bool {
-    return self.get("@ranges").?.ty.rec_range_map.contains(key);
+pub fn hasRange(self: Scope, key: u8) bool {
+    if (self.parent) |parent| return parent.hasRange(key);
+    return self.rec_ranges.contains(key);
 }
 
-pub fn deleteRange(self: *Scope, key: usize) void {
-    _ = self.get("@ranges").?.ty.rec_range_map.remove(key);
+pub fn deleteRange(self: *Scope, key: u8) void {
+    if (self.parent) |parent| return parent.deleteRange(key);
+    _ = self.rec_ranges.remove(key);
 }
 
 // Debug

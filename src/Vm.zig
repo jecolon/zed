@@ -60,7 +60,7 @@ pub fn init(
     return self;
 }
 
-pub fn run(self: *Vm) !void {
+pub fn run(self: *Vm) anyerror!void {
     while (self.ip.* < self.instructions.len) {
         const opcode = @intToEnum(Bytecode.Opcode, self.instructions.*[self.ip.*]);
 
@@ -231,6 +231,80 @@ pub fn run(self: *Vm) !void {
                 );
                 try self.value_stack.append(Value.new(.{ .string = buf.items }, value.offset));
                 self.ip.* += 1;
+            },
+
+            .rec_range => {
+                const range_id = self.instructions.*[self.ip.* + 1];
+                const exclusive = self.instructions.*[self.ip.* + 2] == 1;
+                const from = self.value_stack.pop();
+                const to = self.value_stack.pop();
+                const action_instructions = self.value_stack.pop();
+
+                var result = Value.new(.nil, 0);
+                var eval_action = false;
+
+                if (self.scope.hasRange(range_id)) {
+                    // In range
+                    eval_action = true;
+
+                    if (isTruthy(to)) {
+                        // Range end.
+                        self.scope.deleteRange(range_id);
+                        if (exclusive) eval_action = false;
+                    }
+                } else {
+                    // Not in range
+                    var start_range = false;
+
+                    if (from.ty != .nil) {
+                        // We have from
+                        start_range = isTruthy(from);
+                    } else {
+                        // No from; start only at row == 1.
+                        const rnum = self.scope.load("@rnum").?;
+                        start_range = rnum.ty.uint == 1;
+                    }
+
+                    if (start_range) {
+                        // We start a new range.
+                        try self.scope.putRange(range_id);
+                        eval_action = true;
+                    }
+                }
+
+                if (eval_action) {
+                    if (action_instructions.ty.string.len > 0) {
+                        // Set up Sub-VM arena.
+                        var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
+                        defer vm_arena.deinit();
+                        const vm_allocator = vm_arena.allocator();
+
+                        // Set up function scope.
+                        var func_scope = Scope.init(vm_allocator, self.scope);
+
+                        var vm = try init(
+                            vm_allocator,
+                            self.filename,
+                            self.src,
+                            self.constants,
+                            action_instructions.ty.string,
+                            &func_scope,
+                            self.output,
+                        );
+                        try vm.run();
+
+                        result = vm.last_popped;
+                    } else {
+                        // Default action
+                        const rec = self.scope.load("@rec").?;
+                        var writer = self.output.writer();
+                        _ = try writer.print("{}", .{rec});
+                    }
+                }
+
+                try self.value_stack.append(result);
+
+                self.ip.* += 3;
             },
         }
     }
@@ -1663,7 +1737,6 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         .list,
         .map,
         .range,
-        .rec_range_map,
         => try std.testing.expect(expected.eql(last_popped)),
     }
 
@@ -1737,7 +1810,6 @@ fn testLastValueWithOutput(input: []const u8, expected: Value, expected_output: 
         .list,
         .map,
         .range,
-        .rec_range_map,
         => try std.testing.expect(expected.eql(last_popped)),
     }
 

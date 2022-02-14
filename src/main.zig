@@ -14,7 +14,7 @@ pub fn main() anyerror!void {
     const program_filename = "run/program.zed";
     const filenames = [_][]const u8{
         "run/data_1.csv",
-        //"run/data_2.csv",
+        "run/data_2.csv",
         //"run/lang_mix.txt",
         //"run/hungarian.xml",
     };
@@ -76,9 +76,7 @@ pub fn main() anyerror!void {
     try global_scope.store("@ors", Value.new(.{ .string = ors }, 0));
 
     // Ranges map init.
-    var ranges_map_ptr = try static_allocator.create(std.AutoHashMap(usize, void));
-    ranges_map_ptr.* = std.AutoHashMap(usize, void).init(static_allocator);
-    try global_scope.store("@ranges", Value.new(.{ .rec_range_map = ranges_map_ptr }, 0));
+    global_scope.rec_ranges = std.AutoHashMap(u8, void).init(static_allocator);
 
     // Init blocks
     var inits_arena = std.heap.ArenaAllocator.init(allocator);
