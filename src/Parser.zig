@@ -612,14 +612,13 @@ fn parseFunc(self: *Parser) anyerror!Node {
     var body_list = std.ArrayList(Node).init(self.allocator);
     try self.parseNodes(&body_list, .punct_rbrace, .punct_semicolon);
 
-    //TODO: Handle empty functions.
     // Implicit return
-    if (body_list.items[body_list.items.len - 1].ty != .func_return) {
+    if (body_list.items.len == 0 or body_list.items[body_list.items.len - 1].ty != .func_return) {
         var synth_return = Node.new(
             .{ .func_return = try self.allocator.create(Node) },
             self.currentOffset(),
         );
-        synth_return.ty.func_return.* = body_list.pop();
+        synth_return.ty.func_return.* = if (body_list.items.len == 0) Node.new(.nil, self.currentOffset()) else body_list.pop();
         try body_list.append(synth_return);
     }
 
@@ -1170,7 +1169,7 @@ fn parseNodes(self: *Parser, list: *std.ArrayList(Node), stop: Token.Tag, skip: 
         _ = self.skipTag(skip);
     }
 
-    _ = list.pop(); // Remove last stmt_end to leave only last value on the stack.
+    if (list.items.len > 0) _ = list.pop(); // Remove last stmt_end to leave only last value on the stack.
 }
 
 // Tests

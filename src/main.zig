@@ -13,9 +13,9 @@ pub fn main() anyerror!void {
     // TODO: Replace with command line flags.
     const program_filename = "run/program.zed";
     const filenames = [_][]const u8{
-        //"run/data_1.csv",
+        "run/data_1.csv",
         //"run/data_2.csv",
-        "run/lang_mix.txt",
+        //"run/lang_mix.txt",
         //"run/hungarian.xml",
     };
     const ifs = ",";
@@ -97,7 +97,7 @@ pub fn main() anyerror!void {
     inits_arena.deinit();
 
     // Global record numbering
-    var row: usize = 1;
+    var rnum: usize = 1;
 
     // Loop over input files.
     for (filenames) |filename| {
@@ -132,22 +132,22 @@ pub fn main() anyerror!void {
         var data_reader = std.io.bufferedReader(data_file.reader()).reader();
 
         // Sime state
-        var frow: usize = 1;
-        var record_buf: [1024 * 64]u8 = undefined; //TODO: Is 4K too much?
+        var frnum: usize = 1;
 
         // Loop over records.
-        while (try data_reader.readUntilDelimiterOrEof(&record_buf, global_scope.map.get("@irs").?.ty.string[0])) |record| : ({
-            row += 1;
-            frow += 1;
+        while (try data_reader.readUntilDelimiterOrEof(&global_scope.rec_buf, global_scope.map.get("@irs").?.ty.string[0])) |record| : ({
+            rnum += 1;
+            frnum += 1;
         }) {
+            global_scope.record = record;
+
             var recs_arena = std.heap.ArenaAllocator.init(allocator);
             defer recs_arena.deinit();
             const recs_allocator = recs_arena.allocator();
 
             // Record vars
-            try global_scope.store("@row", Value.new(.{ .uint = row }, 0));
-            try global_scope.store("@frow", Value.new(.{ .uint = frow }, 0));
-            try global_scope.store("@rec", Value.new(.{ .string = record }, 0));
+            try global_scope.store("@rnum", Value.new(.{ .uint = rnum }, 0));
+            try global_scope.store("@frnum", Value.new(.{ .uint = frnum }, 0));
 
             // Rec blocks
             var recs_vm = try Vm.init(
@@ -162,13 +162,14 @@ pub fn main() anyerror!void {
             try recs_vm.run();
 
             // New record, new fileds.
-            var fields_list_ptr = try recs_allocator.create(std.ArrayList(Value));
-            fields_list_ptr.* = std.ArrayList(Value).init(recs_allocator);
+            global_scope.columns = try recs_allocator.create(std.ArrayList(Value));
+            defer recs_allocator.destroy(global_scope.columns);
+            global_scope.columns.* = std.ArrayList(Value).init(recs_allocator);
+            defer global_scope.columns.deinit();
 
             // Loop over fields
-            var field_iter = std.mem.split(u8, global_scope.map.get("@rec").?.ty.string, global_scope.map.get("@ifs").?.ty.string);
-            while (field_iter.next()) |field| try fields_list_ptr.append(Value.new(.{ .string = field }, 0));
-            try global_scope.store("@cols", Value.new(.{ .list = fields_list_ptr }, 0));
+            var field_iter = std.mem.split(u8, global_scope.record, global_scope.map.get("@ifs").?.ty.string);
+            while (field_iter.next()) |field| try global_scope.columns.append(Value.new(.{ .string = field }, 0));
 
             // Eval the program
             var rules_vm = try Vm.init(

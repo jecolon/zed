@@ -8,6 +8,9 @@ allocator: std.mem.Allocator,
 break_point: bool = false,
 map: std.StringHashMap(Value),
 parent: ?*Scope,
+rec_buf: [1024 * 64]u8 = undefined,
+record: []const u8 = undefined,
+columns: *std.ArrayList(Value) = undefined,
 
 pub fn init(allocator: std.mem.Allocator, parent: ?*Scope) Scope {
     return Scope{
@@ -37,6 +40,15 @@ pub fn isDefined(self: Scope, key: []const u8) bool {
 }
 
 pub fn load(self: Scope, key: []const u8) ?Value {
+    if (std.mem.eql(u8, key, "@rec")) {
+        if (self.parent) |parent| return parent.load(key);
+        return Value.new(.{ .string = self.record }, 0);
+    }
+    if (std.mem.eql(u8, key, "@cols")) {
+        if (self.parent) |parent| return parent.load(key);
+        return Value.new(.{ .list = self.columns }, 0);
+    }
+
     if (self.map.get(key)) |value| {
         return value;
     } else if (self.parent) |parent| {
