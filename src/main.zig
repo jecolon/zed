@@ -67,7 +67,7 @@ pub fn main() anyerror!void {
     compiler_arena.deinit();
 
     // Program global scope
-    var global_scope = Scope.init(static_allocator, null);
+    var global_scope = Scope.init(static_allocator, .function, null);
     try Vm.addBuiltins(&global_scope);
 
     // Some global state
@@ -89,7 +89,7 @@ pub fn main() anyerror!void {
         program_src,
         compiled.inits.constants,
         compiled.inits.instructions,
-        &global_scope,
+        global_scope,
         &output,
     );
     inits_vm.run() catch |err| {
@@ -117,7 +117,7 @@ pub fn main() anyerror!void {
             program_src,
             compiled.files.constants,
             compiled.files.instructions,
-            &global_scope,
+            global_scope,
             &output,
         );
         files_vm.run() catch |err| {
@@ -163,7 +163,7 @@ pub fn main() anyerror!void {
                 program_src,
                 compiled.recs.constants,
                 compiled.recs.instructions,
-                &global_scope,
+                global_scope,
                 &output,
             );
             recs_vm.run() catch |err| {
@@ -188,11 +188,9 @@ pub fn main() anyerror!void {
                 program_src,
                 compiled.rules.constants,
                 compiled.rules.instructions,
-                &global_scope,
+                global_scope,
                 &output,
             );
-            global_scope.dump();
-            rules_vm.dump();
             rules_vm.run() catch |err| {
                 std.log.err("Error executing per-record rules: {}.", .{err});
                 return err;
@@ -218,7 +216,7 @@ pub fn main() anyerror!void {
         program_src,
         compiled.exits.constants,
         compiled.exits.instructions,
-        &global_scope,
+        global_scope,
         &output,
     );
     exits_vm.run() catch |err| {

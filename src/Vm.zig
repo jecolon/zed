@@ -8,24 +8,23 @@ const Value = @import("Value.zig");
 const GraphemeIterator = @import("ziglyph").GraphemeIterator;
 const runtimePrint = @import("fmt.zig").runtimePrint;
 
-const Frame = struct {
-    instructions: []const u8,
-    ip: u16 = 0,
-    scope: *Scope,
-};
-
 allocator: std.mem.Allocator,
-call_stack: std.ArrayList(Frame),
-constants: []const Value,
 filename: []const u8,
-global_scope: *Scope,
-instructions: *[]const u8,
-ip: *u16,
+src: []const u8,
+
+constants: []const Value,
 last_popped: Value = Value.new(.nil, 0),
 output: *std.ArrayList(u8),
-scope: *Scope,
-src: []const u8,
+
+// Stacks
+call_stack: std.ArrayList(Frame),
+scope_stack: std.ArrayList(Scope),
 value_stack: std.ArrayList(Value),
+
+// Pointers that change depending on execution context.
+instructions: []const u8 = undefined,
+ip: *u16 = undefined,
+scope: *Scope = undefined,
 
 const Vm = @This();
 
@@ -34,35 +33,36 @@ pub fn init(
     filename: []const u8,
     src: []const u8,
     constants: []const Value,
-    insts: []const u8,
-    scope: *Scope,
+    instructions: []const u8,
+    scope: Scope,
     output: *std.ArrayList(u8),
 ) !Vm {
     var self = Vm{
         .allocator = allocator,
-        .call_stack = std.ArrayList(Frame).init(allocator),
-        .constants = constants,
         .filename = filename,
-        .global_scope = scope,
-        .instructions = undefined,
-        .ip = undefined,
-        .output = output,
-        .scope = undefined,
         .src = src,
+
+        .constants = constants,
+        .instructions = instructions,
+        .output = output,
+
+        .call_stack = std.ArrayList(Frame).init(allocator),
+        .scope_stack = std.ArrayList(Scope).init(allocator),
         .value_stack = std.ArrayList(Value).init(allocator),
     };
 
-    try self.call_stack.append(.{ .instructions = insts, .scope = scope });
-    self.instructions = &self.call_stack.items[0].instructions;
+    try self.call_stack.append(.{ .instructions = instructions });
+    try self.scope_stack.append(scope); // Global Scope
+
     self.ip = &self.call_stack.items[0].ip;
-    self.scope = self.call_stack.items[0].scope;
+    self.scope = &self.scope_stack.items[0];
 
     return self;
 }
 
 pub fn run(self: *Vm) anyerror!void {
     while (self.ip.* < self.instructions.len) {
-        const opcode = @intToEnum(Bytecode.Opcode, self.instructions.*[self.ip.*]);
+        const opcode = @intToEnum(Bytecode.Opcode, self.instructions[self.ip.*]);
 
         switch (opcode) {
             // Instruction pointer movements.
@@ -82,15 +82,13 @@ pub fn run(self: *Vm) anyerror!void {
                 self.ip.* += 2;
             },
             .scope_out => {
-                if (self.scope.parent != null) {
-                    try self.evalScopeOut();
-                }
+                try self.evalScopeOut();
                 self.ip.* += 2;
             },
 
             // Normal opcodes.
             .constant => {
-                const index = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+                const index = std.mem.bytesAsSlice(u16, self.instructions[self.ip.* + 1 .. self.ip.* + 3])[0];
                 try self.value_stack.append(self.constants[index]);
                 self.ip.* += 3;
             },
@@ -172,6 +170,13 @@ pub fn run(self: *Vm) anyerror!void {
 
                 // Pop the function's frame.
                 self.popFrame();
+                // Unwind scopes up to the function's scope.
+                while (true) {
+                    var old_scope = self.popScope();
+                    old_scope.deinit();
+                    if (old_scope.ty == .function) break;
+                }
+
                 self.ip.* += 1;
             },
 
@@ -369,28 +374,28 @@ fn evalCall(self: *Vm) anyerror!void {
     }
 
     // Prepare the child scope.
-    var func_scope_ptr = try self.allocator.create(Scope);
-    func_scope_ptr.* = Scope.init(self.allocator, self.global_scope);
+    var func_scope = Scope.init(self.allocator, .function, &self.scope_stack.items[0]);
 
     // Self-references
-    if (callee.ty.func.name.len != 0) try func_scope_ptr.store(callee.ty.func.name, callee);
+    if (callee.ty.func.name.len != 0) try func_scope.store(callee.ty.func.name, callee);
 
     // Process args
-    const num_args = self.instructions.*[self.ip.* + 1];
+    const num_args = self.instructions[self.ip.* + 1];
     self.ip.* += 1;
 
     var i: usize = 0;
     while (i < num_args) : (i += 1) {
         const arg = self.value_stack.pop();
-        if (i == 0) try func_scope_ptr.store("it", arg); // it
+        if (i == 0) try func_scope.store("it", arg); // it
         var buf: [4]u8 = undefined;
         const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{i});
-        try func_scope_ptr.store(auto_arg_name, arg); // @0, @1, ...
-        if (i < callee.ty.func.params.len) try func_scope_ptr.store(callee.ty.func.params[i], arg);
+        try func_scope.store(auto_arg_name, arg); // @0, @1, ...
+        if (i < callee.ty.func.params.len) try func_scope.store(callee.ty.func.params[i], arg);
     }
 
     // Push the function's frame.
-    try self.pushFrame(callee.ty.func.instructions, func_scope_ptr);
+    try self.pushScope(func_scope);
+    try self.pushFrame(callee.ty.func.instructions);
 }
 
 fn evalDefine(self: *Vm) anyerror!void {
@@ -443,7 +448,7 @@ fn evalLoad(self: *Vm) anyerror!void {
 fn evalStore(self: *Vm) anyerror!void {
     const name = self.value_stack.pop();
     const rvalue = self.value_stack.pop();
-    const combo = @intToEnum(Node.Combo, self.instructions.*[self.ip.* + 1]);
+    const combo = @intToEnum(Node.Combo, self.instructions[self.ip.* + 1]);
 
     if (combo == .none) {
         if (!self.scope.isDefined(name.ty.string)) {
@@ -475,7 +480,7 @@ fn evalStore(self: *Vm) anyerror!void {
 }
 
 fn evalString(self: *Vm) anyerror!void {
-    const len = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+    const len = std.mem.bytesAsSlice(u16, self.instructions[self.ip.* + 1 .. self.ip.* + 3])[0];
     var buf = std.ArrayList(u8).init(self.allocator);
     var writer = buf.writer();
     var i: usize = 0;
@@ -516,7 +521,7 @@ fn evalJumpTrue(self: *Vm) void {
 }
 
 fn evalList(self: *Vm) anyerror!void {
-    const num_items = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+    const num_items = std.mem.bytesAsSlice(u16, self.instructions[self.ip.* + 1 .. self.ip.* + 3])[0];
 
     var list_ptr = try self.allocator.create(std.ArrayList(Value));
     list_ptr.* = std.ArrayList(Value).init(self.allocator);
@@ -595,7 +600,7 @@ fn evalLogicNot(self: *Vm) anyerror!void {
 }
 
 fn evalMap(self: *Vm) anyerror!void {
-    const num_entries = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+    const num_entries = std.mem.bytesAsSlice(u16, self.instructions[self.ip.* + 1 .. self.ip.* + 3])[0];
 
     var map_ptr = try self.allocator.create(std.StringHashMap(Value));
     map_ptr.* = std.StringHashMap(Value).init(self.allocator);
@@ -640,7 +645,7 @@ fn evalNegative(self: *Vm) anyerror!void {
 }
 
 fn evalRange(self: *Vm) anyerror!void {
-    const inclusive = self.instructions.*[self.ip.* + 1] == 1;
+    const inclusive = self.instructions[self.ip.* + 1] == 1;
     const end = self.value_stack.pop();
     const start = self.value_stack.pop();
     if (start.ty != .uint or end.ty != .uint) {
@@ -656,8 +661,8 @@ fn evalRange(self: *Vm) anyerror!void {
 }
 
 fn evalRecRange(self: *Vm) anyerror!void {
-    const range_id = self.instructions.*[self.ip.* + 1];
-    const exclusive = self.instructions.*[self.ip.* + 2] == 1;
+    const range_id = self.instructions[self.ip.* + 1];
+    const exclusive = self.instructions[self.ip.* + 2] == 1;
     const from = self.value_stack.pop();
     const to = self.value_stack.pop();
     const action_instructions = self.value_stack.pop();
@@ -701,16 +706,13 @@ fn evalRecRange(self: *Vm) anyerror!void {
             defer vm_arena.deinit();
             const vm_allocator = vm_arena.allocator();
 
-            // Set up function scope.
-            var func_scope = Scope.init(vm_allocator, self.scope);
-
             var vm = try init(
                 vm_allocator,
                 self.filename,
                 self.src,
                 self.constants,
                 action_instructions.ty.string,
-                &func_scope,
+                Scope.init(vm_allocator, .function, self.scope),
                 self.output,
             );
             try vm.run();
@@ -728,34 +730,23 @@ fn evalRecRange(self: *Vm) anyerror!void {
 }
 
 fn evalScopeIn(self: *Vm) anyerror!void {
-    var child_scope_ptr = try self.allocator.create(Scope);
-    child_scope_ptr.* = Scope.init(self.allocator, self.scope);
-    self.scope = child_scope_ptr;
-    self.scope.break_point = self.instructions.*[self.ip.* + 1] == 1;
+    const child_scope_type = @intToEnum(Scope.Type, self.instructions[self.ip.* + 1]);
+    var child_scope = Scope.init(self.allocator, child_scope_type, self.scope);
+    try self.pushScope(child_scope);
 }
 
 fn evalScopeOut(self: *Vm) anyerror!void {
-    if (self.instructions.*[self.ip.* + 1] == 1) {
-        while (true) {
-            var child_scope_ptr = self.scope;
-            const break_point = child_scope_ptr.break_point;
-            self.scope = child_scope_ptr.parent.?;
-            child_scope_ptr.deinit();
-            self.allocator.destroy(child_scope_ptr);
-            if (break_point) break;
+    const scope_type = @intToEnum(Scope.Type, self.instructions[self.ip.* + 1]);
 
-            //const child_scope = self.scope;
-            //self.scope = child_scope.parent.?;
-            //if (child_scope.break_point) break;
+    if (scope_type == .loop) {
+        while (true) {
+            var old_scope = self.popScope();
+            old_scope.deinit();
+            if (old_scope.ty == .loop) break;
         }
     } else {
-        // TODO: Try this
-        var child_scope_ptr = self.scope;
-        self.scope = child_scope_ptr.parent.?;
-        child_scope_ptr.deinit();
-        self.allocator.destroy(child_scope_ptr);
-
-        //self.scope = self.scope.parent.?;
+        var old_scope = self.popScope();
+        old_scope.deinit();
     }
 }
 
@@ -787,7 +778,7 @@ fn evalListSet(self: *Vm, container: Value) anyerror!void {
         return error.InvalidSet;
     }
 
-    const combo = @intToEnum(Node.Combo, self.instructions.*[self.ip.* + 1]);
+    const combo = @intToEnum(Node.Combo, self.instructions[self.ip.* + 1]);
 
     if (combo == .none) {
         // Free old value.
@@ -823,7 +814,7 @@ fn evalMapSet(self: *Vm, container: Value) anyerror!void {
         return error.InvalidSet;
     }
 
-    const combo = @intToEnum(Node.Combo, self.instructions.*[self.ip.* + 1]);
+    const combo = @intToEnum(Node.Combo, self.instructions[self.ip.* + 1]);
     const rvalue = self.value_stack.pop();
     const key_copy = try container.ty.map.allocator.dupe(u8, key.ty.string);
 
@@ -879,6 +870,8 @@ fn evalSubscript(self: *Vm) anyerror!void {
     }
 }
 
+// Helpers
+
 fn isTruthy(value: Value) bool {
     return switch (value.ty) {
         .boolean => |b| b,
@@ -892,32 +885,43 @@ fn isTruthy(value: Value) bool {
 }
 
 fn jump(self: *Vm) void {
-    const index = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+    const index = std.mem.bytesAsSlice(u16, self.instructions[self.ip.* + 1 .. self.ip.* + 3])[0];
     self.ip.* = index;
 }
 
-fn pushFrame(self: *Vm, instructions: []const u8, scope: *Scope) anyerror!void {
-    try self.call_stack.append(.{ .instructions = instructions, .scope = scope });
-    self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
+const Frame = struct {
+    instructions: []const u8,
+    ip: u16 = 0,
+};
+
+fn pushFrame(self: *Vm, instructions: []const u8) anyerror!void {
+    try self.call_stack.append(.{ .instructions = instructions });
+    self.instructions = instructions;
     self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
-    self.scope = self.call_stack.items[self.call_stack.items.len - 1].scope;
 }
 
 fn popFrame(self: *Vm) void {
-    //TODO: Try this.
-    self.scope.deinit();
-    self.allocator.destroy(self.scope);
     _ = self.call_stack.pop();
-    self.instructions = &self.call_stack.items[self.call_stack.items.len - 1].instructions;
+    self.instructions = self.call_stack.items[self.call_stack.items.len - 1].instructions;
     self.ip = &self.call_stack.items[self.call_stack.items.len - 1].ip;
-    self.scope = self.call_stack.items[self.call_stack.items.len - 1].scope;
+}
+
+fn pushScope(self: *Vm, scope: Scope) anyerror!void {
+    try self.scope_stack.append(scope);
+    self.scope = &self.scope_stack.items[self.scope_stack.items.len - 1];
+}
+
+fn popScope(self: *Vm) Scope {
+    std.debug.assert(self.scope_stack.items.len > 1);
+    self.scope = &self.scope_stack.items[self.scope_stack.items.len - 2];
+    return self.scope_stack.pop();
 }
 
 // Builtins
 fn atan2(self: *Vm, offset: u16) anyerror!void {
     // Get args count.
     self.ip.* += 1;
-    const num_args = self.instructions.*[self.ip.*];
+    const num_args = self.instructions[self.ip.*];
     if (num_args != 2) {
         const location = Location.getLocation(self.filename, self.src, offset);
         std.log.err("atan2 requires 2 arguments.; {}", .{location});
@@ -966,7 +970,7 @@ fn strChars(self: *Vm, offset: u16) anyerror!void {
 fn print(self: *Vm, offset: u16, writer: anytype) anyerror!void {
     // Get args count.
     self.ip.* += 1;
-    const num_args = self.instructions.*[self.ip.*];
+    const num_args = self.instructions[self.ip.*];
 
     var i: usize = 0;
     const ofs = if (self.scope.load("@ofs")) |s| s.ty.string else ",";
@@ -981,7 +985,7 @@ fn print(self: *Vm, offset: u16, writer: anytype) anyerror!void {
 fn oneArgMath(self: *Vm, builtin: Value) anyerror!void {
     // Get args count.
     self.ip.* += 1;
-    const num_args = self.instructions.*[self.ip.*];
+    const num_args = self.instructions[self.ip.*];
     if (num_args != 1) {
         const location = Location.getLocation(self.filename, self.src, builtin.offset);
         std.log.err("Builtin call requires one argument; {}", .{location});
@@ -1545,7 +1549,7 @@ fn listReduce(self: *Vm, offset: u16) anyerror!void {
 
     for (l.ty.list.items) |item, i| {
         // Set up function scope.
-        var func_scope = Scope.init(vm_allocator, self.scope);
+        var func_scope = Scope.init(vm_allocator, .function, self.scope);
 
         // Assign args as locals in function scope.
         try func_scope.store("acc", acc);
@@ -1561,7 +1565,7 @@ fn listReduce(self: *Vm, offset: u16) anyerror!void {
             self.src,
             self.constants,
             f.ty.func.instructions,
-            &func_scope,
+            func_scope,
             self.output,
         );
         try vm.run();
@@ -1575,7 +1579,7 @@ fn listReduce(self: *Vm, offset: u16) anyerror!void {
 fn rand(self: *Vm, offset: u16) anyerror!void {
     // Get args count.
     self.ip.* += 1;
-    const num_args = self.instructions.*[self.ip.*];
+    const num_args = self.instructions[self.ip.*];
     if (num_args != 1) {
         const location = Location.getLocation(self.filename, self.src, offset);
         std.log.err("rand requres one argument; {}", .{location});
@@ -1614,7 +1618,7 @@ fn evalListPredicate(self: Vm, func: Value, item: Value, index: usize) anyerror!
     const vm_allocator = vm_arena.allocator();
 
     // Set up function scope.
-    var func_scope = Scope.init(vm_allocator, self.scope);
+    var func_scope = Scope.init(vm_allocator, .function, self.scope);
 
     // Assign args as locals in function scope.
     try func_scope.store("it", item);
@@ -1628,7 +1632,7 @@ fn evalListPredicate(self: Vm, func: Value, item: Value, index: usize) anyerror!
         self.src,
         self.constants,
         func.ty.func.instructions,
-        &func_scope,
+        func_scope,
         self.output,
     );
     try vm.run();
@@ -1648,14 +1652,14 @@ pub fn dump(self: Vm) void {
 
     var ins_index: usize = 0;
     while (ins_index < self.instructions.len) {
-        const ins = self.instructions.*[ins_index];
+        const ins = self.instructions[ins_index];
 
         if (Bytecode.Opcode.fromInt(ins)) |def| {
             if (def.bytes == 3) {
-                const operand = std.mem.bytesAsSlice(u16, self.instructions.*[ins_index + 1 .. ins_index + 3])[0];
+                const operand = std.mem.bytesAsSlice(u16, self.instructions[ins_index + 1 .. ins_index + 3])[0];
                 std.debug.print("\t{}: {} -> {}\n", .{ ins_index, def.opcode, operand });
             } else if (def.bytes == 2) {
-                std.debug.print("\t{}: {} -> {}\n", .{ ins_index, def.opcode, self.instructions.*[ins_index + 1] });
+                std.debug.print("\t{}: {} -> {}\n", .{ ins_index, def.opcode, self.instructions[ins_index + 1] });
             } else {
                 std.debug.print("\t{}: {}\n", .{ ins_index, def.opcode });
             }
@@ -1704,7 +1708,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
     var compiler = try Compiler.init(compiler_allocator);
     const compiled = try compiler.compileProgram(vm_allocator, program);
 
-    var scope = Scope.init(allocator, null);
+    var scope = Scope.init(allocator, .function, null);
     defer scope.deinit();
     try addBuiltins(&scope);
 
@@ -1721,7 +1725,7 @@ fn testLastValue(input: []const u8, expected: Value) !void {
         input,
         constants,
         instructions,
-        &scope,
+        scope,
         &output,
     );
     if (debug_dumps) vm.dump();
@@ -1780,7 +1784,7 @@ fn testLastValueWithOutput(input: []const u8, expected: Value, expected_output: 
     var compiler = try Compiler.init(arena.allocator());
     const compiled = try compiler.compileProgram(arena.allocator(), program);
 
-    var scope = Scope.init(allocator, null);
+    var scope = Scope.init(allocator, .function, null);
     defer scope.deinit();
     try addBuiltins(&scope);
 
@@ -1792,7 +1796,7 @@ fn testLastValueWithOutput(input: []const u8, expected: Value, expected_output: 
         input,
         compiled.rules.constants,
         compiled.rules.instructions,
-        &scope,
+        scope,
         &output,
     );
     if (debug_dumps) vm.dump();
@@ -2353,4 +2357,10 @@ test "Vm method builtins" {
     try testLastValue(
         \\"H\u65\u301llo".chars()[1]
     , Value.new(.{ .string = "\u{65}\u{301}" }, 0));
+    try testLastValue(
+        \\if (true) {
+        \\  f := { 1 + 1 }
+        \\  f() + f()
+        \\}
+    , Value.new(.{ .uint = 4 }, 0));
 }

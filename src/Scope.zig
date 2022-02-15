@@ -4,20 +4,27 @@ const Value = @import("Value.zig");
 
 const Scope = @This();
 
+pub const Type = enum {
+    block,
+    function,
+    loop,
+};
+
 allocator: std.mem.Allocator,
-break_point: bool = false,
+columns: *std.ArrayList(Value) = undefined,
 map: std.StringHashMap(Value),
 parent: ?*Scope,
 rec_buf: [1024 * 64]u8 = undefined,
-record: []const u8 = undefined,
-columns: *std.ArrayList(Value) = undefined,
 rec_ranges: std.AutoHashMap(u8, void) = undefined,
+record: []const u8 = undefined,
+ty: Type,
 
-pub fn init(allocator: std.mem.Allocator, parent: ?*Scope) Scope {
+pub fn init(allocator: std.mem.Allocator, ty: Type, parent: ?*Scope) Scope {
     return Scope{
         .allocator = allocator,
         .map = std.StringHashMap(Value).init(allocator),
         .parent = parent,
+        .ty = ty,
     };
 }
 

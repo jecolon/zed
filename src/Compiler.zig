@@ -3,6 +3,7 @@ const std = @import("std");
 const Bytecode = @import("Bytecode.zig");
 const Node = @import("Node.zig");
 const Program = @import("Parser.zig").Program;
+const Scope = @import("Scope.zig");
 const Value = @import("Value.zig");
 
 allocator: std.mem.Allocator,
@@ -146,7 +147,7 @@ fn compileAssign(self: *Compiler, node: Node) anyerror!void {
 
 fn compileBreak(self: *Compiler) anyerror!void {
     try self.pushInstruction(.scope_out);
-    try self.instructions.append(1);
+    try self.instructions.append(@enumToInt(Scope.Type.loop));
     try self.pushInstruction(.jump);
     try self.jump_updates.?.updates.append(try self.pushZeroes(2));
 }
@@ -168,27 +169,27 @@ fn compileConditional(self: *Compiler, node: Node) anyerror!void {
     const jump_false_operand_index = try self.pushZeroes(2);
     // Then branch
     try self.pushInstruction(.scope_in);
-    try self.instructions.append(0);
+    try self.instructions.append(@enumToInt(Scope.Type.block));
     for (node.ty.conditional.then_branch) |n| try self.compile(n);
     try self.pushInstruction(.scope_out);
-    try self.instructions.append(0);
+    try self.instructions.append(@enumToInt(Scope.Type.block));
     // Unconditional jump
     try self.pushInstruction(.jump);
     const jump_operand_index = try self.pushZeroes(2);
     self.updateJumpIndex(jump_false_operand_index);
     // Else branch
     try self.pushInstruction(.scope_in);
-    try self.instructions.append(0);
+    try self.instructions.append(@enumToInt(Scope.Type.block));
     for (node.ty.conditional.else_branch) |n| try self.compile(n);
     try self.pushInstruction(.scope_out);
-    try self.instructions.append(0);
+    try self.instructions.append(@enumToInt(Scope.Type.block));
 
     self.updateJumpIndex(jump_operand_index);
 }
 
 fn compileContinue(self: *Compiler) anyerror!void {
     try self.pushInstruction(.scope_out);
-    try self.instructions.append(1);
+    try self.instructions.append(@enumToInt(Scope.Type.loop));
     try self.pushInstructionAndOperands(u16, .jump, &[_]u16{self.current_loop_start.?.index});
 }
 
@@ -283,10 +284,10 @@ fn compileLoop(self: *Compiler, node: Node) anyerror!void {
 
     // Body
     try self.pushInstruction(.scope_in);
-    try self.instructions.append(1);
+    try self.instructions.append(@enumToInt(Scope.Type.loop));
     for (node.ty.loop.body) |n| try self.compile(n);
     try self.pushInstruction(.scope_out);
-    try self.instructions.append(1);
+    try self.instructions.append(@enumToInt(Scope.Type.loop));
 
     // Unconditional jump
     try self.pushInstructionAndOperands(u16, .jump, &[_]u16{self.current_loop_start.?.index});
@@ -342,10 +343,10 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
             },
             .ipol => |ipol| {
                 try self.pushInstruction(.scope_in);
-                try self.instructions.append(0);
+                try self.instructions.append(@enumToInt(Scope.Type.block));
                 for (ipol.nodes) |n| try self.compile(n);
                 try self.pushInstruction(.scope_out);
-                try self.instructions.append(0);
+                try self.instructions.append(@enumToInt(Scope.Type.block));
 
                 if (ipol.format) |spec| {
                     try self.pushConstant(Value.new(.{ .string = spec }, node.offset));
