@@ -13,8 +13,9 @@ pub fn main() anyerror!void {
     // TODO: Replace with command line flags.
     const program_filename = "run/program.zed";
     const filenames = [_][]const u8{
+        //"-",
         "run/data_1.csv",
-        "run/data_2.csv",
+        //"run/data_2.csv",
         //"run/lang_mix.txt",
         //"run/hungarian.xml",
     };
@@ -190,6 +191,8 @@ pub fn main() anyerror!void {
                 &global_scope,
                 &output,
             );
+            global_scope.dump();
+            rules_vm.dump();
             rules_vm.run() catch |err| {
                 std.log.err("Error executing per-record rules: {}.", .{err});
                 return err;

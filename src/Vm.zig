@@ -82,7 +82,9 @@ pub fn run(self: *Vm) anyerror!void {
                 self.ip.* += 2;
             },
             .scope_out => {
-                try self.evalScopeOut();
+                if (self.scope.parent != null) {
+                    try self.evalScopeOut();
+                }
                 self.ip.* += 2;
             },
 
@@ -199,111 +201,17 @@ pub fn run(self: *Vm) anyerror!void {
             },
 
             .string => {
-                const len = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
-                var buf = std.ArrayList(u8).init(self.allocator);
-                var writer = buf.writer();
-                var i: usize = 0;
-                while (i < len) : (i += 1) _ = try writer.print("{}", .{self.value_stack.pop()});
-                try self.value_stack.append(Value.new(.{ .string = buf.items }, 0));
-
+                try self.evalString();
                 self.ip.* += 3;
             },
 
             .format => {
-                const spec = self.value_stack.pop();
-                if (spec.ty != .string) {
-                    const location = Location.getLocation(self.filename, self.src, spec.offset);
-                    std.log.err("Invalid format spec; {}", .{location});
-                    return error.InvalidFormat;
-                }
-
-                const value = self.value_stack.pop();
-                var buf = std.ArrayList(u8).init(self.allocator);
-                var writer = buf.writer();
-                try runtimePrint(
-                    self.allocator,
-                    self.filename,
-                    self.src,
-                    spec.ty.string,
-                    value,
-                    writer,
-                    spec.offset,
-                );
-                try self.value_stack.append(Value.new(.{ .string = buf.items }, value.offset));
+                try self.evalFormat();
                 self.ip.* += 1;
             },
 
             .rec_range => {
-                const range_id = self.instructions.*[self.ip.* + 1];
-                const exclusive = self.instructions.*[self.ip.* + 2] == 1;
-                const from = self.value_stack.pop();
-                const to = self.value_stack.pop();
-                const action_instructions = self.value_stack.pop();
-
-                var result = Value.new(.nil, 0);
-                var eval_action = false;
-
-                if (self.scope.hasRange(range_id)) {
-                    // In range
-                    eval_action = true;
-
-                    if (isTruthy(to)) {
-                        // Range end.
-                        self.scope.deleteRange(range_id);
-                        if (exclusive) eval_action = false;
-                    }
-                } else {
-                    // Not in range
-                    var start_range = false;
-
-                    if (from.ty != .nil) {
-                        // We have from
-                        start_range = isTruthy(from);
-                    } else {
-                        // No from; start only at row == 1.
-                        const rnum = self.scope.load("@rnum").?;
-                        start_range = rnum.ty.uint == 1;
-                    }
-
-                    if (start_range) {
-                        // We start a new range.
-                        try self.scope.putRange(range_id);
-                        eval_action = true;
-                    }
-                }
-
-                if (eval_action) {
-                    if (action_instructions.ty.string.len > 0) {
-                        // Set up Sub-VM arena.
-                        var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
-                        defer vm_arena.deinit();
-                        const vm_allocator = vm_arena.allocator();
-
-                        // Set up function scope.
-                        var func_scope = Scope.init(vm_allocator, self.scope);
-
-                        var vm = try init(
-                            vm_allocator,
-                            self.filename,
-                            self.src,
-                            self.constants,
-                            action_instructions.ty.string,
-                            &func_scope,
-                            self.output,
-                        );
-                        try vm.run();
-
-                        result = vm.last_popped;
-                    } else {
-                        // Default action
-                        const rec = self.scope.load("@rec").?;
-                        var writer = self.output.writer();
-                        _ = try writer.print("{}", .{rec});
-                    }
-                }
-
-                try self.value_stack.append(result);
-
+                try self.evalRecRange();
                 self.ip.* += 3;
             },
         }
@@ -497,6 +405,29 @@ fn evalDefine(self: *Vm) anyerror!void {
     try self.value_stack.append(value);
 }
 
+fn evalFormat(self: *Vm) anyerror!void {
+    const spec = self.value_stack.pop();
+    if (spec.ty != .string) {
+        const location = Location.getLocation(self.filename, self.src, spec.offset);
+        std.log.err("Invalid format spec; {}", .{location});
+        return error.InvalidFormat;
+    }
+
+    const value = self.value_stack.pop();
+    var buf = std.ArrayList(u8).init(self.allocator);
+    var writer = buf.writer();
+    try runtimePrint(
+        self.allocator,
+        self.filename,
+        self.src,
+        spec.ty.string,
+        value,
+        writer,
+        spec.offset,
+    );
+    try self.value_stack.append(Value.new(.{ .string = buf.items }, value.offset));
+}
+
 fn evalLoad(self: *Vm) anyerror!void {
     const name = self.value_stack.pop();
 
@@ -541,6 +472,15 @@ fn evalStore(self: *Vm) anyerror!void {
         try self.scope.update(name.ty.string, new_value);
         try self.value_stack.append(new_value);
     }
+}
+
+fn evalString(self: *Vm) anyerror!void {
+    const len = std.mem.bytesAsSlice(u16, self.instructions.*[self.ip.* + 1 .. self.ip.* + 3])[0];
+    var buf = std.ArrayList(u8).init(self.allocator);
+    var writer = buf.writer();
+    var i: usize = 0;
+    while (i < len) : (i += 1) _ = try writer.print("{}", .{self.value_stack.pop()});
+    try self.value_stack.append(Value.new(.{ .string = buf.items }, 0));
 }
 
 fn evalLogicAndOr(self: *Vm, opcode: Bytecode.Opcode) anyerror!void {
@@ -713,6 +653,78 @@ fn evalRange(self: *Vm) anyerror!void {
     const end_uint = if (inclusive) end.ty.uint + 1 else end.ty.uint;
 
     try self.value_stack.append(Value.new(.{ .range = [2]usize{ start_uint, end_uint } }, start.offset));
+}
+
+fn evalRecRange(self: *Vm) anyerror!void {
+    const range_id = self.instructions.*[self.ip.* + 1];
+    const exclusive = self.instructions.*[self.ip.* + 2] == 1;
+    const from = self.value_stack.pop();
+    const to = self.value_stack.pop();
+    const action_instructions = self.value_stack.pop();
+
+    var result = Value.new(.nil, 0);
+    var eval_action = false;
+
+    if (self.scope.hasRange(range_id)) {
+        // In range
+        eval_action = true;
+
+        if (isTruthy(to)) {
+            // Range end.
+            self.scope.deleteRange(range_id);
+            if (exclusive) eval_action = false;
+        }
+    } else {
+        // Not in range
+        var start_range = false;
+
+        if (from.ty != .nil) {
+            // We have from
+            start_range = isTruthy(from);
+        } else {
+            // No from; start only at row == 1.
+            const rnum = self.scope.load("@rnum").?;
+            start_range = rnum.ty.uint == 1;
+        }
+
+        if (start_range) {
+            // We start a new range.
+            try self.scope.putRange(range_id);
+            eval_action = true;
+        }
+    }
+
+    if (eval_action) {
+        if (action_instructions.ty.string.len > 0) {
+            // Set up Sub-VM arena.
+            var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
+            defer vm_arena.deinit();
+            const vm_allocator = vm_arena.allocator();
+
+            // Set up function scope.
+            var func_scope = Scope.init(vm_allocator, self.scope);
+
+            var vm = try init(
+                vm_allocator,
+                self.filename,
+                self.src,
+                self.constants,
+                action_instructions.ty.string,
+                &func_scope,
+                self.output,
+            );
+            try vm.run();
+
+            result = vm.last_popped;
+        } else {
+            // Default action
+            const rec = self.scope.load("@rec").?;
+            var writer = self.output.writer();
+            _ = try writer.print("{}", .{rec});
+        }
+    }
+
+    try self.value_stack.append(result);
 }
 
 fn evalScopeIn(self: *Vm) anyerror!void {
