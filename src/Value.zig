@@ -6,7 +6,7 @@ const Builtin = enum {
     contains,
     cos,
     each,
-    endIs,
+    endsWith,
     exp,
     filter,
     indexOf,
@@ -31,7 +31,7 @@ const Builtin = enum {
     sort,
     sqrt,
     split,
-    startIs,
+    startsWith,
     stdev,
     values,
 };

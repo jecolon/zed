@@ -323,7 +323,7 @@ fn parseBuiltin(self: *Parser, object: Node) anyerror!Node {
         .pd_chars => return self.parseNoArgBuiltin(object),
         .pd_contains => self.parseOneArgBuiltin(object),
         .pd_each => self.parseOneArgBuiltin(object),
-        .pd_endIs => self.parseOneArgBuiltin(object),
+        .pd_endsWith => self.parseOneArgBuiltin(object),
         .pd_filter => self.parseOneArgBuiltin(object),
         .pd_indexOf => self.parseOneArgBuiltin(object),
         .pd_join => self.parseOneArgBuiltin(object),
@@ -341,7 +341,7 @@ fn parseBuiltin(self: *Parser, object: Node) anyerror!Node {
         .pd_reverse => self.parseNoArgBuiltin(object),
         .pd_sort => self.parseNoArgBuiltin(object),
         .pd_split => self.parseOneArgBuiltin(object),
-        .pd_startIs => self.parseOneArgBuiltin(object),
+        .pd_startsWith => self.parseOneArgBuiltin(object),
         .pd_stdev => self.parseNoArgBuiltin(object),
         .pd_values => self.parseNoArgBuiltin(object),
 
@@ -403,7 +403,7 @@ fn parseOneArgBuiltin(self: *Parser, object: Node) anyerror!Node {
     const bi_name = switch (tag) {
         .pd_contains => "contains",
         .pd_each => "each",
-        .pd_endIs => "endIs",
+        .pd_endsWith => "endsWith",
         .pd_filter => "filter",
         .pd_indexOf => "indexOf",
         .pd_join => "join",
@@ -411,7 +411,7 @@ fn parseOneArgBuiltin(self: *Parser, object: Node) anyerror!Node {
         .pd_map => "map",
         .pd_push => "push",
         .pd_split => "split",
-        .pd_startIs => "startIs",
+        .pd_startsWith => "startsWith",
         else => unreachable,
     };
     bi_ptr.* = Node.new(.{ .ident = bi_name }, offset);
