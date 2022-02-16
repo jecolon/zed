@@ -6,6 +6,7 @@ const Node = @import("Node.zig");
 const Parser = @import("Parser.zig");
 const Program = @import("Node.zig").Program;
 const Scope = @import("Scope.zig");
+const ScopeStack = @import("ScopeStack.zig");
 const Value = @import("Value.zig");
 const Vm = @import("Vm.zig");
 
@@ -15,7 +16,7 @@ pub fn main() anyerror!void {
     const filenames = [_][]const u8{
         //"-",
         "run/data_1.csv",
-        //"run/data_2.csv",
+        "run/data_2.csv",
         //"run/lang_mix.txt",
         //"run/hungarian.xml",
     };
@@ -67,8 +68,9 @@ pub fn main() anyerror!void {
     compiler_arena.deinit();
 
     // Program global scope
-    var global_scope = Scope.init(static_allocator, .function, null);
-    try Vm.addBuiltins(&global_scope);
+    var scope_stack = ScopeStack.init(static_allocator);
+    const global_scope = try scope_stack.push(Scope.init(static_allocator, .function));
+    try Vm.addBuiltins(global_scope);
 
     // Some global state
     try global_scope.store("@ifs", Value.new(.{ .string = ifs }, 0));
@@ -89,7 +91,7 @@ pub fn main() anyerror!void {
         program_src,
         compiled.inits.constants,
         compiled.inits.instructions,
-        global_scope,
+        scope_stack,
         &output,
     );
     inits_vm.run() catch |err| {
@@ -117,7 +119,7 @@ pub fn main() anyerror!void {
             program_src,
             compiled.files.constants,
             compiled.files.instructions,
-            global_scope,
+            scope_stack,
             &output,
         );
         files_vm.run() catch |err| {
@@ -163,7 +165,7 @@ pub fn main() anyerror!void {
                 program_src,
                 compiled.recs.constants,
                 compiled.recs.instructions,
-                global_scope,
+                scope_stack,
                 &output,
             );
             recs_vm.run() catch |err| {
@@ -188,7 +190,7 @@ pub fn main() anyerror!void {
                 program_src,
                 compiled.rules.constants,
                 compiled.rules.instructions,
-                global_scope,
+                scope_stack,
                 &output,
             );
             rules_vm.run() catch |err| {
@@ -216,7 +218,7 @@ pub fn main() anyerror!void {
         program_src,
         compiled.exits.constants,
         compiled.exits.instructions,
-        global_scope,
+        scope_stack,
         &output,
     );
     exits_vm.run() catch |err| {

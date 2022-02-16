@@ -13,17 +13,15 @@ pub const Type = enum {
 allocator: std.mem.Allocator,
 columns: *std.ArrayList(Value) = undefined,
 map: std.StringHashMap(Value),
-parent: ?*Scope,
 rec_buf: [1024 * 64]u8 = undefined,
 rec_ranges: std.AutoHashMap(u8, void) = undefined,
 record: []const u8 = undefined,
 ty: Type,
 
-pub fn init(allocator: std.mem.Allocator, ty: Type, parent: ?*Scope) Scope {
+pub fn init(allocator: std.mem.Allocator, ty: Type) Scope {
     return Scope{
         .allocator = allocator,
         .map = std.StringHashMap(Value).init(allocator),
-        .parent = parent,
         .ty = ty,
     };
 }
@@ -66,33 +64,11 @@ const read_only = std.ComptimeStringMap(void, .{
 
 pub fn isDefined(self: Scope, key: []const u8) bool {
     if (globals.has(key)) return true;
-
-    if (self.map.contains(key)) {
-        return true;
-    } else if (self.parent) |parent| {
-        return parent.isDefined(key);
-    } else {
-        return false;
-    }
+    return self.map.contains(key);
 }
 
 pub fn load(self: Scope, key: []const u8) ?Value {
-    if (std.mem.eql(u8, key, "@rec")) {
-        if (self.parent) |parent| return parent.load(key);
-        return Value.new(.{ .string = self.record }, 0);
-    }
-    if (std.mem.eql(u8, key, "@cols")) {
-        if (self.parent) |parent| return parent.load(key);
-        return Value.new(.{ .list = self.columns }, 0);
-    }
-
-    if (self.map.get(key)) |value| {
-        return value;
-    } else if (self.parent) |parent| {
-        return parent.load(key);
-    } else {
-        return null;
-    }
+    return self.map.get(key);
 }
 
 pub fn store(self: *Scope, key: []const u8, value: Value) !void {
@@ -102,44 +78,8 @@ pub fn store(self: *Scope, key: []const u8, value: Value) !void {
 
 pub fn update(self: *Scope, key: []const u8, value: Value) !void {
     if (read_only.has(key)) return error.ReadOnlyGlobal;
-
-    if (std.mem.eql(u8, key, "@rec")) {
-        if (self.parent) |parent| return parent.update(key, value);
-        if (value.ty != .string) return error.InvalidAtRec;
-        self.record = value.ty.string;
-        return;
-    }
-    if (std.mem.eql(u8, key, "@cols")) {
-        if (self.parent) |parent| return parent.update(key, value);
-        if (value.ty != .list) return error.InvalidAtCols;
-        self.columns = value.ty.list;
-        return;
-    }
-
-    if (self.map.get(key)) |old_value| {
-        old_value.deinit(self.allocator);
-        try self.map.put(key, try value.copy(self.allocator));
-    } else if (self.parent) |parent| {
-        return parent.update(key, value);
-    } else {
-        unreachable;
-    }
-}
-
-// Ranges
-pub fn putRange(self: *Scope, key: u8) !void {
-    if (self.parent) |parent| return parent.putRange(key);
-    try self.rec_ranges.put(key, {});
-}
-
-pub fn hasRange(self: Scope, key: u8) bool {
-    if (self.parent) |parent| return parent.hasRange(key);
-    return self.rec_ranges.contains(key);
-}
-
-pub fn deleteRange(self: *Scope, key: u8) void {
-    if (self.parent) |parent| return parent.deleteRange(key);
-    _ = self.rec_ranges.remove(key);
+    if (self.map.get(key)) |old_value| old_value.deinit(self.allocator);
+    try self.map.put(key, try value.copy(self.allocator));
 }
 
 // Debug

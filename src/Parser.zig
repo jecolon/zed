@@ -183,12 +183,8 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .kw_continue => Parser.parseContinue,
         .kw_if => Parser.parseIf,
         .kw_return => Parser.parseReturn,
+        .kw_select => Parser.parseRecRange,
         .kw_while => Parser.parseWhile,
-
-        .kw_from,
-        .kw_to,
-        .kw_until,
-        => Parser.parseRecRange,
 
         .op_global => Parser.parseGlobal,
         .op_neg, .punct_bang => Parser.parsePrefix,
@@ -822,27 +818,27 @@ fn parseRecRange(self: *Parser) anyerror!Node {
         .exclusive = false,
     } }, self.currentOffset());
 
-    if (self.currentIs(.kw_from)) {
+    try self.expectNext();
+
+    if (self.currentIs(.punct_lparen)) {
         // From
-        try self.expectTag(.punct_lparen);
         try self.expectNext();
         node.ty.rec_range.from = try self.allocator.create(Node);
         node.ty.rec_range.from.?.* = try self.parseExpression(.lowest);
         try self.expectTag(.punct_rparen);
 
-        // No to or until with default action.
+        // No range end expression with default action.
         if (self.atEnd() or self.peekIs(.punct_semicolon)) return node;
 
         _ = self.advance();
     }
 
-    // To or until range?
-    if (self.currentIs(.kw_to) or self.currentIs(.kw_until)) {
-        if (self.currentIs(.kw_until)) node.ty.rec_range.exclusive = true;
-
-        node.ty.rec_range.to = try self.allocator.create(Node);
+    // Range with end expression.
+    if (self.currentIs(.op_range_ex) or self.currentIs(.op_range_in)) {
+        node.ty.rec_range.exclusive = self.currentIs(.op_range_ex);
         try self.expectTag(.punct_lparen);
         try self.expectNext();
+        node.ty.rec_range.to = try self.allocator.create(Node);
         node.ty.rec_range.to.?.* = try self.parseExpression(.lowest);
         try self.expectTag(.punct_rparen);
 
