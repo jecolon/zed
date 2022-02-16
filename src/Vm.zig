@@ -142,6 +142,7 @@ pub fn addBuiltins(scope: *Scope) anyerror!void {
     try scope.store("contains", Value.new(.{ .builtin = .contains }, 0));
     try scope.store("cos", Value.new(.{ .builtin = .cos }, 0));
     try scope.store("each", Value.new(.{ .builtin = .each }, 0));
+    try scope.store("endIs", Value.new(.{ .builtin = .endIs }, 0));
     try scope.store("exp", Value.new(.{ .builtin = .exp }, 0));
     try scope.store("filter", Value.new(.{ .builtin = .filter }, 0));
     try scope.store("int", Value.new(.{ .builtin = .int }, 0));
@@ -166,6 +167,7 @@ pub fn addBuiltins(scope: *Scope) anyerror!void {
     try scope.store("sort", Value.new(.{ .builtin = .sort }, 0));
     try scope.store("split", Value.new(.{ .builtin = .split }, 0));
     try scope.store("sqrt", Value.new(.{ .builtin = .sqrt }, 0));
+    try scope.store("startIs", Value.new(.{ .builtin = .startIs }, 0));
     try scope.store("stdev", Value.new(.{ .builtin = .stdev }, 0));
     try scope.store("values", Value.new(.{ .builtin = .values }, 0));
 }
@@ -288,6 +290,7 @@ fn evalCall(self: *Vm) anyerror!void {
             .contains => try self.contains(callee.offset),
             .cos => try self.oneArgMath(callee),
             .each => try self.listEach(callee.offset),
+            .endIs => try self.strEndIs(callee.offset),
             .exp => try self.oneArgMath(callee),
             .filter => try self.listFilter(callee.offset),
             .join => try self.listJoin(callee.offset),
@@ -312,6 +315,7 @@ fn evalCall(self: *Vm) anyerror!void {
             .sort => try self.listSort(callee.offset),
             .split => try self.strSplit(callee.offset),
             .sqrt => try self.oneArgMath(callee),
+            .startIs => try self.strStartIs(callee.offset),
             .stdev => try self.listStdev(callee.offset),
             .values => try self.mapValues(callee.offset),
         };
@@ -1418,6 +1422,44 @@ fn listJoin(self: *Vm, offset: u16) anyerror!void {
     try self.value_stack.append(Value.new(.{ .string = buf.items }, offset));
     self.ip.* += 2;
 }
+fn strEndIs(self: *Vm, offset: u16) anyerror!void {
+    const str = self.value_stack.pop();
+    const ending = self.value_stack.pop();
+    if (str.ty != .string) {
+        const location = Location.getLocation(self.filename, self.src, offset);
+        std.log.err("endIs not allowed on {s}; {}", .{ @tagName(str.ty), location });
+        return error.InvalidEndIs;
+    }
+    if (ending.ty != .string) {
+        const location = Location.getLocation(self.filename, self.src, offset);
+        std.log.err("endIs argument must be string; {}", .{location});
+        return error.InvalidEndIs;
+    }
+
+    const result = Value.new(.{ .boolean = std.mem.endsWith(u8, str.ty.string, ending.ty.string) }, str.offset);
+
+    try self.value_stack.append(result);
+    self.ip.* += 2;
+}
+fn strStartIs(self: *Vm, offset: u16) anyerror!void {
+    const str = self.value_stack.pop();
+    const beginning = self.value_stack.pop();
+    if (str.ty != .string) {
+        const location = Location.getLocation(self.filename, self.src, offset);
+        std.log.err("startIs not allowed on {s}; {}", .{ @tagName(str.ty), location });
+        return error.InvalidStartIs;
+    }
+    if (beginning.ty != .string) {
+        const location = Location.getLocation(self.filename, self.src, offset);
+        std.log.err("startIs argument must be string; {}", .{location});
+        return error.InvalidStartIs;
+    }
+
+    const result = Value.new(.{ .boolean = std.mem.startsWith(u8, str.ty.string, beginning.ty.string) }, str.offset);
+    try self.value_stack.append(result);
+
+    self.ip.* += 2;
+}
 fn listMap(self: *Vm, offset: u16) anyerror!void {
     const l = self.value_stack.pop();
     if (l.ty != .list) {
@@ -2334,9 +2376,9 @@ test "Vm method builtins" {
         \\"H\u65\u301llo".chars()[1]
     , Value.new(.{ .string = "\u{65}\u{301}" }, 0));
     try testLastValue(
-        \\if (true) {
-        \\  f := { 1 + 1 }
-        \\  f() + f()
-        \\}
-    , Value.new(.{ .uint = 4 }, 0));
+        \\"Hello".startIs("Hell")
+    , Value.new(.{ .boolean = true }, 0));
+    try testLastValue(
+        \\"Hello".endIs("llo")
+    , Value.new(.{ .boolean = true }, 0));
 }
