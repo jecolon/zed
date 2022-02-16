@@ -96,6 +96,7 @@ const Infix = struct {
 const Loop = struct {
     condition: *Node,
     body: []Node,
+    is_do: bool,
 };
 
 const Prefix = struct {

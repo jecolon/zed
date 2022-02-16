@@ -2018,6 +2018,17 @@ test "Vm while loop" {
     try testLastValue(input, Value.new(.{ .uint = 3 }, 0));
 }
 
+test "Vm do while loop" {
+    const input =
+        \\i := 10
+        \\do {
+        \\  if (true) { i = i + 1 }
+        \\} while (i < 3)
+        \\i
+    ;
+    try testLastValue(input, Value.new(.{ .uint = 11 }, 0));
+}
+
 test "Vm loop break" {
     const input =
         \\i := 0

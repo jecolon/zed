@@ -181,6 +181,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
 
         .kw_break => Parser.parseBreak,
         .kw_continue => Parser.parseContinue,
+        .kw_do => Parser.parseDoWhile,
         .kw_if => Parser.parseIf,
         .kw_return => Parser.parseReturn,
         .kw_select => Parser.parseRecRange,
@@ -1118,11 +1119,53 @@ fn parseUint(self: *Parser) anyerror!Node {
     return Node.new(.{ .uint = uint }, self.currentOffset());
 }
 
+fn parseDoWhile(self: *Parser) anyerror!Node {
+    self.can_break = true;
+    defer self.can_break = false;
+
+    var node = Node.new(.{ .loop = .{
+        .condition = undefined,
+        .body = undefined,
+        .is_do = true,
+    } }, self.currentOffset());
+
+    // Body
+    var body_list = std.ArrayList(Node).init(self.allocator);
+
+    if (self.skipTag(.punct_lbrace)) {
+        try self.parseNodes(&body_list, .punct_rbrace, .punct_semicolon);
+    } else {
+        try self.expectNext();
+        const body_node = try self.parseExpression(.lowest);
+        try body_list.append(body_node);
+    }
+
+    // while loops need to clean up the stack after every iteration.
+    try body_list.append(Node.new(.stmt_end, 0));
+    node.ty.loop.body = body_list.items;
+
+    try self.expectTag(.kw_while);
+
+    // Condition
+    try self.expectTag(.punct_lparen);
+    try self.expectNext();
+    node.ty.loop.condition = try self.allocator.create(Node);
+    node.ty.loop.condition.* = try self.parseExpression(.lowest);
+    try self.expectTag(.punct_rparen);
+
+    return node;
+}
+
 fn parseWhile(self: *Parser) anyerror!Node {
     self.can_break = true;
     defer self.can_break = false;
 
-    var node = Node.new(.{ .loop = .{ .condition = undefined, .body = undefined } }, self.currentOffset());
+    var node = Node.new(.{ .loop = .{
+        .condition = undefined,
+        .body = undefined,
+        .is_do = false,
+    } }, self.currentOffset());
+
     // Condition
     try self.expectTag(.punct_lparen);
     try self.expectNext();

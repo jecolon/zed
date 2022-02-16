@@ -291,6 +291,8 @@ fn compilePrefix(self: *Compiler, node: Node) anyerror!void {
 }
 
 fn compileLoop(self: *Compiler, node: Node) anyerror!void {
+    if (node.ty.loop.is_do) return self.compileDoWhile(node);
+
     // Breaks
     try self.pushJumpUpdates();
     defer self.popJumpUpdates();
@@ -318,6 +320,32 @@ fn compileLoop(self: *Compiler, node: Node) anyerror!void {
 
     // Update break out jumps.
     while (self.jump_updates.?.updates.popOrNull()) |index| self.updateJumpIndex(index);
+
+    // while loops always return nul.
+    try self.pushConstant(Value.new(.nil, node.offset));
+}
+
+fn compileDoWhile(self: *Compiler, node: Node) anyerror!void {
+    // Breaks
+    try self.pushJumpUpdates();
+    defer self.popJumpUpdates();
+
+    // Iterate / Continues
+    try self.pushCurrentLoopIndex();
+    defer self.popCurrentLoopIndex();
+
+    // Body
+    try self.pushInstruction(.scope_in);
+    try self.instructions.append(@enumToInt(Scope.Type.loop));
+    for (node.ty.loop.body) |n| try self.compile(n);
+    try self.pushInstruction(.scope_out);
+    try self.instructions.append(@enumToInt(Scope.Type.loop));
+
+    // Condition
+    try self.compile(node.ty.loop.condition.*);
+
+    // Jump true
+    try self.pushInstructionAndOperands(u16, .jump_true, &[_]u16{self.current_loop_start.?.index});
 
     // while loops always return nul.
     try self.pushConstant(Value.new(.nil, node.offset));
