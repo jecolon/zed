@@ -288,7 +288,7 @@ fn evalCall(self: *Vm) anyerror!void {
             .chars => try self.strChars(callee.offset),
             .contains => try self.contains(callee.offset),
             .cos => try self.oneArgMath(callee),
-            .each => try self.listEach(callee.offset),
+            .each => try self.each(callee.offset),
             .endsWith => try self.strEndsWith(callee.offset),
             .exp => try self.oneArgMath(callee),
             .filter => try self.listFilter(callee.offset),
@@ -1509,11 +1509,11 @@ fn listFilter(self: *Vm, offset: u16) anyerror!void {
     try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
     self.ip.* += 2;
 }
-fn listEach(self: *Vm, offset: u16) anyerror!void {
-    const l = self.value_stack.pop();
-    if (l.ty != .list) {
+fn each(self: *Vm, offset: u16) anyerror!void {
+    const container = self.value_stack.pop();
+    if (container.ty != .list and container.ty != .map) {
         const location = Location.getLocation(self.filename, self.src, offset);
-        std.log.err("each not allowed on {s}; {}", .{ @tagName(l.ty), location });
+        std.log.err("each not allowed on {s}; {}", .{ @tagName(container.ty), location });
         return error.InvalidEach;
     }
 
@@ -1524,15 +1524,27 @@ fn listEach(self: *Vm, offset: u16) anyerror!void {
         return error.InvalidEach;
     }
 
-    if (l.ty.list.items.len == 0) {
-        try self.value_stack.append(l);
+    const container_len = switch (container.ty) {
+        .list => |l| l.items.len,
+        .map => |m| m.count(),
+        else => unreachable,
+    };
+
+    if (container_len == 0) {
+        try self.value_stack.append(container);
         self.ip.* += 2;
         return;
     }
 
-    for (l.ty.list.items) |item, i| _ = try self.evalListPredicate(f, item, i);
+    if (container.ty == .list) {
+        for (container.ty.list.items) |item, i| _ = try self.evalListPredicate(f, item, i);
+    } else {
+        var iter = container.ty.map.iterator();
+        var i: usize = 0;
+        while (iter.next()) |entry| : (i += 1) _ = try self.evalMapPredicate(f, entry.key_ptr.*, entry.value_ptr.*, i);
+    }
 
-    try self.value_stack.append(l);
+    try self.value_stack.append(container);
     self.ip.* += 2;
 }
 fn listReduce(self: *Vm, offset: u16) anyerror!void {
@@ -1632,20 +1644,43 @@ fn listPush(self: *Vm, offset: u16) anyerror!void {
 }
 
 fn evalListPredicate(self: *Vm, func: Value, item: Value, index: usize) anyerror!Value {
+    // Assign args as locals in function scope.
+    var func_scope = Scope.init(self.allocator, .function);
+
+    const index_val = Value.new(.{ .uint = index }, 0);
+
+    try func_scope.store("it", item);
+    try func_scope.store("index", index_val);
+
+    if (func.ty.func.params.len > 0) try func_scope.store(func.ty.func.params[0], item);
+    if (func.ty.func.params.len > 1) try func_scope.store(func.ty.func.params[1], index_val);
+
+    return self.evalPredicate(func.ty.func.instructions, func_scope);
+}
+
+fn evalMapPredicate(self: *Vm, func: Value, key: []const u8, item: Value, index: usize) anyerror!Value {
+    // Assign args as locals in function scope.
+    var func_scope = Scope.init(self.allocator, .function);
+
+    const key_val = Value.new(.{ .string = key }, 0);
+    const index_val = Value.new(.{ .uint = index }, 0);
+
+    try func_scope.store("key", key_val);
+    try func_scope.store("value", item);
+    try func_scope.store("index", Value.new(.{ .uint = index }, 0));
+
+    if (func.ty.func.params.len > 0) try func_scope.store(func.ty.func.params[0], key_val);
+    if (func.ty.func.params.len > 1) try func_scope.store(func.ty.func.params[1], item);
+    if (func.ty.func.params.len > 2) try func_scope.store(func.ty.func.params[2], index_val);
+
+    return self.evalPredicate(func.ty.func.instructions, func_scope);
+}
+
+fn evalPredicate(self: *Vm, instructions: []const u8, func_scope: Scope) anyerror!Value {
     // Set up Sub-VM arena.
     var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
     defer vm_arena.deinit();
     const vm_allocator = vm_arena.allocator();
-
-    // Set up function scope.
-    var func_scope = Scope.init(vm_allocator, .function);
-    defer func_scope.deinit();
-
-    // Assign args as locals in function scope.
-    try func_scope.store("it", item);
-    try func_scope.store("@0", item);
-    if (func.ty.func.params.len > 0) try func_scope.store(func.ty.func.params[0], item);
-    try func_scope.store("index", Value.new(.{ .uint = index }, 0));
 
     _ = try self.scope_stack.push(func_scope);
 
@@ -1654,13 +1689,14 @@ fn evalListPredicate(self: *Vm, func: Value, item: Value, index: usize) anyerror
         self.filename,
         self.src,
         self.constants,
-        func.ty.func.instructions,
+        instructions,
         self.scope_stack,
         self.output,
     );
     try vm.run();
 
-    _ = self.scope_stack.pop();
+    var used_func_scope = self.scope_stack.pop();
+    used_func_scope.deinit();
 
     return vm.last_popped;
 }
@@ -2403,4 +2439,16 @@ test "Vm method builtins" {
     try testLastValue(
         \\"Hello".endsWith("llo")
     , Value.new(.{ .boolean = true }, 0));
+
+    var em_ptr = try std.testing.allocator.create(std.StringHashMap(Value));
+    defer std.testing.allocator.destroy(em_ptr);
+    em_ptr.* = std.StringHashMap(Value).init(std.testing.allocator);
+    defer em_ptr.deinit();
+    try em_ptr.put("a", Value.new(.{ .uint = 1 }, 0));
+    try em_ptr.put("b", Value.new(.{ .uint = 2 }, 0));
+    const expected_map = Value.new(.{ .map = em_ptr }, 0);
+
+    try testLastValueWithOutput(
+        \\["a": 1, "b": 2].each() { print("{key}:{value} ") }
+    , expected_map, "a:1 b:2 ");
 }
