@@ -219,6 +219,9 @@ fn compileIdent(self: *Compiler, node: Node) anyerror!void {
 }
 
 fn compileInfix(self: *Compiler, node: Node) anyerror!void {
+    if (node.ty.infix.op == .kw_and) return self.compileLogicAnd(node);
+    if (node.ty.infix.op == .kw_or) return self.compileLogicOr(node);
+
     try self.compile(node.ty.infix.left.*);
     try self.compile(node.ty.infix.right.*);
 
@@ -234,11 +237,32 @@ fn compileInfix(self: *Compiler, node: Node) anyerror!void {
         .op_gte => try self.pushInstruction(.gte),
         .op_eq => try self.pushInstruction(.eq),
         .op_neq => try self.pushInstruction(.neq),
-        //TODO: Short circuit logic and / or
-        .kw_and => try self.pushInstruction(.logic_and),
-        .kw_or => try self.pushInstruction(.logic_or),
         else => unreachable,
     }
+}
+
+fn compileLogicAnd(self: *Compiler, node: Node) anyerror!void {
+    // Left
+    try self.compile(node.ty.infix.left.*);
+    // Jump if false
+    try self.pushInstruction(.jump_false);
+    const jump_false_operand_index = try self.pushZeroes(2);
+    // Right
+    try self.compile(node.ty.infix.right.*);
+    // Update jump_false index.
+    self.updateJumpIndex(jump_false_operand_index);
+}
+
+fn compileLogicOr(self: *Compiler, node: Node) anyerror!void {
+    // Left
+    try self.compile(node.ty.infix.left.*);
+    // Jump if true
+    try self.pushInstruction(.jump_true);
+    const jump_true_operand_index = try self.pushZeroes(2);
+    // Right
+    try self.compile(node.ty.infix.right.*);
+    // Update jump_false index.
+    self.updateJumpIndex(jump_true_operand_index);
 }
 
 fn compileList(self: *Compiler, node: Node) anyerror!void {

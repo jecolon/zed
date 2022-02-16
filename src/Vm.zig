@@ -77,148 +77,60 @@ pub fn run(self: *Vm) anyerror!void {
             },
 
             // Scope
-            .scope_in => {
-                try self.evalScopeIn();
-                self.ip.* += 2;
-            },
-            .scope_out => {
-                try self.evalScopeOut();
-                self.ip.* += 2;
-            },
+            .scope_in => try self.evalScopeIn(),
+            .scope_out => try self.evalScopeOut(),
 
-            // Normal opcodes.
-            .constant => {
-                const index = std.mem.bytesAsSlice(u16, self.instructions[self.ip.* + 1 .. self.ip.* + 3])[0];
-                try self.value_stack.append(self.constants[index]);
-                self.ip.* += 3;
-            },
+            // Load constant
+            .constant => try self.evalConstant(),
 
-            .logic_and, .logic_or => {
-                try self.evalLogicAndOr(opcode);
-                self.ip.* += 1;
-            },
+            // Prefix
+            .logic_not => try self.evalLogicNot(),
+            .negative => try self.evalNegative(),
 
-            .logic_not => {
-                try self.evalLogicNot();
-                self.ip.* += 1;
-            },
+            // Arithmetic
+            .add => try self.evalAdd(),
+            .sub => try self.evalSub(),
+            .mul => try self.evalMul(),
+            .div => try self.evalDiv(),
+            .mod => try self.evalMod(),
 
-            .negative => {
-                try self.evalNegative();
-                self.ip.* += 1;
-            },
-
-            .add,
-            .sub,
-            .mul,
-            .div,
-            .mod,
-            .eq,
-            .neq,
-            => {
-                const right = self.value_stack.pop();
-                const left = self.value_stack.pop();
-                switch (opcode) {
-                    .add => try self.evalAdd(left, right),
-                    .sub => try self.evalSub(left, right),
-                    .mul => try self.evalMul(left, right),
-                    .div => try self.evalDiv(left, right),
-                    .mod => try self.evalMod(left, right),
-                    .eq, .neq => try self.evalEqNeq(left, right, opcode),
-                    else => unreachable,
-                }
-
-                self.ip.* += 1;
-            },
-
+            // Comparison ops
             .lt,
             .lte,
             .gt,
             .gte,
-            => {
-                const right = self.value_stack.pop();
-                const left = self.value_stack.pop();
-                try self.evalComparison(left, right, opcode);
-                self.ip.* += 1;
-            },
+            => try self.evalComparison(opcode),
+            .eq, .neq => try self.evalEqNeq(opcode),
 
-            // Names
-            .define => {
-                try self.evalDefine();
-                self.ip.* += 1;
-            },
-            .load => {
-                try self.evalLoad();
-                self.ip.* += 1;
-            },
-            .store => {
-                try self.evalStore();
-                self.ip.* += 2;
-            },
+            // Varibales
+            .define => try self.evalDefine(),
+            .load => try self.evalLoad(),
+            .store => try self.evalStore(),
 
             // Functions
-            .call => {
-                try self.evalCall();
-                // self.ip.* += 1; is done in evalCall before pushing new frame.
-            },
+            .call => try self.evalCall(),
             .func_return => {
                 if (self.call_stack.items.len == 1) {
                     // Return from main.
                     self.last_popped = self.value_stack.pop();
                     break;
                 }
-
-                // Pop the function's frame.
-                self.popFrame();
-                // Unwind scopes up to the function's scope.
-                while (true) {
-                    var old_scope = self.popScope();
-                    old_scope.deinit();
-                    if (old_scope.ty == .function) break;
-                }
-
-                self.ip.* += 1;
+                self.evalReturn();
             },
 
-            .list => {
-                try self.evalList();
-                self.ip.* += 3;
-            },
+            // Data structures
+            .list => try self.evalList(),
+            .map => try self.evalMap(),
+            .range => try self.evalRange(),
+            .string => try self.evalString(),
 
-            .map => {
-                try self.evalMap();
-                self.ip.* += 3;
-            },
+            // Data structure ops
+            .subscript => try self.evalSubscript(),
+            .set => try self.evalSet(),
+            .format => try self.evalFormat(),
 
-            .range => {
-                try self.evalRange();
-                self.ip.* += 2;
-            },
-
-            .subscript => {
-                try self.evalSubscript();
-                self.ip.* += 1;
-            },
-
-            .set => {
-                try self.evalSet();
-                self.ip.* += 2;
-            },
-
-            .string => {
-                try self.evalString();
-                self.ip.* += 3;
-            },
-
-            .format => {
-                try self.evalFormat();
-                self.ip.* += 1;
-            },
-
-            .rec_range => {
-                try self.evalRecRange();
-                self.ip.* += 3;
-            },
+            // Record selection
+            .rec_range => try self.evalRecRange(),
         }
     }
 }
@@ -258,7 +170,11 @@ pub fn addBuiltins(scope: *Scope) anyerror!void {
     try scope.store("values", Value.new(.{ .builtin = .values }, 0));
 }
 
-fn evalAdd(self: *Vm, left: Value, right: Value) anyerror!void {
+// Arithmetic
+fn evalAdd(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+
     if (left.add(right)) |sum| {
         try self.value_stack.append(sum);
     } else |err| {
@@ -266,8 +182,13 @@ fn evalAdd(self: *Vm, left: Value, right: Value) anyerror!void {
         std.log.err("Unable to add {s} and {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
         return err;
     }
+
+    self.ip.* += 1;
 }
-fn evalSub(self: *Vm, left: Value, right: Value) anyerror!void {
+fn evalSub(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+
     if (left.sub(right)) |diff| {
         try self.value_stack.append(diff);
     } else |err| {
@@ -275,8 +196,13 @@ fn evalSub(self: *Vm, left: Value, right: Value) anyerror!void {
         std.log.err("Unable to subtract {s} from {s}; {}", .{ @tagName(right.ty), @tagName(left.ty), location });
         return err;
     }
+
+    self.ip.* += 1;
 }
-fn evalMul(self: *Vm, left: Value, right: Value) anyerror!void {
+fn evalMul(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+
     if (left.mul(right)) |product| {
         try self.value_stack.append(product);
     } else |err| {
@@ -284,8 +210,13 @@ fn evalMul(self: *Vm, left: Value, right: Value) anyerror!void {
         std.log.err("Unable to multiply {s} and {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
         return err;
     }
+
+    self.ip.* += 1;
 }
-fn evalDiv(self: *Vm, left: Value, right: Value) anyerror!void {
+fn evalDiv(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+
     if (left.div(right)) |quotient| {
         try self.value_stack.append(quotient);
     } else |err| {
@@ -293,8 +224,13 @@ fn evalDiv(self: *Vm, left: Value, right: Value) anyerror!void {
         std.log.err("Unable to divide {s} by {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
         return err;
     }
+
+    self.ip.* += 1;
 }
-fn evalMod(self: *Vm, left: Value, right: Value) anyerror!void {
+fn evalMod(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+
     if (left.mod(right)) |remainder| {
         try self.value_stack.append(remainder);
     } else |err| {
@@ -302,13 +238,15 @@ fn evalMod(self: *Vm, left: Value, right: Value) anyerror!void {
         std.log.err("Unable to get remainder of {s} by {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
         return err;
     }
+
+    self.ip.* += 1;
 }
-fn evalEqNeq(self: *Vm, left: Value, right: Value, opcode: Bytecode.Opcode) anyerror!void {
-    var comparison = left.eql(right);
-    if (opcode == .neq) comparison = !comparison;
-    try self.value_stack.append(Value.new(.{ .boolean = comparison }, left.offset));
-}
-fn evalComparison(self: *Vm, left: Value, right: Value, opcode: Bytecode.Opcode) anyerror!void {
+
+// Comparison
+fn evalComparison(self: *Vm, opcode: Bytecode.Opcode) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+
     const comparison = left.cmp(right) catch |err| {
         const location = Location.getLocation(self.filename, self.src, left.offset);
         std.log.err("Unable to compare {s} with {s}; {}", .{ @tagName(left.ty), @tagName(right.ty), location });
@@ -325,6 +263,18 @@ fn evalComparison(self: *Vm, left: Value, right: Value, opcode: Bytecode.Opcode)
     };
 
     try self.value_stack.append(result);
+
+    self.ip.* += 1;
+}
+fn evalEqNeq(self: *Vm, opcode: Bytecode.Opcode) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+
+    var comparison = left.eql(right);
+    if (opcode == .neq) comparison = !comparison;
+    try self.value_stack.append(Value.new(.{ .boolean = comparison }, left.offset));
+
+    self.ip.* += 1;
 }
 
 fn evalCall(self: *Vm) anyerror!void {
@@ -398,6 +348,12 @@ fn evalCall(self: *Vm) anyerror!void {
     try self.pushFrame(callee.ty.func.instructions);
 }
 
+fn evalConstant(self: *Vm) anyerror!void {
+    const index = std.mem.bytesAsSlice(u16, self.instructions[self.ip.* + 1 .. self.ip.* + 3])[0];
+    try self.value_stack.append(self.constants[index]);
+    self.ip.* += 3;
+}
+
 fn evalDefine(self: *Vm) anyerror!void {
     const name = self.value_stack.pop();
     const value = self.value_stack.pop();
@@ -408,6 +364,8 @@ fn evalDefine(self: *Vm) anyerror!void {
     }
     try self.scope.store(name.ty.string, value);
     try self.value_stack.append(value);
+
+    self.ip.* += 1;
 }
 
 fn evalFormat(self: *Vm) anyerror!void {
@@ -431,6 +389,8 @@ fn evalFormat(self: *Vm) anyerror!void {
         spec.offset,
     );
     try self.value_stack.append(Value.new(.{ .string = buf.items }, value.offset));
+
+    self.ip.* += 1;
 }
 
 fn evalLoad(self: *Vm) anyerror!void {
@@ -443,6 +403,8 @@ fn evalLoad(self: *Vm) anyerror!void {
         std.log.err("{s} not defined; {}", .{ name.ty.string, location });
         return error.NameNotDefined;
     }
+
+    self.ip.* += 1;
 }
 
 fn evalStore(self: *Vm) anyerror!void {
@@ -477,6 +439,8 @@ fn evalStore(self: *Vm) anyerror!void {
         try self.scope.update(name.ty.string, new_value);
         try self.value_stack.append(new_value);
     }
+
+    self.ip.* += 2;
 }
 
 fn evalString(self: *Vm) anyerror!void {
@@ -486,28 +450,8 @@ fn evalString(self: *Vm) anyerror!void {
     var i: usize = 0;
     while (i < len) : (i += 1) _ = try writer.print("{}", .{self.value_stack.pop()});
     try self.value_stack.append(Value.new(.{ .string = buf.items }, 0));
-}
 
-fn evalLogicAndOr(self: *Vm, opcode: Bytecode.Opcode) anyerror!void {
-    const right = self.value_stack.pop();
-    const left = self.value_stack.pop();
-
-    if (left.ty != .boolean) {
-        const location = Location.getLocation(self.filename, self.src, left.offset);
-        std.log.err("Logical op on {s}; {}", .{ @tagName(left.ty), location });
-        return error.InvalidLogicOp;
-    }
-    if (right.ty != .boolean) {
-        const location = Location.getLocation(self.filename, self.src, right.offset);
-        std.log.err("Logical op on {s}; {}", .{ @tagName(right.ty), location });
-        return error.InvalidLogicOp;
-    }
-
-    switch (opcode) {
-        .logic_and => try self.value_stack.append(Value.new(.{ .boolean = left.ty.boolean and right.ty.boolean }, left.offset)),
-        .logic_or => try self.value_stack.append(Value.new(.{ .boolean = left.ty.boolean or right.ty.boolean }, left.offset)),
-        else => unreachable,
-    }
+    self.ip.* += 3;
 }
 
 fn evalJumpFalse(self: *Vm) void {
@@ -539,6 +483,8 @@ fn evalList(self: *Vm) anyerror!void {
     }
 
     try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
+
+    self.ip.* += 3;
 }
 
 fn evalMapSubscript(self: *Vm, container: Value) anyerror!void {
@@ -597,6 +543,8 @@ fn evalLogicNot(self: *Vm) anyerror!void {
     }
 
     try self.value_stack.append(Value.new(.{ .boolean = !value.ty.boolean }, value.offset));
+
+    self.ip.* += 1;
 }
 
 fn evalMap(self: *Vm) anyerror!void {
@@ -627,6 +575,8 @@ fn evalMap(self: *Vm) anyerror!void {
         try map_ptr.put(key_copy, value_copy);
     }
     try self.value_stack.append(Value.new(.{ .map = map_ptr }, 0));
+
+    self.ip.* += 3;
 }
 
 fn evalNegative(self: *Vm) anyerror!void {
@@ -642,6 +592,8 @@ fn evalNegative(self: *Vm) anyerror!void {
             return error.InvalidNegative;
         },
     }
+
+    self.ip.* += 1;
 }
 
 fn evalRange(self: *Vm) anyerror!void {
@@ -658,6 +610,8 @@ fn evalRange(self: *Vm) anyerror!void {
     const end_uint = if (inclusive) end.ty.uint + 1 else end.ty.uint;
 
     try self.value_stack.append(Value.new(.{ .range = [2]usize{ start_uint, end_uint } }, start.offset));
+
+    self.ip.* += 2;
 }
 
 fn evalRecRange(self: *Vm) anyerror!void {
@@ -727,12 +681,28 @@ fn evalRecRange(self: *Vm) anyerror!void {
     }
 
     try self.value_stack.append(result);
+
+    self.ip.* += 3;
+}
+
+fn evalReturn(self: *Vm) void {
+    // Pop the function's frame.
+    self.popFrame();
+    // Unwind scopes up to the function's scope.
+    while (true) {
+        var old_scope = self.popScope();
+        old_scope.deinit();
+        if (old_scope.ty == .function) break;
+    }
+
+    self.ip.* += 1;
 }
 
 fn evalScopeIn(self: *Vm) anyerror!void {
     const child_scope_type = @intToEnum(Scope.Type, self.instructions[self.ip.* + 1]);
     var child_scope = Scope.init(self.allocator, child_scope_type, self.scope);
     try self.pushScope(child_scope);
+    self.ip.* += 2;
 }
 
 fn evalScopeOut(self: *Vm) anyerror!void {
@@ -748,6 +718,8 @@ fn evalScopeOut(self: *Vm) anyerror!void {
         var old_scope = self.popScope();
         old_scope.deinit();
     }
+
+    self.ip.* += 2;
 }
 
 fn evalSet(self: *Vm) anyerror!void {
@@ -763,6 +735,8 @@ fn evalSet(self: *Vm) anyerror!void {
         .map => try self.evalMapSet(container),
         else => unreachable,
     }
+
+    self.ip.* += 2;
 }
 fn evalListSet(self: *Vm, container: Value) anyerror!void {
     const index = self.value_stack.pop();
@@ -868,6 +842,8 @@ fn evalSubscript(self: *Vm) anyerror!void {
         .map => try self.evalMapSubscript(container),
         else => unreachable,
     }
+
+    self.ip.* += 1;
 }
 
 // Helpers
