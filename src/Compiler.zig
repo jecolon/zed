@@ -269,7 +269,7 @@ fn compileList(self: *Compiler, node: Node) anyerror!void {
     var i: usize = 1;
     const list_len = node.ty.list.len;
     while (i <= list_len) : (i += 1) try self.compile(node.ty.list[list_len - i]);
-    try self.pushInstructionAndOperands(u16, .list, &[_]u16{@intCast(u16, node.ty.list.len)});
+    try self.pushInstructionAndOperands(u16, .list, &[_]u16{@intCast(u16, list_len)});
 }
 
 fn compileMap(self: *Compiler, node: Node) anyerror!void {

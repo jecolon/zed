@@ -475,6 +475,7 @@ fn evalList(self: *Vm) anyerror!void {
 
     if (num_items == 0) {
         try self.value_stack.append(Value.new(.{ .list = list_ptr }, 0));
+        self.ip.* += 3;
         return;
     }
 
@@ -558,6 +559,7 @@ fn evalMap(self: *Vm) anyerror!void {
 
     if (num_entries == 0) {
         try self.value_stack.append(Value.new(.{ .map = map_ptr }, 0));
+        self.ip.* += 3;
         return;
     }
 

@@ -435,10 +435,10 @@ pub fn mod(self: Value, other: Value) anyerror!Value {
 
 fn cmpString(self: Value, other: Value) anyerror!std.math.Order {
     if (other.ty == .string) {
-        var order = std.math.order(self.ty.string.len, other.ty.string.len);
-        if (order != .eq) return order;
-        return for (self.ty.string) |byte, i| {
-            order = std.math.order(byte, other.ty.string[i]);
+        var max_len = std.math.max(self.ty.string.len, other.ty.string.len);
+        var i: usize = 0;
+        return while (i < max_len) : (i += 1) {
+            const order = std.math.order(self.ty.string[i], other.ty.string[i]);
             if (order != .eq) break order;
         } else .eq;
     }
