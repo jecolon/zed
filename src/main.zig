@@ -10,16 +10,13 @@ const ScopeStack = @import("ScopeStack.zig");
 const Value = @import("Value.zig");
 const Vm = @import("Vm.zig");
 
+fn printUsage() !void {
+    std.log.err("Usage: zed <your_program_file.zed> <data_file_1> <data_file_2> ... <data_file_n>\n", .{});
+    return error.InvalidUsage;
+}
+
 pub fn main() anyerror!void {
-    // TODO: Replace with command line flags.
-    const program_filename = "run/program.zed";
-    const filenames = [_][]const u8{
-        //"-",
-        "run/data_1.csv",
-        "run/data_2.csv",
-        //"run/lang_mix.txt",
-        //"run/hungarian.xml",
-    };
+    // Set defaults for field and record globals.
     const ifs = ",";
     const irs = "\n";
     const ofs = ",";
@@ -30,11 +27,17 @@ pub fn main() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
     var static_arena = std.heap.ArenaAllocator.init(allocator);
     defer static_arena.deinit();
     const static_allocator = static_arena.allocator();
 
+    // Command line args.
+    var args = try std.process.argsWithAllocator(allocator);
+    _ = args.skip(); // skip program name.
+
     // Program file.
+    const program_filename = args.next() orelse return printUsage();
     var program_file = try std.fs.cwd().openFile(program_filename, .{});
     defer program_file.close();
     const program_src = try program_file.readToEndAlloc(static_allocator, 1024 * 64); // 64K
@@ -105,7 +108,7 @@ pub fn main() anyerror!void {
     var rnum: usize = 1;
 
     // Loop over input files.
-    for (filenames) |filename| {
+    while (args.next()) |filename| {
         // Filename
         try global_scope.store("@file", Value.new(.{ .string = filename }, 0));
 
