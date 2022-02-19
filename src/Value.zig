@@ -24,6 +24,7 @@ const Builtin = enum {
     mode,
     print,
     push,
+    put,
     rand,
     reduce,
     reverse,

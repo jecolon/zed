@@ -159,6 +159,7 @@ pub fn addBuiltins(scope: *Scope) anyerror!void {
     try scope.store("mode", Value.new(.{ .builtin = .mode }, 0));
     try scope.store("print", Value.new(.{ .builtin = .print }, 0));
     try scope.store("push", Value.new(.{ .builtin = .push }, 0));
+    try scope.store("put", Value.new(.{ .builtin = .put }, 0));
     try scope.store("rand", Value.new(.{ .builtin = .rand }, 0));
     try scope.store("reduce", Value.new(.{ .builtin = .reduce }, 0));
     try scope.store("reverse", Value.new(.{ .builtin = .reverse }, 0));
@@ -307,6 +308,7 @@ fn evalCall(self: *Vm) anyerror!void {
             .mode => try self.listMode(callee.offset),
             .print => try self.print(callee.offset, self.output.writer()),
             .push => try self.listPush(callee.offset),
+            .put => try self.mapPut(callee.offset),
             .rand => try self.rand(callee.offset),
             .reduce => try self.listReduce(callee.offset),
             .reverse => try self.listReverse(callee.offset),
@@ -1641,7 +1643,24 @@ fn listPush(self: *Vm, offset: u16) anyerror!void {
 
     var item = self.value_stack.pop();
     try l.ty.list.append(try item.copy(l.ty.list.allocator));
-    try self.value_stack.append(item);
+    try self.value_stack.append(l);
+
+    self.ip.* += 2;
+}
+fn mapPut(self: *Vm, offset: u16) anyerror!void {
+    const m = self.value_stack.pop();
+    if (m.ty != .map) {
+        const location = Location.getLocation(self.filename, self.src, offset);
+        std.log.err("put not allowed on {s}; {}", .{ @tagName(m.ty), location });
+        return error.InvalidPut;
+    }
+
+    var key = self.value_stack.pop();
+    var value = self.value_stack.pop();
+    const key_copy = try key.copy(m.ty.map.allocator);
+    try m.ty.map.put(key_copy.ty.string, try value.copy(m.ty.map.allocator));
+    try self.value_stack.append(m);
+
     self.ip.* += 2;
 }
 
@@ -2453,4 +2472,19 @@ test "Vm method builtins" {
     try testLastValueWithOutput(
         \\["a": 1, "b": 2].each() { print("{key}:{value} ") }
     , expected_map, "a:1 b:2 ");
+    try testLastValueWithOutput(
+        \\["a": 1].put("b", 2).each() { print("{key}:{value} ") }
+    , expected_map, "a:1 b:2 ");
+
+    var el_ptr = try std.testing.allocator.create(std.ArrayList(Value));
+    defer std.testing.allocator.destroy(el_ptr);
+    el_ptr.* = std.ArrayList(Value).init(std.testing.allocator);
+    defer el_ptr.deinit();
+    try el_ptr.append(Value.new(.{ .uint = 1 }, 0));
+    try el_ptr.append(Value.new(.{ .uint = 2 }, 0));
+    const expected_list = Value.new(.{ .list = el_ptr }, 0);
+
+    try testLastValueWithOutput(
+        \\[1].push(2).each() { print("{index}:{it} ") }
+    , expected_list, "0:1 1:2 ");
 }
