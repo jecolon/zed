@@ -333,8 +333,8 @@ fn parseBuiltin(self: *Parser, object: Node) anyerror!Node {
         .pd_median => self.parseNoArgBuiltin(object),
         .pd_min => self.parseNoArgBuiltin(object),
         .pd_mode => self.parseNoArgBuiltin(object),
+        .pd_pop => self.parseNoArgBuiltin(object),
         .pd_push => self.parseOneArgBuiltin(object),
-        .pd_put => self.parseTwoArgBuiltin(object),
         .pd_reduce => self.parseTwoArgBuiltin(object),
         .pd_reverse => self.parseNoArgBuiltin(object),
         .pd_sort => self.parseNoArgBuiltin(object),
@@ -367,6 +367,7 @@ fn parseNoArgBuiltin(self: *Parser, object: Node) anyerror!Node {
         .pd_median => "median",
         .pd_min => "min",
         .pd_mode => "mode",
+        .pd_pop => "pop",
         .pd_reverse => "reverse",
         .pd_sort => "sort",
         .pd_stdev => "stdev",
@@ -446,7 +447,6 @@ fn parseTwoArgBuiltin(self: *Parser, object: Node) anyerror!Node {
 
     const bi_ptr = try self.allocator.create(Node);
     const bi_name = switch (tag) {
-        .pd_put => "put",
         .pd_reduce => "reduce",
         else => unreachable,
     };
