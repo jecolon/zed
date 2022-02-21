@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Node = @import("Node.zig");
+const Scope = @import("Scope.zig");
 
 pub const Opcode = enum {
     // Stack operations
@@ -14,8 +15,12 @@ pub const Opcode = enum {
     int,
     uint,
     // Strings
+    format,
     plain,
     string,
+    // Scopes
+    scope_in,
+    scope_out,
 };
 
 allocator: std.mem.Allocator,
@@ -83,17 +88,18 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
                 try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, plain.len)}));
                 try self.instructions.appendSlice(plain);
             },
-            .ipol => |_| {
-                //try self.pushInstruction(.scope_in);
-                //try self.instructions.append(@enumToInt(Scope.Type.block));
-                //for (ipol.nodes) |n| try self.compile(n);
-                //try self.pushInstruction(.scope_out);
-                //try self.instructions.append(@enumToInt(Scope.Type.block));
+            .ipol => |ipol| {
+                try self.pushInstruction(.scope_in);
+                try self.instructions.append(@enumToInt(Scope.Type.block));
+                for (ipol.nodes) |n| try self.compile(n);
+                try self.pushInstruction(.scope_out);
+                try self.instructions.append(@enumToInt(Scope.Type.block));
 
-                //if (ipol.format) |spec| {
-                //    try self.pushConstant(Value.new(.{ .string = spec }, node.offset));
-                //    try self.pushInstruction(.format);
-                //}
+                if (ipol.format) |spec| {
+                    try self.pushInstruction(.format);
+                    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, spec.len)}));
+                    try self.instructions.appendSlice(spec);
+                }
             },
         }
     }

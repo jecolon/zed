@@ -27,6 +27,8 @@ pub fn new(ty: Type, offset: u16) Value {
     return .{ .offset = offset, .ty = ty };
 }
 
+pub fn deinit(_: Value, _: std.mem.Allocator) void {}
+
 pub fn asBytes(self: Value, bytes: *std.ArrayList(u8)) !void {
     switch (self.ty) {
         // Predefined constant values
