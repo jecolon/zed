@@ -62,6 +62,7 @@ pub fn run(self: *Vm) !void {
             .plain_ref => try self.execPlainRef(),
             .string => try self.execString(),
             // functions
+            .call => try self.execCall(),
             .func => try self.execFunc(),
             .func_return => {
                 if (self.frame_stack.items.len == 1) {
@@ -225,6 +226,80 @@ fn execReturn(self: *Vm) void {
     // Unwind scopes up to the function's scope.
     while (true) if (self.popScope().ty == .function) break;
     self.ip.* += 1;
+}
+
+fn execCall(self: *Vm) anyerror!void {
+    // Get the function.
+    const callee = self.value_stack.pop();
+
+    //if (callee.ty == .builtin) {
+    //    return switch (callee.ty.builtin) {
+    //        .atan2 => try self.atan2(callee.offset),
+    //        .chars => try self.strChars(callee.offset),
+    //        .contains => try self.contains(callee.offset),
+    //        .cos => try self.oneArgMath(callee),
+    //        .each => try self.each(callee.offset),
+    //        .endsWith => try self.strEndsWith(callee.offset),
+    //        .exp => try self.oneArgMath(callee),
+    //        .filter => try self.listFilter(callee.offset),
+    //        .join => try self.listJoin(callee.offset),
+    //        .indexOf => try self.indexOf(callee.offset),
+    //        .int => try self.oneArgMath(callee),
+    //        .keys => try self.mapKeys(callee.offset),
+    //        .lastIndexOf => try self.lastIndexOf(callee.offset),
+    //        .len => try self.length(callee.offset),
+    //        .log => try self.oneArgMath(callee),
+    //        .map => try self.listMap(callee.offset),
+    //        .max => try self.listMax(callee.offset),
+    //        .mean => try self.listMean(callee.offset),
+    //        .median => try self.listMedian(callee.offset),
+    //        .min => try self.listMin(callee.offset),
+    //        .mode => try self.listMode(callee.offset),
+    //        .print => try self.print(callee.offset, self.output.writer()),
+    //        .pop => try self.listPop(callee.offset),
+    //        .push => try self.listPush(callee.offset),
+    //        .rand => try self.rand(callee.offset),
+    //        .reduce => try self.listReduce(callee.offset),
+    //        .reverse => try self.listReverse(callee.offset),
+    //        .sin => try self.oneArgMath(callee),
+    //        .sort => try self.listSort(callee.offset),
+    //        .split => try self.strSplit(callee.offset),
+    //        .sqrt => try self.oneArgMath(callee),
+    //        .startsWith => try self.strStartsWith(callee.offset),
+    //        .stdev => try self.listStdev(callee.offset),
+    //        .values => try self.mapValues(callee.offset),
+    //    };
+    //}
+
+    //if (callee.ty != .func) {
+    //    const location = Location.getLocation(self.filename, self.src, callee.offset);
+    //    std.log.err("Call op on {s}; {}", .{ @tagName(callee.ty), location });
+    //    return error.InvalidCall;
+    //}
+
+    // Prepare the child scope.
+    var func_scope = Scope.init(self.allocator, .function);
+
+    // Self-references
+    if (callee.ty.func.name.len != 0) try func_scope.store(callee.ty.func.name, callee);
+
+    // Process args
+    const num_args = self.instructions[self.ip.* + 1];
+    self.ip.* += 1;
+
+    var i: usize = 0;
+    while (i < num_args) : (i += 1) {
+        const arg = self.value_stack.pop();
+        if (i == 0) try func_scope.store("it", arg); // it
+        //var buf: [4]u8 = undefined;
+        //const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{i});
+        //try func_scope.store(try func_scope.allocator.dupe(u8, auto_arg_name), arg); // @0, @1, ...
+        if (i < callee.ty.func.params.len) try func_scope.store(callee.ty.func.params[i], arg);
+    }
+
+    // Push the function's frame.
+    try self.pushScope(func_scope);
+    try self.pushFrame(callee.ty.func.instructions);
 }
 
 // Stack Frame
@@ -400,7 +475,7 @@ test "Vm strings" {
     try std.testing.expectEqual(@as(u16, 0), got.offset);
 }
 
-test "Vm strings" {
+test "Vm function literal" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -415,4 +490,16 @@ test "Vm strings" {
     try std.testing.expectEqual(@as(usize, 12), got.ty.func.instructions.len);
     try std.testing.expectEqual(Compiler.Opcode.uint, @intToEnum(Compiler.Opcode, got.ty.func.instructions[0]));
     try std.testing.expectEqual(@as(u16, 0), got.offset);
+}
+
+test "Vm function literal" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\{ 42 }()
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 42), got.ty.uint);
 }

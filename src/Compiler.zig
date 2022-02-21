@@ -26,6 +26,7 @@ pub const Opcode = enum {
     scope_in,
     scope_out,
     // Functions
+    call,
     func,
     func_return,
 };
@@ -59,6 +60,7 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         // Strings
         .string => try self.compileString(node),
         // Functions
+        .call => try self.compileCall(node),
         .func => try self.compileFunc(node),
         .func_return => try self.compileReturn(node),
 
@@ -188,6 +190,15 @@ fn compileFunc(self: *Compiler, node: Node) anyerror!void {
 fn compileReturn(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.func_return.*);
     try self.pushInstruction(.func_return);
+}
+
+fn compileCall(self: *Compiler, node: Node) anyerror!void {
+    var i: usize = 1;
+    const num_args = node.ty.call.args.len;
+    while (i <= num_args) : (i += 1) try self.compile(node.ty.call.args[num_args - i]);
+    try self.compile(node.ty.call.callee.*);
+    try self.pushInstruction(.call);
+    try self.instructions.append(@intCast(u8, num_args));
 }
 
 // Helpers
