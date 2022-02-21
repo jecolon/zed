@@ -1,12 +1,14 @@
 const std = @import("std");
 
 const Compiler = @import("Compiler.zig");
+const Context = @import("Context.zig");
 const Scope = @import("Scope.zig");
 const ScopeStack = @import("ScopeStack.zig");
 const Value = @import("Value.zig");
 const runtimePrint = @import("fmt.zig").runtimePrint;
 
 allocator: std.mem.Allocator,
+ctx: Context,
 last_popped: Value = Value.new(.nil, 0),
 
 instructions: []const u8 = undefined,
@@ -23,9 +25,11 @@ pub fn init(
     allocator: std.mem.Allocator,
     instructions: []const u8,
     scope_stack: ScopeStack,
+    ctx: Context,
 ) !Vm {
     var self = Vm{
         .allocator = allocator,
+        .ctx = ctx,
         .frame_stack = std.ArrayList(Frame).init(allocator),
         .scope_stack = scope_stack,
         .scope = scope_stack.head(),
@@ -361,9 +365,10 @@ fn execDefine(self: *Vm) !void {
         self.ip.* += 2;
         name = self.getString(start, name_len);
     }
+    // Is it already defined?
+    if (self.scope.isDefined(name)) return self.ctx.err("{s} already defined.", .{name}, error.NameAlreadyDefined, offset);
     // Value
     const rvalue = self.value_stack.pop();
-    //TODO: Handle name already defined.
     // Define
     try self.scope.store(name, rvalue);
     try self.value_stack.append(rvalue);
@@ -517,7 +522,9 @@ fn testVmValue(allocator: std.mem.Allocator, input: []const u8) !Value {
     var scope_stack = ScopeStack.init(allocator);
     _ = try scope_stack.push(Scope.init(allocator, .block));
 
-    var vm = try init(allocator, compiler.instructions.items, scope_stack);
+    const ctx = Context{ .filename = "inline", .src = input };
+
+    var vm = try init(allocator, compiler.instructions.items, scope_stack, ctx);
     try vm.run();
 
     try std.testing.expectEqual(@as(usize, 0), vm.value_stack.items.len);
