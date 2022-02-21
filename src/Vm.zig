@@ -74,6 +74,10 @@ pub fn run(self: *Vm) !void {
 
                 self.execReturn();
             },
+            // Variables
+            .define => try self.execDefine(),
+            .load => try self.execLoad(),
+            .store => try self.execStore(),
         }
     }
 }
@@ -84,55 +88,79 @@ fn execPop(self: *Vm) !void {
     self.ip.* += 1;
 }
 fn execBoolFalse(self: *Vm) !void {
+    self.ip.* += 1;
     try self.value_stack.append(Value.new(.{ .boolean = false }, self.getOffset()));
-    self.ip.* += 3;
+    self.ip.* += 2;
 }
 fn execBoolTrue(self: *Vm) !void {
+    self.ip.* += 1;
     try self.value_stack.append(Value.new(.{ .boolean = true }, self.getOffset()));
-    self.ip.* += 3;
+    self.ip.* += 2;
 }
 fn execNil(self: *Vm) !void {
+    self.ip.* += 1;
     try self.value_stack.append(Value.new(.nil, self.getOffset()));
-    self.ip.* += 3;
+    self.ip.* += 2;
 }
 
 fn execFloat(self: *Vm) !void {
-    const f = self.getNumber(f64, self.ip.* + 3, 8);
-    try self.value_stack.append(Value.new(.{ .float = f }, self.getOffset()));
-    self.ip.* += 11;
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const f = self.getNumber(f64, self.ip.*, 8);
+    self.ip.* += 8;
+    try self.value_stack.append(Value.new(.{ .float = f }, offset));
 }
 fn execFloatRef(self: *Vm) !void {
-    const start = self.getNumber(u16, self.ip.* + 3, 2);
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const start = self.getU16(self.ip.*);
+    self.ip.* += 2;
     const f = self.getNumber(f64, start, 8);
-    try self.value_stack.append(Value.new(.{ .float = f }, self.getOffset()));
-    self.ip.* += 5;
+    try self.value_stack.append(Value.new(.{ .float = f }, offset));
 }
 fn execInt(self: *Vm) !void {
-    const i = self.getNumber(i64, self.ip.* + 3, 8);
-    try self.value_stack.append(Value.new(.{ .int = i }, self.getOffset()));
-    self.ip.* += 11;
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const i = self.getNumber(i64, self.ip.*, 8);
+    self.ip.* += 8;
+    try self.value_stack.append(Value.new(.{ .int = i }, offset));
 }
 fn execIntRef(self: *Vm) !void {
-    const start = self.getNumber(u16, self.ip.* + 3, 2);
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const start = self.getU16(self.ip.*);
+    self.ip.* += 2;
     const i = self.getNumber(i64, start, 8);
-    try self.value_stack.append(Value.new(.{ .int = i }, self.getOffset()));
-    self.ip.* += 5;
+    try self.value_stack.append(Value.new(.{ .int = i }, offset));
 }
 fn execUint(self: *Vm) !void {
-    const u = self.getNumber(u64, self.ip.* + 3, 8);
-    try self.value_stack.append(Value.new(.{ .uint = u }, self.getOffset()));
-    self.ip.* += 11;
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const u = self.getNumber(u64, self.ip.*, 8);
+    self.ip.* += 8;
+    try self.value_stack.append(Value.new(.{ .uint = u }, offset));
 }
 fn execUintRef(self: *Vm) !void {
-    const start = self.getNumber(u16, self.ip.* + 3, 2);
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const start = self.getU16(self.ip.*);
+    self.ip.* += 2;
     const u = self.getNumber(u64, start, 8);
-    try self.value_stack.append(Value.new(.{ .uint = u }, self.getOffset()));
-    self.ip.* += 5;
+    try self.value_stack.append(Value.new(.{ .uint = u }, offset));
 }
 
 fn execFormat(self: *Vm) !void {
-    const len = self.getU16(self.ip.* + 1);
-    const spec = self.getString(self.ip.* + 3, len);
+    self.ip.* += 1;
+    const len = self.getU16(self.ip.*);
+    self.ip.* += 2;
+    const spec = self.getString(self.ip.*, len);
+    self.ip.* += len;
 
     const value = self.value_stack.pop();
     var buf = std.ArrayList(u8).init(self.allocator);
@@ -147,39 +175,43 @@ fn execFormat(self: *Vm) !void {
         value.offset,
     );
     try self.value_stack.append(Value.new(.{ .string = buf.items }, value.offset));
-
-    self.ip.* += 3 + len;
 }
 fn execPlain(self: *Vm) !void {
-    const len = self.getU16(self.ip.* + 1);
-    const s = self.getString(self.ip.* + 3, len);
+    self.ip.* += 1;
+    const len = self.getU16(self.ip.*);
+    self.ip.* += 2;
+    const s = self.getString(self.ip.*, len);
+    self.ip.* += len;
     try self.value_stack.append(Value.new(.{ .string = s }, 0));
-    self.ip.* += 3 + len;
 }
 fn execPlainRef(self: *Vm) !void {
-    const len = self.getU16(self.ip.* + 1);
-    const start = self.getU16(self.ip.* + 3);
+    self.ip.* += 1;
+    const len = self.getU16(self.ip.*);
+    self.ip.* += 2;
+    const start = self.getU16(self.ip.*);
+    self.ip.* += 2;
     const s = self.getString(start, len);
     try self.value_stack.append(Value.new(.{ .string = s }, 0));
-    self.ip.* += 5;
 }
 fn execString(self: *Vm) !void {
+    self.ip.* += 1;
     const offset = self.getOffset();
-    const len = self.getU16(self.ip.* + 3);
+    self.ip.* += 2;
+    const len = self.getU16(self.ip.*);
+    self.ip.* += 2;
 
     var buf = std.ArrayList(u8).init(self.allocator);
     var writer = buf.writer();
     var i: usize = 0;
     while (i < len) : (i += 1) _ = try writer.print("{}", .{self.value_stack.pop()});
     try self.value_stack.append(Value.new(.{ .string = buf.items }, offset));
-
-    self.ip.* += 5;
 }
 
 fn execFunc(self: *Vm) !void {
     // Src offset
-    const offset = self.getOffset(); //TODO: change to use current ip
-    self.ip.* += 3;
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
 
     // Function name
     const func_name_len = self.getU16(self.ip.*);
@@ -232,6 +264,7 @@ fn execCall(self: *Vm) anyerror!void {
     // Get the function.
     const callee = self.value_stack.pop();
 
+    //TODO: Builtins
     //if (callee.ty == .builtin) {
     //    return switch (callee.ty.builtin) {
     //        .atan2 => try self.atan2(callee.offset),
@@ -271,6 +304,7 @@ fn execCall(self: *Vm) anyerror!void {
     //    };
     //}
 
+    //TODO: Error reporting
     //if (callee.ty != .func) {
     //    const location = Location.getLocation(self.filename, self.src, callee.offset);
     //    std.log.err("Call op on {s}; {}", .{ @tagName(callee.ty), location });
@@ -284,13 +318,14 @@ fn execCall(self: *Vm) anyerror!void {
     if (callee.ty.func.name.len != 0) try func_scope.store(callee.ty.func.name, callee);
 
     // Process args
-    const num_args = self.instructions[self.ip.* + 1];
     self.ip.* += 1;
+    const num_args = self.instructions[self.ip.*];
 
     var i: usize = 0;
     while (i < num_args) : (i += 1) {
         const arg = self.value_stack.pop();
         if (i == 0) try func_scope.store("it", arg); // it
+        //TODO: Auto func arg names
         //var buf: [4]u8 = undefined;
         //const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{i});
         //try func_scope.store(try func_scope.allocator.dupe(u8, auto_arg_name), arg); // @0, @1, ...
@@ -300,6 +335,58 @@ fn execCall(self: *Vm) anyerror!void {
     // Push the function's frame.
     try self.pushScope(func_scope);
     try self.pushFrame(callee.ty.func.instructions);
+}
+
+fn execDefine(self: *Vm) !void {
+    // Offset
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    _ = offset;
+    // Name
+    const name_len = self.getU16(self.ip.*);
+    self.ip.* += 2;
+    const name = self.getString(self.ip.*, name_len);
+    self.ip.* += name_len;
+    // Value
+    const rvalue = self.value_stack.pop();
+    //TODO: Handle name already defined.
+    // Define
+    try self.scope.store(name, rvalue);
+    try self.value_stack.append(rvalue);
+}
+fn execLoad(self: *Vm) !void {
+    // Offset
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    _ = offset;
+    // Name
+    const name_len = self.getU16(self.ip.*);
+    self.ip.* += 2;
+    const name = self.getString(self.ip.*, name_len);
+    self.ip.* += name_len;
+    //TODO: Handle name not defined.
+    // Load
+    try self.value_stack.append(self.scope.load(name).?);
+}
+fn execStore(self: *Vm) !void {
+    // Offset
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    _ = offset;
+    // Name
+    const name_len = self.getU16(self.ip.*);
+    self.ip.* += 2;
+    const name = self.getString(self.ip.*, name_len);
+    self.ip.* += name_len;
+    // Value
+    const rvalue = self.value_stack.pop();
+    //TODO: Handle name already defined.
+    // Define
+    try self.scope.update(name, rvalue);
+    try self.value_stack.append(rvalue);
 }
 
 // Stack Frame
@@ -353,7 +440,7 @@ fn popScope(self: *Vm) Scope {
 
 // Helpers
 fn getOffset(self: Vm) u16 {
-    return self.getU16(self.ip.* + 1);
+    return self.getU16(self.ip.*);
 }
 
 fn getNumber(self: Vm, comptime T: type, start: usize, n: usize) T {
@@ -492,13 +579,15 @@ test "Vm function literal" {
     try std.testing.expectEqual(@as(u16, 0), got.offset);
 }
 
-test "Vm function literal" {
+test "Vm function call" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
     var got = try testVmValue(allocator,
-        \\{ 42 }()
+        \\f := { a := it; return a }
+        \\r := f(42)
+        \\r
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 42), got.ty.uint);

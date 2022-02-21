@@ -29,6 +29,10 @@ pub const Opcode = enum {
     call,
     func,
     func_return,
+    // Variables
+    define,
+    load,
+    store,
 };
 
 allocator: std.mem.Allocator,
@@ -63,6 +67,10 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         .call => try self.compileCall(node),
         .func => try self.compileFunc(node),
         .func_return => try self.compileReturn(node),
+        // Variables
+        .define => try self.compileDefine(node),
+        .ident => try self.compileLoad(node),
+        .assign => try self.compileStore(node),
 
         else => unreachable,
     }
@@ -199,6 +207,41 @@ fn compileCall(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.call.callee.*);
     try self.pushInstruction(.call);
     try self.instructions.append(@intCast(u8, num_args));
+}
+
+fn compileDefine(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.define.rvalue.*);
+    try self.pushInstruction(.define);
+    try self.pushOffset(node.offset);
+    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, node.ty.define.lvalue.ty.ident.len)}));
+    try self.instructions.appendSlice(node.ty.define.lvalue.ty.ident);
+}
+
+fn compileLoad(self: *Compiler, node: Node) anyerror!void {
+    try self.pushInstruction(.load);
+    try self.pushOffset(node.offset);
+    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, node.ty.ident.len)}));
+    try self.instructions.appendSlice(node.ty.ident);
+}
+
+fn compileStore(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.assign.rvalue.*);
+    try self.pushInstruction(.store);
+    try self.pushOffset(node.offset);
+    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, node.ty.assign.lvalue.ty.ident.len)}));
+    try self.instructions.appendSlice(node.ty.assign.lvalue.ty.ident);
+
+    //TODO: Subscript assign
+    //if (node.ty.assign.lvalue.ty == .ident) {
+    //    try self.pushConstant(Value.new(.{ .string = node.ty.assign.lvalue.ty.ident }, node.ty.assign.lvalue.offset));
+    //    try self.pushInstruction(.store);
+    //    try self.instructions.append(@enumToInt(node.ty.assign.combo));
+    //} else {
+    //    try self.compile(node.ty.assign.lvalue.ty.subscript.index.*);
+    //    try self.compile(node.ty.assign.lvalue.ty.subscript.container.*);
+    //    try self.pushInstruction(.set);
+    //    try self.instructions.append(@enumToInt(node.ty.assign.combo));
+    //}
 }
 
 // Helpers
