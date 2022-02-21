@@ -78,6 +78,8 @@ pub fn run(self: *Vm) !void {
             .define => try self.execDefine(),
             .load => try self.execLoad(),
             .store => try self.execStore(),
+
+            else => unreachable,
         }
     }
 }
@@ -344,10 +346,21 @@ fn execDefine(self: *Vm) !void {
     self.ip.* += 2;
     _ = offset;
     // Name
-    const name_len = self.getU16(self.ip.*);
-    self.ip.* += 2;
-    const name = self.getString(self.ip.*, name_len);
-    self.ip.* += name_len;
+    var name: []const u8 = undefined;
+    if (@intToEnum(Compiler.Opcode, self.instructions[self.ip.*]) == .ident) {
+        self.ip.* += 1;
+        const name_len = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        name = self.getString(self.ip.*, name_len);
+        self.ip.* += name_len;
+    } else {
+        self.ip.* += 1;
+        const start = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        const name_len = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        name = self.getString(start, name_len);
+    }
     // Value
     const rvalue = self.value_stack.pop();
     //TODO: Handle name already defined.
@@ -362,10 +375,21 @@ fn execLoad(self: *Vm) !void {
     self.ip.* += 2;
     _ = offset;
     // Name
-    const name_len = self.getU16(self.ip.*);
-    self.ip.* += 2;
-    const name = self.getString(self.ip.*, name_len);
-    self.ip.* += name_len;
+    var name: []const u8 = undefined;
+    if (@intToEnum(Compiler.Opcode, self.instructions[self.ip.*]) == .ident) {
+        self.ip.* += 1;
+        const name_len = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        name = self.getString(self.ip.*, name_len);
+        self.ip.* += name_len;
+    } else {
+        self.ip.* += 1;
+        const start = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        const name_len = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        name = self.getString(start, name_len);
+    }
     //TODO: Handle name not defined.
     // Load
     try self.value_stack.append(self.scope.load(name).?);
@@ -377,10 +401,21 @@ fn execStore(self: *Vm) !void {
     self.ip.* += 2;
     _ = offset;
     // Name
-    const name_len = self.getU16(self.ip.*);
-    self.ip.* += 2;
-    const name = self.getString(self.ip.*, name_len);
-    self.ip.* += name_len;
+    var name: []const u8 = undefined;
+    if (@intToEnum(Compiler.Opcode, self.instructions[self.ip.*]) == .ident) {
+        self.ip.* += 1;
+        const name_len = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        name = self.getString(self.ip.*, name_len);
+        self.ip.* += name_len;
+    } else {
+        self.ip.* += 1;
+        const start = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        const name_len = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        name = self.getString(start, name_len);
+    }
     // Value
     const rvalue = self.value_stack.pop();
     //TODO: Handle name already defined.

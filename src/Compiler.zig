@@ -31,6 +31,8 @@ pub const Opcode = enum {
     func_return,
     // Variables
     define,
+    ident,
+    ident_ref,
     load,
     store,
 };
@@ -98,7 +100,7 @@ fn compileFloat(self: *Compiler, node: Node) !void {
 
     try self.pushInstruction(instruction);
     try self.pushOffset(node.offset);
-    try self.instructions.appendSlice(slice);
+    try self.pushSlice(slice);
 }
 
 fn compileInt(self: *Compiler, node: Node) !void {
@@ -112,7 +114,7 @@ fn compileInt(self: *Compiler, node: Node) !void {
 
     try self.pushInstruction(instruction);
     try self.pushOffset(node.offset);
-    try self.instructions.appendSlice(slice);
+    try self.pushSlice(slice);
 }
 
 fn compileUint(self: *Compiler, node: Node) !void {
@@ -126,7 +128,7 @@ fn compileUint(self: *Compiler, node: Node) !void {
 
     try self.pushInstruction(instruction);
     try self.pushOffset(node.offset);
-    try self.instructions.appendSlice(slice);
+    try self.pushSlice(slice);
 }
 
 fn compileString(self: *Compiler, node: Node) anyerror!void {
@@ -146,20 +148,20 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
                 }
 
                 try self.pushInstruction(instruction);
-                try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, plain.len)}));
-                try self.instructions.appendSlice(slice);
+                try self.pushLen(plain.len);
+                try self.pushSlice(slice);
             },
             .ipol => |ipol| {
                 try self.pushInstruction(.scope_in);
-                try self.instructions.append(@enumToInt(Scope.Type.block));
+                try self.pushEnum(Scope.Type.block);
                 for (ipol.nodes) |n| try self.compile(n);
                 try self.pushInstruction(.scope_out);
-                try self.instructions.append(@enumToInt(Scope.Type.block));
+                try self.pushEnum(Scope.Type.block);
 
                 if (ipol.format) |spec| {
                     try self.pushInstruction(.format);
-                    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, spec.len)}));
-                    try self.instructions.appendSlice(spec);
+                    try self.pushLen(spec.len);
+                    try self.pushSlice(spec);
                 }
             },
         }
@@ -167,7 +169,7 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
 
     try self.pushInstruction(.string);
     try self.pushOffset(node.offset);
-    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, len)}));
+    try self.pushLen(len);
 }
 
 fn compileFunc(self: *Compiler, node: Node) anyerror!void {
@@ -180,19 +182,19 @@ fn compileFunc(self: *Compiler, node: Node) anyerror!void {
     try self.pushInstruction(.func);
     try self.pushOffset(node.offset);
     // Function name
-    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, node.ty.func.name.len)}));
-    if (node.ty.func.name.len != 0) try self.instructions.appendSlice(node.ty.func.name);
+    try self.pushLen(node.ty.func.name.len);
+    if (node.ty.func.name.len != 0) try self.pushSlice(node.ty.func.name);
     // Function params
-    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, node.ty.func.params.len)}));
+    try self.pushLen(node.ty.func.params.len);
     if (node.ty.func.params.len != 0) {
         for (node.ty.func.params) |param| {
-            try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, param.len)}));
-            try self.instructions.appendSlice(param);
+            try self.pushLen(param.len);
+            try self.pushSlice(param);
         }
     }
     // Function instructions
-    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, func_instructions.len)}));
-    if (func_instructions.len != 0) try self.instructions.appendSlice(func_instructions);
+    try self.pushLen(func_instructions.len);
+    if (func_instructions.len != 0) try self.pushSlice(func_instructions);
 }
 
 fn compileReturn(self: *Compiler, node: Node) anyerror!void {
@@ -206,41 +208,62 @@ fn compileCall(self: *Compiler, node: Node) anyerror!void {
     while (i <= num_args) : (i += 1) try self.compile(node.ty.call.args[num_args - i]);
     try self.compile(node.ty.call.callee.*);
     try self.pushInstruction(.call);
-    try self.instructions.append(@intCast(u8, num_args));
+    try self.pushByte(num_args);
 }
 
 fn compileDefine(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.define.rvalue.*);
     try self.pushInstruction(.define);
     try self.pushOffset(node.offset);
-    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, node.ty.define.lvalue.ty.ident.len)}));
-    try self.instructions.appendSlice(node.ty.define.lvalue.ty.ident);
+    if (std.mem.indexOf(u8, self.instructions.items, node.ty.define.lvalue.ty.ident)) |index| {
+        try self.pushInstruction(.ident_ref);
+        try self.pushLen(index); // pushIndex?
+        try self.pushLen(node.ty.define.lvalue.ty.ident.len);
+    } else {
+        try self.pushInstruction(.ident);
+        try self.pushLen(node.ty.define.lvalue.ty.ident.len);
+        try self.pushSlice(node.ty.define.lvalue.ty.ident);
+    }
 }
 
 fn compileLoad(self: *Compiler, node: Node) anyerror!void {
     try self.pushInstruction(.load);
     try self.pushOffset(node.offset);
-    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, node.ty.ident.len)}));
-    try self.instructions.appendSlice(node.ty.ident);
+    if (std.mem.indexOf(u8, self.instructions.items, node.ty.ident)) |index| {
+        try self.pushInstruction(.ident_ref);
+        try self.pushLen(index); // pushIndex?
+        try self.pushLen(node.ty.ident.len);
+    } else {
+        try self.pushInstruction(.ident);
+        try self.pushLen(node.ty.ident.len);
+        try self.pushSlice(node.ty.ident);
+    }
 }
 
 fn compileStore(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.assign.rvalue.*);
     try self.pushInstruction(.store);
     try self.pushOffset(node.offset);
-    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, node.ty.assign.lvalue.ty.ident.len)}));
-    try self.instructions.appendSlice(node.ty.assign.lvalue.ty.ident);
+    if (std.mem.indexOf(u8, self.instructions.items, node.ty.assign.lvalue.ty.ident)) |index| {
+        try self.pushInstruction(.ident_ref);
+        try self.pushLen(index); // pushIndex?
+        try self.pushLen(node.ty.assign.lvalue.ty.ident.len);
+    } else {
+        try self.pushInstruction(.ident);
+        try self.pushLen(node.ty.assign.lvalue.ty.ident.len);
+        try self.pushSlice(node.ty.assign.lvalue.ty.ident);
+    }
 
     //TODO: Subscript assign
     //if (node.ty.assign.lvalue.ty == .ident) {
     //    try self.pushConstant(Value.new(.{ .string = node.ty.assign.lvalue.ty.ident }, node.ty.assign.lvalue.offset));
     //    try self.pushInstruction(.store);
-    //    try self.instructions.append(@enumToInt(node.ty.assign.combo));
+    //    try self.pushEnum(node.ty.assign.combo);
     //} else {
     //    try self.compile(node.ty.assign.lvalue.ty.subscript.index.*);
     //    try self.compile(node.ty.assign.lvalue.ty.subscript.container.*);
     //    try self.pushInstruction(.set);
-    //    try self.instructions.append(@enumToInt(node.ty.assign.combo));
+    //    try self.pushEnum(node.ty.assign.combo);
     //}
 }
 
@@ -269,6 +292,22 @@ fn pushInstruction(self: *Compiler, opcode: Opcode) !void {
 
 fn pushOffset(self: *Compiler, offset: u16) !void {
     try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{offset}));
+}
+
+fn pushLen(self: *Compiler, len: usize) !void {
+    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, len)}));
+}
+
+fn pushSlice(self: *Compiler, slice: []const u8) !void {
+    try self.instructions.appendSlice(slice);
+}
+
+fn pushEnum(self: *Compiler, v: anytype) !void {
+    try self.instructions.append(@enumToInt(v));
+}
+
+fn pushByte(self: *Compiler, n: anytype) !void {
+    try self.instructions.append(@intCast(u8, n));
 }
 
 // Tests
