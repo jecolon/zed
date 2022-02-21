@@ -10,7 +10,6 @@ pub const Type = enum {
     loop,
 };
 
-allocator: std.mem.Allocator,
 columns: *std.ArrayList(Value) = undefined,
 map: std.StringHashMap(Value),
 rec_buf: [1024 * 64]u8 = undefined,
@@ -20,19 +19,9 @@ ty: Type,
 
 pub fn init(allocator: std.mem.Allocator, ty: Type) Scope {
     return Scope{
-        .allocator = allocator,
         .map = std.StringHashMap(Value).init(allocator),
         .ty = ty,
     };
-}
-
-pub fn deinit(self: *Scope) void {
-    var iter = self.map.iterator();
-    while (iter.next()) |entry| {
-        entry.value_ptr.deinit(self.allocator);
-        self.allocator.free(entry.key_ptr.*);
-    }
-    self.map.deinit();
 }
 
 const globals = std.ComptimeStringMap(void, .{
@@ -72,14 +61,12 @@ pub fn load(self: Scope, key: []const u8) ?Value {
 }
 
 pub fn store(self: *Scope, key: []const u8, value: Value) !void {
-    const key_copy = try self.allocator.dupe(u8, key);
-    try self.map.put(key_copy, try value.copy(self.allocator));
+    try self.map.put(key, value);
 }
 
 pub fn update(self: *Scope, key: []const u8, value: Value) !void {
     if (read_only.has(key)) return error.ReadOnlyGlobal;
-    if (self.map.get(key)) |old_value| old_value.deinit(self.allocator);
-    try self.map.put(key, try value.copy(self.allocator));
+    try self.map.put(key, value);
 }
 
 // Debug

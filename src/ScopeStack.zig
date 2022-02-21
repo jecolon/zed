@@ -11,10 +11,6 @@ pub fn init(allocator: std.mem.Allocator) ScopeStack {
     return ScopeStack{ .stack = std.ArrayList(Scope).init(allocator) };
 }
 
-pub fn deinit(self: *ScopeStack) void {
-    self.stack.deinit();
-}
-
 pub fn push(self: *ScopeStack, scope: Scope) !*Scope {
     try self.stack.append(scope);
     return &self.stack.items[self.stack.items.len - 1];
