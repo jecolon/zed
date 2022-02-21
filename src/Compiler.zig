@@ -3,31 +3,20 @@ const std = @import("std");
 const Node = @import("Node.zig");
 
 pub const Opcode = enum {
+    // Stack operations
+    pop,
     // Predefined constant values
     bool_true,
     bool_false,
     nil,
-    // Stack operations
-    pop,
+    // Numbers
+    float,
+    int,
+    uint,
+    // Strings
+    plain,
+    string,
 };
-
-pub fn compile(self: *Compiler, node: Node) anyerror!void {
-    switch (node.ty) {
-        // Predefined constant values
-        .boolean => |b| {
-            try self.pushInstruction(if (b) .bool_true else .bool_false);
-            try self.pushOffset(node.offset);
-        },
-        .nil => {
-            try self.pushInstruction(.nil);
-            try self.pushOffset(node.offset);
-        },
-        // Stack operations
-        .stmt_end => try self.pushInstruction(.pop),
-
-        else => unreachable,
-    }
-}
 
 allocator: std.mem.Allocator,
 ctx_stack: std.ArrayList(std.ArrayList(u8)),
@@ -43,6 +32,78 @@ pub fn init(allocator: std.mem.Allocator) !Compiler {
     try self.pushContext();
     return self;
 }
+
+pub fn compile(self: *Compiler, node: Node) anyerror!void {
+    switch (node.ty) {
+        // Stack operations
+        .stmt_end => try self.pushInstruction(.pop),
+        // Predefined constant values
+        .boolean => |b| {
+            try self.pushInstruction(if (b) .bool_true else .bool_false);
+            try self.pushOffset(node.offset);
+        },
+        .nil => {
+            try self.pushInstruction(.nil);
+            try self.pushOffset(node.offset);
+        },
+        // Numbers
+        .float => |f| {
+            try self.pushInstruction(.float);
+            try self.pushOffset(node.offset);
+            try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]f64{f}));
+        },
+        .int => |i| {
+            try self.pushInstruction(.int);
+            try self.pushOffset(node.offset);
+            try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]i64{i}));
+        },
+        .uint => |u| {
+            try self.pushInstruction(.uint);
+            try self.pushOffset(node.offset);
+            try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u64{u}));
+        },
+        // Strings
+        .string => try self.compileString(node),
+
+        else => unreachable,
+    }
+}
+
+// Compile functions
+
+fn compileString(self: *Compiler, node: Node) anyerror!void {
+    const len = node.ty.string.len;
+    var i: usize = 1;
+    while (i <= len) : (i += 1) {
+        const segment = node.ty.string[len - i];
+
+        switch (segment) {
+            .plain => |plain| {
+                try self.pushInstruction(.plain);
+                try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, plain.len)}));
+                try self.instructions.appendSlice(plain);
+            },
+            .ipol => |_| {
+                //try self.pushInstruction(.scope_in);
+                //try self.instructions.append(@enumToInt(Scope.Type.block));
+                //for (ipol.nodes) |n| try self.compile(n);
+                //try self.pushInstruction(.scope_out);
+                //try self.instructions.append(@enumToInt(Scope.Type.block));
+
+                //if (ipol.format) |spec| {
+                //    try self.pushConstant(Value.new(.{ .string = spec }, node.offset));
+                //    try self.pushInstruction(.format);
+                //}
+            },
+        }
+    }
+
+    try self.pushInstruction(.string);
+    try self.pushOffset(node.offset);
+    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, len)}));
+}
+
+// Helpers
 
 fn head(self: Compiler) *std.ArrayList(u8) {
     std.debug.assert(self.ctx_stack.items.len != 0);
@@ -68,6 +129,8 @@ fn pushInstruction(self: *Compiler, opcode: Opcode) !void {
 fn pushOffset(self: *Compiler, offset: u16) !void {
     try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{offset}));
 }
+
+// Tests
 
 test "Compiler predefined constant values" {
     const Lexer = @import("Lexer.zig");

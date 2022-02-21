@@ -716,7 +716,7 @@ fn parseInfix(self: *Parser, left: Node) anyerror!Node {
 fn parseInt(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
-    const int = try std.fmt.parseInt(isize, self.src[start..end], 0);
+    const int = try std.fmt.parseInt(i64, self.src[start..end], 0);
 
     return Node.new(.{ .int = int }, self.currentOffset());
 }
@@ -1116,7 +1116,7 @@ fn parseTernary(self: *Parser, condition: Node) anyerror!Node {
 fn parseUint(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
-    const uint = try std.fmt.parseUnsigned(usize, self.src[start..end], 0);
+    const uint = try std.fmt.parseUnsigned(u64, self.src[start..end], 0);
 
     return Node.new(.{ .uint = uint }, self.currentOffset());
 }

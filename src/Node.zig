@@ -5,7 +5,7 @@ pub const Type = union(enum) {
     float: f64,
     func_return: *Node,
     ident: []const u8,
-    int: isize,
+    int: i64,
     list: []Node,
     map: []Entry,
     loop_break,
@@ -13,7 +13,7 @@ pub const Type = union(enum) {
     nil,
     stmt_end,
     string: []const Segment,
-    uint: usize,
+    uint: u64,
 
     assign: Assign,
     call: Call,
