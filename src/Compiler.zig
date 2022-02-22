@@ -51,6 +51,9 @@ pub const Opcode = enum {
     // Prefix
     neg,
     not,
+    // Data structures
+    list,
+    map,
 };
 
 allocator: std.mem.Allocator,
@@ -92,6 +95,9 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         // Operators
         .infix => try self.compileInfix(node),
         .prefix => try self.compilePrefix(node),
+        // Data structures
+        .list => try self.compileList(node),
+        .map => try self.compileMap(node),
 
         else => unreachable,
     }
@@ -321,6 +327,24 @@ fn compilePrefix(self: *Compiler, node: Node) !void {
     }
 
     try self.pushOffset(node.offset);
+}
+
+fn compileList(self: *Compiler, node: Node) anyerror!void {
+    const len = node.ty.list.len;
+    var i: usize = 1;
+    while (i <= len) : (i += 1) try self.compile(node.ty.list[len - i]);
+    try self.pushInstruction(.list);
+    try self.pushOffset(node.offset);
+    try self.pushLen(len);
+}
+fn compileMap(self: *Compiler, node: Node) anyerror!void {
+    for (node.ty.map) |entry| {
+        try self.compile(entry.key);
+        try self.compile(entry.value);
+    }
+    try self.pushInstruction(.map);
+    try self.pushOffset(node.offset);
+    try self.pushLen(node.ty.map.len);
 }
 
 // Helpers

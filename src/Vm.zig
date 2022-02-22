@@ -81,20 +81,25 @@ pub fn run(self: *Vm) !void {
             .define => try self.execDefine(),
             .load => try self.execLoad(),
             .store => try self.execStore(),
-            // Operators
+            // Infix
             .add => try self.execAdd(),
             .sub => try self.execSub(),
             .mul => try self.execMul(),
             .div => try self.execDiv(),
             .mod => try self.execMod(),
+            // Comparison
             .lt,
             .lte,
             .gt,
             .gte,
             => try self.execComparison(opcode),
             .eq, .neq => try self.execEqNeq(opcode),
+            // Prefix
             .neg => try self.execNeg(),
             .not => try self.execNot(),
+            // Data structures
+            .list => try self.execList(),
+            .map => try self.execMap(),
 
             else => unreachable,
         }
@@ -527,6 +532,40 @@ fn execNeg(self: *Vm) !void {
     }
 }
 
+fn execList(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const len = self.getU16(self.ip.*);
+    self.ip.* += 2;
+
+    const list_ptr = try self.allocator.create(std.ArrayList(Value));
+    list_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, len);
+    var i: usize = 0;
+    while (i < len) : (i += 1) list_ptr.appendAssumeCapacity(self.value_stack.pop());
+
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
+}
+fn execMap(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const len = self.getU16(self.ip.*);
+    self.ip.* += 2;
+
+    const map_ptr = try self.allocator.create(std.StringHashMap(Value));
+    map_ptr.* = std.StringHashMap(Value).init(self.allocator);
+    try map_ptr.ensureTotalCapacity(len);
+    var i: usize = 0;
+    while (i < len) : (i += 1) {
+        const value = self.value_stack.pop();
+        const key = self.value_stack.pop();
+        map_ptr.putAssumeCapacity(key.ty.string, value);
+    }
+
+    try self.value_stack.append(Value.new(.{ .map = map_ptr }, offset));
+}
+
 // Stack Frame
 
 const Frame = struct {
@@ -796,4 +835,30 @@ test "Vm prefix" {
     got = try testVmValue(allocator, "!true");
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(false, got.ty.boolean);
+}
+
+test "Vm list literal" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator, "[1, 2, 3]");
+    try std.testing.expectEqual(Value.Tag.list, got.ty);
+    try std.testing.expectEqual(@as(usize, 3), got.ty.list.items.len);
+    try std.testing.expectEqual(Value.Tag.uint, got.ty.list.items[0].ty);
+    try std.testing.expectEqual(@as(u64, 1), got.ty.list.items[0].ty.uint);
+}
+
+test "Vm map literal" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\["a": 1, "b": 2]
+    );
+    try std.testing.expectEqual(Value.Tag.map, got.ty);
+    try std.testing.expectEqual(@as(usize, 2), got.ty.map.count());
+    try std.testing.expectEqual(Value.Tag.uint, got.ty.map.get("a").?.ty);
+    try std.testing.expectEqual(@as(u64, 1), got.ty.map.get("a").?.ty.uint);
 }

@@ -7,6 +7,8 @@ pub const Tag = enum {
     float,
     func,
     int,
+    list,
+    map,
     nil,
     string,
     uint,
@@ -17,6 +19,8 @@ pub const Type = union(Tag) {
     float: f64,
     func: Function,
     int: i64,
+    list: *std.ArrayList(Value),
+    map: *std.StringHashMap(Value),
     nil,
     string: []const u8,
     uint: u64,
@@ -29,46 +33,6 @@ pub fn new(ty: Type, offset: u16) Value {
     return .{ .offset = offset, .ty = ty };
 }
 
-//pub fn deinit(_: Value, _: std.mem.Allocator) void {}
-
-//pub fn asBytes(self: Value, bytes: *std.ArrayList(u8)) !void {
-//    switch (self.ty) {
-//        // Predefined constant values
-//        .boolean => |b| {
-//            try bytes.append(if (b) 1 else 0);
-//            try bytes.appendSlice(std.mem.sliceAsBytes(&[1]u16{self.offset}));
-//            try bytes.append(@enumToInt(Tag.boolean));
-//        },
-//        .nil => {
-//            try bytes.appendSlice(std.mem.sliceAsBytes(&[1]u16{self.offset}));
-//            try bytes.append(@enumToInt(Tag.nil));
-//        },
-//        // Numbers
-//        .float => |f| {
-//            try bytes.appendSlice(std.mem.sliceAsBytes(&[1]f64{f}));
-//            try bytes.appendSlice(std.mem.sliceAsBytes(&[1]u16{self.offset}));
-//            try bytes.append(@enumToInt(Tag.float));
-//        },
-//        .int => |i| {
-//            try bytes.appendSlice(std.mem.sliceAsBytes(&[1]i64{i}));
-//            try bytes.appendSlice(std.mem.sliceAsBytes(&[1]u16{self.offset}));
-//            try bytes.append(@enumToInt(Tag.int));
-//        },
-//        .uint => |u| {
-//            try bytes.appendSlice(std.mem.sliceAsBytes(&[1]u64{u}));
-//            try bytes.appendSlice(std.mem.sliceAsBytes(&[1]u16{self.offset}));
-//            try bytes.append(@enumToInt(Tag.uint));
-//        },
-//        // Strings
-//        .string => |s| {
-//            try bytes.appendSlice(s);
-//            try bytes.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, s.len)}));
-//            try bytes.appendSlice(std.mem.sliceAsBytes(&[1]u16{self.offset}));
-//            try bytes.append(@enumToInt(Tag.string));
-//        },
-//    }
-//}
-
 pub fn format(self: Value, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
     _ = fmt;
     _ = options;
@@ -77,13 +41,36 @@ pub fn format(self: Value, comptime fmt: []const u8, options: std.fmt.FormatOpti
         .boolean => |b| _ = try writer.print("{}", .{b}),
         .float => |f| _ = try writer.print("{d}", .{f}),
         .int => |i| _ = try writer.print("{}", .{i}),
-        //.list => |l| try printList(l, writer),
-        //.map => |m| try printMap(m, writer),
+        .list => |l| try printList(l, writer),
+        .map => |m| try printMap(m, writer),
         .string => |s| _ = try writer.print("{s}", .{s}),
         .uint => |u| _ = try writer.print("{}", .{u}),
 
         else => {},
     }
+}
+
+fn printList(list: *std.ArrayList(Value), writer: anytype) !void {
+    try writer.writeByte('[');
+
+    for (list.items) |element, i| {
+        if (i != 0) try writer.writeAll(", ");
+        _ = try writer.print("{}", .{element});
+    }
+
+    try writer.writeByte(']');
+}
+fn printMap(map: *std.StringHashMap(Value), writer: anytype) !void {
+    try writer.writeByte('[');
+    var iter = map.iterator();
+    var i: usize = 0;
+
+    while (iter.next()) |entry| : (i += 1) {
+        if (i != 0) try writer.writeAll(", ");
+        _ = try writer.print("{s}: {}", .{ entry.key_ptr.*, entry.value_ptr.* });
+    }
+
+    try writer.writeByte(']');
 }
 
 pub const Function = struct {
@@ -107,21 +94,21 @@ pub fn eql(self: Value, other: Value) bool {
                 if (!std.mem.eql(u8, param, other.ty.func.params[i])) break false;
             } else true;
         },
-        //.list => |l| lst: {
-        //    if (l.items.len != other.ty.list.items.len) break :lst false;
-        //    break :lst for (l.items) |item, i| {
-        //        if (!item.eql(other.ty.list.items[i])) break false;
-        //    } else true;
-        //},
-        //.map => |m| mp: {
-        //    if (m.count() != other.ty.map.count()) break :mp false;
-        //    var iter = m.iterator();
-        //    break :mp while (iter.next()) |entry| {
-        //        if (other.ty.map.get(entry.key_ptr.*)) |ov| {
-        //            if (!entry.value_ptr.eql(ov)) break false;
-        //        }
-        //    } else true;
-        //},
+        .list => |l| lst: {
+            if (l.items.len != other.ty.list.items.len) break :lst false;
+            break :lst for (l.items) |item, i| {
+                if (!item.eql(other.ty.list.items[i])) break false;
+            } else true;
+        },
+        .map => |m| mp: {
+            if (m.count() != other.ty.map.count()) break :mp false;
+            var iter = m.iterator();
+            break :mp while (iter.next()) |entry| {
+                if (other.ty.map.get(entry.key_ptr.*)) |ov| {
+                    if (!entry.value_ptr.eql(ov)) break false;
+                }
+            } else true;
+        },
         //.range => |r| r[0] == other.ty.range[0] and r[1] == other.ty.range[1],
         .string => |s| std.mem.eql(u8, s, other.ty.string),
         .nil => other.ty == .nil,
@@ -136,8 +123,8 @@ pub fn eqlType(self: Value, other: Value) bool {
         .float => other.ty == .float,
         .func => other.ty == .func,
         .int => other.ty == .int,
-        //.list => other.ty == .list,
-        //.map => other.ty == .map,
+        .list => other.ty == .list,
+        .map => other.ty == .map,
         //.range => other.ty == .range,
         .string => other.ty == .string,
         .uint => other.ty == .uint,
