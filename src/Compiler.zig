@@ -54,6 +54,7 @@ pub const Opcode = enum {
     // Data structures
     list,
     map,
+    range,
     subscript,
     // Stack ops
     jump,
@@ -115,6 +116,7 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         // Data structures
         .list => try self.compileList(node),
         .map => try self.compileMap(node),
+        .range => try self.compileRange(node),
         .subscript => try self.compileSubscript(node),
         // Conditionals
         .conditional => try self.compileConditional(node),
@@ -481,6 +483,14 @@ fn compileContinue(self: *Compiler) anyerror!void {
     try self.pushEnum(Scope.Type.loop);
     try self.pushInstruction(.jump);
     try self.pushLen(self.current_loop_start.?.index);
+}
+
+fn compileRange(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.range.from.*);
+    try self.compile(node.ty.range.to.*);
+    try self.pushInstruction(.range);
+    try self.pushOffset(node.offset);
+    try self.pushByte(@boolToInt(node.ty.range.inclusive));
 }
 
 // Helpers

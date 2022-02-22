@@ -103,6 +103,7 @@ pub fn run(self: *Vm) !void {
             // Data structures
             .list => try self.execList(),
             .map => try self.execMap(),
+            .range => try self.execRange(),
             .subscript => try self.execSubscript(),
             .set => try self.execSet(),
 
@@ -586,9 +587,21 @@ fn execSubscript(self: *Vm) !void {
 }
 fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
     const index = self.value_stack.pop();
-    if (index.ty != .uint) return self.ctx.err("list[{s}] ?", .{@tagName(index.ty)}, error.InvalidSubscript, offset);
-    if (index.ty.uint >= list.ty.list.items.len) return self.ctx.err("Index out of bounds.", .{}, error.InvalidSubscript, offset);
-    try self.value_stack.append(list.ty.list.items[index.ty.uint]);
+    if (index.ty != .uint and index.ty != .range) return self.ctx.err("list[{s}] ?", .{@tagName(index.ty)}, error.InvalidSubscript, offset);
+
+    if (index.ty == .uint) {
+        if (index.ty.uint >= list.ty.list.items.len) return self.ctx.err("Index out of bounds.", .{}, error.InvalidSubscript, offset);
+        try self.value_stack.append(list.ty.list.items[index.ty.uint]);
+    } else {
+        if (index.ty.range[1] > list.ty.list.items.len) return self.ctx.err("Index out of bounds.", .{}, error.InvalidSubscript, offset);
+
+        var new_list_ptr = try self.allocator.create(std.ArrayList(Value));
+        new_list_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, index.ty.range[1] - index.ty.range[0]);
+        for (list.ty.list.items[index.ty.range[0]..index.ty.range[1]]) |item|
+            new_list_ptr.appendAssumeCapacity(item); //TODO: Copy here?
+
+        try self.value_stack.append(Value.new(.{ .list = new_list_ptr }, offset));
+    }
 }
 fn execSubscriptMap(self: *Vm, map: Value, offset: u16) !void {
     const key = self.value_stack.pop();
@@ -677,6 +690,24 @@ fn execJumpFalse(self: *Vm) void {
 fn execJumpTrue(self: *Vm) void {
     const condition = self.value_stack.pop();
     if (isTruthy(condition)) self.execJump() else self.ip.* += 3;
+}
+
+fn execRange(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const inclusive = self.instructions[self.ip.*] == 1;
+    self.ip.* += 1;
+
+    const to = self.value_stack.pop();
+    const from = self.value_stack.pop();
+
+    if (from.ty != .uint or to.ty != .uint) return self.ctx.err("Invalid range.", .{}, error.InvalidRange, offset);
+
+    const from_uint = from.ty.uint;
+    const to_uint = if (inclusive) to.ty.uint + 1 else to.ty.uint;
+
+    try self.value_stack.append(Value.new(.{ .range = [2]usize{ from_uint, to_uint } }, offset));
 }
 
 // Stack Frame
@@ -1143,4 +1174,16 @@ test "Vm recursive fibonacci" {
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 13), got.ty.uint);
+}
+
+test "Vm list range subscript" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\[1, 2, 3, 4, 5][2..<5][1]
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 4), got.ty.uint);
 }

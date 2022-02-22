@@ -10,6 +10,7 @@ pub const Tag = enum {
     list,
     map,
     nil,
+    range,
     string,
     uint,
 };
@@ -22,6 +23,7 @@ pub const Type = union(Tag) {
     list: *std.ArrayList(Value),
     map: *std.StringHashMap(Value),
     nil,
+    range: [2]usize,
     string: []const u8,
     uint: u64,
 };
@@ -109,7 +111,7 @@ pub fn eql(self: Value, other: Value) bool {
                 }
             } else true;
         },
-        //.range => |r| r[0] == other.ty.range[0] and r[1] == other.ty.range[1],
+        .range => |r| r[0] == other.ty.range[0] and r[1] == other.ty.range[1],
         .string => |s| std.mem.eql(u8, s, other.ty.string),
         .nil => other.ty == .nil,
         else => unreachable,
@@ -125,7 +127,7 @@ pub fn eqlType(self: Value, other: Value) bool {
         .int => other.ty == .int,
         .list => other.ty == .list,
         .map => other.ty == .map,
-        //.range => other.ty == .range,
+        .range => other.ty == .range,
         .string => other.ty == .string,
         .uint => other.ty == .uint,
         .nil => other.ty == .nil,
