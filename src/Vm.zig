@@ -101,6 +101,7 @@ pub fn run(self: *Vm) !void {
             .list => try self.execList(),
             .map => try self.execMap(),
             .subscript => try self.execSubscript(),
+            .set => try self.execSet(),
 
             else => unreachable,
         }
@@ -592,6 +593,74 @@ fn execSubscriptMap(self: *Vm, map: Value, offset: u16) !void {
     const value = if (map.ty.map.get(key.ty.string)) |v| v else Value.new(.nil, offset);
     try self.value_stack.append(value);
 }
+fn execSet(self: *Vm) !void {
+    const container = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    // Combo assign
+    const combo = @intToEnum(Node.Combo, self.instructions[self.ip.*]);
+    self.ip.* += 1;
+
+    if (container.ty != .list and container.ty != .map)
+        return self.ctx.err("{s}[]= ?", .{@tagName(container.ty)}, error.InvalidSubscript, offset);
+
+    return if (container.ty == .list)
+        try self.execSetList(container, offset, combo)
+    else
+        try self.execSetMap(container, offset, combo);
+}
+fn execSetList(self: *Vm, list: Value, offset: u16, combo: Node.Combo) !void {
+    const index = self.value_stack.pop();
+    if (index.ty != .uint) return self.ctx.err("list[{s}]= ?", .{@tagName(index.ty)}, error.InvalidSubscript, offset);
+    if (index.ty.uint >= list.ty.list.items.len) return self.ctx.err("Index out of bounds.", .{}, error.InvalidSubscript, offset);
+    const rvalue = self.value_stack.pop();
+
+    // Store
+    if (combo == .none) {
+        list.ty.list.items[index.ty.uint] = rvalue; //TODO: Deinit old value?
+        try self.value_stack.append(rvalue);
+    } else {
+        const old_value = list.ty.list.items[index.ty.uint];
+
+        const new_value = switch (combo) {
+            .none => unreachable,
+            .add => try old_value.add(rvalue),
+            .sub => try old_value.sub(rvalue),
+            .mul => try old_value.mul(rvalue),
+            .div => try old_value.div(rvalue),
+            .mod => try old_value.mod(rvalue),
+        };
+
+        list.ty.list.items[index.ty.uint] = new_value;
+        try self.value_stack.append(new_value);
+    }
+}
+fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
+    const key = self.value_stack.pop();
+    if (key.ty != .string) return self.ctx.err("map[{s}]= ?", .{@tagName(key.ty)}, error.InvalidSubscript, offset);
+    const rvalue = self.value_stack.pop();
+
+    // Store
+    if (combo == .none) {
+        try map.ty.map.put(key.ty.string, rvalue); //TODO: Deinit old value?
+        try self.value_stack.append(rvalue);
+    } else {
+        const old_value = map.ty.map.get(key.ty.string) orelse Value.new(.{ .uint = 0 }, offset);
+
+        const new_value = switch (combo) {
+            .none => unreachable,
+            .add => try old_value.add(rvalue),
+            .sub => try old_value.sub(rvalue),
+            .mul => try old_value.mul(rvalue),
+            .div => try old_value.div(rvalue),
+            .mod => try old_value.mod(rvalue),
+        };
+
+        try map.ty.map.put(key.ty.string, new_value);
+        try self.value_stack.append(new_value);
+    }
+}
 
 // Stack Frame
 
@@ -901,4 +970,22 @@ test "Vm subscripts" {
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 4), got.ty.uint);
     try std.testing.expectEqual(@as(u16, 14), got.offset);
+}
+
+test "Vm subscript assign" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\m := ["a": 1, "b": 2]
+        \\m["b"] += 2
+        \\m["c"] += m["b"]
+        \\l := [1, 2, 3]
+        \\l[1] = 3
+        \\m["c"] + l[1]
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 7), got.ty.uint);
+    try std.testing.expectEqual(@as(u16, 41), got.offset);
 }
