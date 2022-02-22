@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Compiler = @import("Compiler.zig");
 const Context = @import("Context.zig");
+const Node = @import("Node.zig");
 const Scope = @import("Scope.zig");
 const ScopeStack = @import("ScopeStack.zig");
 const Value = @import("Value.zig");
@@ -13,7 +14,6 @@ last_popped: Value = Value.new(.nil, 0),
 
 instructions: []const u8 = undefined,
 ip: *u16 = undefined,
-scope: *Scope,
 
 scope_stack: ScopeStack,
 frame_stack: std.ArrayList(Frame),
@@ -32,7 +32,6 @@ pub fn init(
         .ctx = ctx,
         .frame_stack = std.ArrayList(Frame).init(allocator),
         .scope_stack = scope_stack,
-        .scope = scope_stack.head(),
         .value_stack = std.ArrayList(Value).init(allocator),
     };
     try self.pushFrame(instructions);
@@ -82,6 +81,18 @@ pub fn run(self: *Vm) !void {
             .define => try self.execDefine(),
             .load => try self.execLoad(),
             .store => try self.execStore(),
+            // Operators
+            .add => try self.execAdd(),
+            .sub => try self.execSub(),
+            .mul => try self.execMul(),
+            .div => try self.execDiv(),
+            .mod => try self.execMod(),
+            .lt,
+            .lte,
+            .gt,
+            .gte,
+            => try self.execComparison(opcode),
+            .eq, .neq => try self.execEqNeq(opcode),
 
             else => unreachable,
         }
@@ -310,12 +321,7 @@ fn execCall(self: *Vm) anyerror!void {
     //    };
     //}
 
-    //TODO: Error reporting
-    //if (callee.ty != .func) {
-    //    const location = Location.getLocation(self.filename, self.src, callee.offset);
-    //    std.log.err("Call op on {s}; {}", .{ @tagName(callee.ty), location });
-    //    return error.InvalidCall;
-    //}
+    if (callee.ty != .func) return self.ctx.err("{s} is not callable.", .{@tagName(callee.ty)}, error.InvalidCall, callee.offset);
 
     // Prepare the child scope.
     var func_scope = Scope.init(self.allocator, .function);
@@ -348,29 +354,14 @@ fn execDefine(self: *Vm) !void {
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
-    _ = offset;
     // Name
-    var name: []const u8 = undefined;
-    if (@intToEnum(Compiler.Opcode, self.instructions[self.ip.*]) == .ident) {
-        self.ip.* += 1;
-        const name_len = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        name = self.getString(self.ip.*, name_len);
-        self.ip.* += name_len;
-    } else {
-        self.ip.* += 1;
-        const start = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        const name_len = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        name = self.getString(start, name_len);
-    }
+    const name = self.getName();
     // Is it already defined?
-    if (self.scope.isDefined(name)) return self.ctx.err("{s} already defined.", .{name}, error.NameAlreadyDefined, offset);
+    if (self.scope_stack.isDefined(name)) return self.ctx.err("{s} already defined.", .{name}, error.NameAlreadyDefined, offset);
     // Value
     const rvalue = self.value_stack.pop();
     // Define
-    try self.scope.store(name, rvalue);
+    try self.scope_stack.store(name, rvalue);
     try self.value_stack.append(rvalue);
 }
 fn execLoad(self: *Vm) !void {
@@ -378,55 +369,138 @@ fn execLoad(self: *Vm) !void {
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
-    _ = offset;
     // Name
-    var name: []const u8 = undefined;
-    if (@intToEnum(Compiler.Opcode, self.instructions[self.ip.*]) == .ident) {
-        self.ip.* += 1;
-        const name_len = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        name = self.getString(self.ip.*, name_len);
-        self.ip.* += name_len;
-    } else {
-        self.ip.* += 1;
-        const start = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        const name_len = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        name = self.getString(start, name_len);
-    }
-    //TODO: Handle name not defined.
+    const name = self.getName();
+    // Is the name defined?
+    if (!self.scope_stack.isDefined(name)) return self.ctx.err("{s} is undefined.", .{name}, error.NameUndefined, offset);
     // Load
-    try self.value_stack.append(self.scope.load(name).?);
+    try self.value_stack.append(self.scope_stack.load(name).?);
 }
 fn execStore(self: *Vm) !void {
     // Offset
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
-    _ = offset;
+    // Combo assign
+    const combo = @intToEnum(Node.Combo, self.instructions[self.ip.*]);
+    self.ip.* += 1;
     // Name
-    var name: []const u8 = undefined;
-    if (@intToEnum(Compiler.Opcode, self.instructions[self.ip.*]) == .ident) {
-        self.ip.* += 1;
-        const name_len = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        name = self.getString(self.ip.*, name_len);
-        self.ip.* += name_len;
-    } else {
-        self.ip.* += 1;
-        const start = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        const name_len = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        name = self.getString(start, name_len);
-    }
+    const name = self.getName();
+    // Is the name defined?
+    if (!self.scope_stack.isDefined(name)) return self.ctx.err("{s} is undefined.", .{name}, error.NameUndefined, offset);
     // Value
     const rvalue = self.value_stack.pop();
-    //TODO: Handle name already defined.
-    // Define
-    try self.scope.update(name, rvalue);
-    try self.value_stack.append(rvalue);
+    // Store
+    if (combo == .none) {
+        try self.scope_stack.update(name, rvalue);
+        try self.value_stack.append(rvalue);
+    } else {
+        const old_value = self.scope_stack.load(name).?;
+
+        const new_value = switch (combo) {
+            .none => unreachable,
+            .add => try old_value.add(rvalue),
+            .sub => try old_value.sub(rvalue),
+            .mul => try old_value.mul(rvalue),
+            .div => try old_value.div(rvalue),
+            .mod => try old_value.mod(rvalue),
+        };
+
+        try self.scope_stack.update(name, new_value);
+        try self.value_stack.append(new_value);
+    }
+}
+
+// Arithmetic
+fn execAdd(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    if (left.add(right)) |sum| {
+        try self.value_stack.append(sum);
+    } else |err| return self.ctx.err("{s} + {s} ?", .{ @tagName(left.ty), @tagName(right.ty) }, err, offset);
+}
+fn execSub(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    if (left.sub(right)) |diff| {
+        try self.value_stack.append(diff);
+    } else |err| return self.ctx.err("{s} - {s} ?", .{ @tagName(left.ty), @tagName(right.ty) }, err, offset);
+}
+fn execMul(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    if (left.mul(right)) |product| {
+        try self.value_stack.append(product);
+    } else |err| return self.ctx.err("{s} * {s} ?", .{ @tagName(left.ty), @tagName(right.ty) }, err, offset);
+}
+fn execDiv(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    if (left.div(right)) |quotient| {
+        try self.value_stack.append(quotient);
+    } else |err| return self.ctx.err("{s} / {s} ?", .{ @tagName(left.ty), @tagName(right.ty) }, err, offset);
+}
+fn execMod(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    if (left.mod(right)) |remainder| {
+        try self.value_stack.append(remainder);
+    } else |err| return self.ctx.err("{s} % {s} ?", .{ @tagName(left.ty), @tagName(right.ty) }, err, offset);
+}
+fn execComparison(self: *Vm, opcode: Compiler.Opcode) !void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const comparison = left.cmp(right) catch |err| return self.ctx.err("{s} {s} {s} ?", .{
+        @tagName(left.ty),
+        @tagName(opcode),
+        @tagName(right.ty),
+    }, err, offset);
+
+    const result = switch (opcode) {
+        .lt => Value.new(.{ .boolean = comparison == .lt }, offset),
+        .lte => Value.new(.{ .boolean = comparison == .lt or comparison == .eq }, offset),
+        .gt => Value.new(.{ .boolean = comparison == .gt }, offset),
+        .gte => Value.new(.{ .boolean = comparison == .gt or comparison == .eq }, offset),
+
+        else => unreachable,
+    };
+
+    try self.value_stack.append(result);
+}
+fn execEqNeq(self: *Vm, opcode: Compiler.Opcode) !void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    var comparison = left.eql(right);
+    if (opcode == .neq) comparison = !comparison;
+    try self.value_stack.append(Value.new(.{ .boolean = comparison }, offset));
 }
 
 // Stack Frame
@@ -468,23 +542,42 @@ fn execScopeOut(self: *Vm) anyerror!void {
 }
 
 fn pushScope(self: *Vm, scope: Scope) !void {
-    self.scope = try self.scope_stack.push(scope);
+    try self.scope_stack.push(scope);
 }
 
 fn popScope(self: *Vm) Scope {
     std.debug.assert(self.scope_stack.stack.items.len > 1);
     var old_scope = self.scope_stack.pop();
-    self.scope = self.scope_stack.head();
     return old_scope;
 }
 
 // Helpers
-fn getOffset(self: Vm) u16 {
-    return self.getU16(self.ip.*);
+fn getName(self: Vm) []const u8 {
+    var name: []const u8 = undefined;
+    if (@intToEnum(Compiler.Opcode, self.instructions[self.ip.*]) == .ident) {
+        self.ip.* += 1;
+        const name_len = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        name = self.getString(self.ip.*, name_len);
+        self.ip.* += name_len;
+    } else {
+        self.ip.* += 1;
+        const start = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        const name_len = self.getU16(self.ip.*);
+        self.ip.* += 2;
+        name = self.getString(start, name_len);
+    }
+
+    return name;
 }
 
 fn getNumber(self: Vm, comptime T: type, start: usize, n: usize) T {
     return std.mem.bytesAsSlice(T, self.instructions[start .. start + n])[0];
+}
+
+fn getOffset(self: Vm) u16 {
+    return self.getU16(self.ip.*);
 }
 
 fn getString(self: Vm, start: usize, len: usize) []const u8 {
@@ -621,7 +714,7 @@ test "Vm function literal" {
     try std.testing.expectEqual(@as(u16, 0), got.offset);
 }
 
-test "Vm function call" {
+test "Vm function call / define, store, load" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -633,4 +726,36 @@ test "Vm function call" {
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 42), got.ty.uint);
+}
+
+test "Vm combo assign" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\f := 1
+        \\f += 2
+        \\f
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+}
+
+test "Vm infix" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator, "1 + 2 * 3 / 2 % 2");
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 2), got.ty.uint);
+
+    got = try testVmValue(allocator, "1 + 2 * 3 / 2 % 2 == 2");
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(true, got.ty.boolean);
+
+    got = try testVmValue(allocator, "(1 + 2) * 3 / 2 % 2 > 2");
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(false, got.ty.boolean);
 }

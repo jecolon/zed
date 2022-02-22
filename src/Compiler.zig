@@ -34,7 +34,20 @@ pub const Opcode = enum {
     ident,
     ident_ref,
     load,
+    set,
     store,
+    // Infix
+    add,
+    sub,
+    mul,
+    div,
+    mod,
+    lt,
+    lte,
+    gt,
+    gte,
+    eq,
+    neq,
 };
 
 allocator: std.mem.Allocator,
@@ -73,6 +86,8 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         .define => try self.compileDefine(node),
         .ident => try self.compileLoad(node),
         .assign => try self.compileStore(node),
+        // Operators
+        .infix => try self.compileInfix(node),
 
         else => unreachable,
     }
@@ -242,29 +257,54 @@ fn compileLoad(self: *Compiler, node: Node) anyerror!void {
 
 fn compileStore(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.assign.rvalue.*);
-    try self.pushInstruction(.store);
-    try self.pushOffset(node.offset);
-    if (std.mem.indexOf(u8, self.instructions.items, node.ty.assign.lvalue.ty.ident)) |index| {
-        try self.pushInstruction(.ident_ref);
-        try self.pushLen(index); // pushIndex?
-        try self.pushLen(node.ty.assign.lvalue.ty.ident.len);
+
+    if (node.ty.assign.lvalue.ty == .ident) {
+        try self.pushInstruction(.store);
+        try self.pushOffset(node.offset);
+        try self.pushEnum(node.ty.assign.combo);
+
+        if (std.mem.indexOf(u8, self.instructions.items, node.ty.assign.lvalue.ty.ident)) |index| {
+            try self.pushInstruction(.ident_ref);
+            try self.pushLen(index); // pushIndex?
+            try self.pushLen(node.ty.assign.lvalue.ty.ident.len);
+        } else {
+            try self.pushInstruction(.ident);
+            try self.pushLen(node.ty.assign.lvalue.ty.ident.len);
+            try self.pushSlice(node.ty.assign.lvalue.ty.ident);
+        }
     } else {
-        try self.pushInstruction(.ident);
-        try self.pushLen(node.ty.assign.lvalue.ty.ident.len);
-        try self.pushSlice(node.ty.assign.lvalue.ty.ident);
+        try self.compile(node.ty.assign.lvalue.ty.subscript.index.*);
+        try self.compile(node.ty.assign.lvalue.ty.subscript.container.*);
+        try self.pushInstruction(.set);
+        try self.pushOffset(node.offset);
+        try self.pushEnum(node.ty.assign.combo);
+    }
+}
+
+fn compileInfix(self: *Compiler, node: Node) anyerror!void {
+    //TODO
+    //if (node.ty.infix.op == .kw_and) return self.compileLogicAnd(node);
+    //if (node.ty.infix.op == .kw_or) return self.compileLogicOr(node);
+
+    try self.compile(node.ty.infix.left.*);
+    try self.compile(node.ty.infix.right.*);
+
+    switch (node.ty.infix.op) {
+        .punct_plus => try self.pushInstruction(.add),
+        .punct_minus => try self.pushInstruction(.sub),
+        .punct_star => try self.pushInstruction(.mul),
+        .punct_slash => try self.pushInstruction(.div),
+        .punct_percent => try self.pushInstruction(.mod),
+        .punct_lt => try self.pushInstruction(.lt),
+        .op_lte => try self.pushInstruction(.lte),
+        .punct_gt => try self.pushInstruction(.gt),
+        .op_gte => try self.pushInstruction(.gte),
+        .op_eq => try self.pushInstruction(.eq),
+        .op_neq => try self.pushInstruction(.neq),
+        else => unreachable,
     }
 
-    //TODO: Subscript assign
-    //if (node.ty.assign.lvalue.ty == .ident) {
-    //    try self.pushConstant(Value.new(.{ .string = node.ty.assign.lvalue.ty.ident }, node.ty.assign.lvalue.offset));
-    //    try self.pushInstruction(.store);
-    //    try self.pushEnum(node.ty.assign.combo);
-    //} else {
-    //    try self.compile(node.ty.assign.lvalue.ty.subscript.index.*);
-    //    try self.compile(node.ty.assign.lvalue.ty.subscript.container.*);
-    //    try self.pushInstruction(.set);
-    //    try self.pushEnum(node.ty.assign.combo);
-    //}
+    try self.pushOffset(node.offset);
 }
 
 // Helpers

@@ -11,9 +11,8 @@ pub fn init(allocator: std.mem.Allocator) ScopeStack {
     return ScopeStack{ .stack = std.ArrayList(Scope).init(allocator) };
 }
 
-pub fn push(self: *ScopeStack, scope: Scope) !*Scope {
+pub fn push(self: *ScopeStack, scope: Scope) !void {
     try self.stack.append(scope);
-    return &self.stack.items[self.stack.items.len - 1];
 }
 
 pub fn pop(self: *ScopeStack) Scope {
@@ -42,9 +41,10 @@ pub fn load(self: ScopeStack, key: []const u8) ?Value {
     if (std.mem.eql(u8, key, "@rec")) {
         return Value.new(.{ .string = self.stack.items[0].record }, 0);
     }
-    if (std.mem.eql(u8, key, "@cols")) {
-        return Value.new(.{ .list = self.stack.items[0].columns }, 0);
-    }
+    //TODO: Load @cols
+    //if (std.mem.eql(u8, key, "@cols")) {
+    //    return Value.new(.{ .list = self.stack.items[0].columns }, 0);
+    //}
 
     const len = self.stack.items.len;
     var i: usize = 1;
@@ -67,11 +67,12 @@ pub fn update(self: *ScopeStack, key: []const u8, value: Value) !void {
         self.stack.items[0].record = value.ty.string;
         return;
     }
-    if (std.mem.eql(u8, key, "@cols")) {
-        if (value.ty != .list) return error.InvalidAtCols;
-        self.stack.items[0].columns = value.ty.list;
-        return;
-    }
+    //TODO: Store @cols
+    //if (std.mem.eql(u8, key, "@cols")) {
+    //    if (value.ty != .list) return error.InvalidAtCols;
+    //    self.stack.items[0].columns = value.ty.list;
+    //    return;
+    //}
 
     const len = self.stack.items.len;
     var i: usize = 1;
