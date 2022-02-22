@@ -52,16 +52,14 @@ pub fn main() anyerror!void {
     //errdefer compiler_arena.deinit();
     //const compiler_allocator = compiler_arena.allocator();
 
-    var lexer = Lexer{
-        .allocator = static_allocator,
-        .filename = program_filename,
-        .src = program_src,
-    };
+    // Context
+    const ctx = Context{ .filename = program_filename, .src = program_src };
+
+    var lexer = Lexer{ .allocator = static_allocator, .ctx = ctx };
     const tokens = try lexer.lex();
     var parser = Parser{
         .allocator = static_allocator,
-        .filename = program_filename,
-        .src = program_src,
+        .ctx = ctx,
         .tokens = tokens,
     };
     const program = try parser.parse();
@@ -71,9 +69,6 @@ pub fn main() anyerror!void {
     for (program.rules) |n| try compiler.compile(n);
     //const compiled = try compiler.compileProgram(static_allocator, program);
     //compiler_arena.deinit();
-
-    // Context
-    const ctx = Context{ .filename = program_filename, .src = program_src };
 
     // Program global scope
     var scope_stack = ScopeStack.init(static_allocator);
@@ -147,7 +142,7 @@ pub fn main() anyerror!void {
         defer data_file.close();
         var data_reader = std.io.bufferedReader(data_file.reader()).reader();
 
-        // Sime state
+        // File record numbering
         var frnum: usize = 1;
 
         // Loop over records.
@@ -182,9 +177,9 @@ pub fn main() anyerror!void {
 
             // New record, new fileds.
             global_scope.columns = try static_allocator.create(std.ArrayList(Value));
-            defer static_allocator.destroy(global_scope.columns);
+            //defer static_allocator.destroy(global_scope.columns);
             global_scope.columns.* = std.ArrayList(Value).init(static_allocator);
-            defer global_scope.columns.deinit();
+            //defer global_scope.columns.deinit();
 
             // Loop over fields
             var field_iter = std.mem.split(u8, global_scope.record, global_scope.map.get("@ifs").?.ty.string);

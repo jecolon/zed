@@ -608,6 +608,7 @@ fn popCurrentLoopIndex(self: *Compiler) void {
 // Tests
 
 test "Compiler predefined constant values" {
+    const Context = @import("Context.zig");
     const Lexer = @import("Lexer.zig");
     const Parser = @import("Parser.zig");
 
@@ -615,19 +616,17 @@ test "Compiler predefined constant values" {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const input = "true false nil";
+    const ctx = Context{ .filename = "inline", .src = "true false nil" };
 
     var lexer = Lexer{
         .allocator = arena.allocator(),
-        .filename = "inline",
-        .src = input,
+        .ctx = ctx,
     };
     var tokens = try lexer.lex();
 
     var parser = Parser{
         .allocator = arena.allocator(),
-        .filename = "inline",
-        .src = input,
+        .ctx = ctx,
         .tokens = tokens,
     };
     const program = try parser.parse();

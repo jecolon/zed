@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const Context = @import("Context.zig");
 const Lexer = @import("Lexer.zig");
 const Location = @import("Location.zig");
 const Node = @import("Node.zig");
@@ -7,10 +8,9 @@ const Token = @import("Token.zig");
 
 allocator: std.mem.Allocator,
 can_break: bool = false, // Parsing something that can be broken out of or continued? (i.e. loops)
-filename: []const u8,
+ctx: Context,
 range_id: u8 = 0,
 token_index: ?u16 = null,
-src: []const u8,
 tokens: std.MultiArrayList(Token),
 
 const Parser = @This();
@@ -249,11 +249,12 @@ fn infixFn(self: Parser) InfixFn {
 fn parseExpression(self: *Parser, precedence: Precedence) anyerror!Node {
     const tag = self.currentTag();
 
-    const pfn = prefixFn(tag) orelse {
-        const location = Location.getLocation(self.filename, self.src, self.currentOffset());
-        std.log.err("No parse function for {}; {}", .{ tag, location });
-        return error.NoParseFn;
-    };
+    const pfn = prefixFn(tag) orelse return self.ctx.err(
+        "No parse function for {}.",
+        .{tag},
+        error.NoParseFn,
+        self.currentOffset(),
+    );
 
     var left = try pfn(self);
 
@@ -269,11 +270,12 @@ fn parseExpression(self: *Parser, precedence: Precedence) anyerror!Node {
 
 // Parse functions.
 fn parseAssign(self: *Parser, lvalue: Node) anyerror!Node {
-    if (lvalue.ty != .ident and lvalue.ty != .subscript) {
-        const location = Location.getLocation(self.filename, self.src, lvalue.offset);
-        std.log.err("Invalid assignment left hand side {s}; {}", .{ @tagName(lvalue.ty), location });
-        return error.InvalidAssign;
-    }
+    if (lvalue.ty != .ident and lvalue.ty != .subscript) return self.ctx.err(
+        "{s} = ?",
+        .{@tagName(lvalue.ty)},
+        error.InvalidAssignment,
+        lvalue.offset,
+    );
 
     const combo: Node.Combo = switch (self.currentTag()) {
         .punct_equals => .none,
@@ -304,12 +306,12 @@ fn parseBoolean(self: *Parser) anyerror!Node {
 }
 
 fn parseBreak(self: *Parser) anyerror!Node {
-    if (!self.can_break) {
-        const location = Location.getLocation(self.filename, self.src, self.currentOffset());
-        std.log.err("break not allowed here; {}", .{location});
-        return error.InvalidBreak;
-    }
-
+    if (!self.can_break) return self.ctx.err(
+        "Invalid break.",
+        .{},
+        error.InvalidBreak,
+        self.currentOffset(),
+    );
     return Node.new(.loop_break, self.currentOffset());
 }
 
@@ -343,11 +345,12 @@ fn parseBuiltin(self: *Parser, object: Node) anyerror!Node {
         .pd_stdev => self.parseNoArgBuiltin(object),
         .pd_values => self.parseNoArgBuiltin(object),
 
-        else => {
-            const location = Location.getLocation(self.filename, self.src, self.currentOffset());
-            std.log.err("Undefined builtin call; {}", .{location});
-            return error.InvalidBuiltin;
-        },
+        else => self.ctx.err(
+            "Undefined builtin.",
+            .{},
+            error.InvalidBuiltin,
+            self.currentOffset(),
+        ),
     };
 }
 fn parseNoArgBuiltin(self: *Parser, object: Node) anyerror!Node {
@@ -440,9 +443,12 @@ fn parseTwoArgBuiltin(self: *Parser, object: Node) anyerror!Node {
         try self.expectTag(.punct_lbrace);
         arg_2 = try self.parseExpression(.call);
     } else {
-        const location = Location.getLocation(self.filename, self.src, offset);
-        std.log.err("Expected comma or right paren; {}", .{location});
-        return error.InvalidBuiltin;
+        return self.ctx.err(
+            "Expected comma or right paren.",
+            .{},
+            error.InvalidBuiltin,
+            offset,
+        );
     }
 
     const bi_ptr = try self.allocator.create(Node);
@@ -482,21 +488,22 @@ fn parseCall(self: *Parser, callee: Node) anyerror!Node {
 }
 
 fn parseContinue(self: *Parser) anyerror!Node {
-    if (!self.can_break) {
-        const location = Location.getLocation(self.filename, self.src, self.currentOffset());
-        std.log.err("continue not allowed here; {}", .{location});
-        return error.InvalidContinue;
-    }
-
+    if (!self.can_break) return self.ctx.err(
+        "Invalid continue.",
+        .{},
+        error.InvalidContinue,
+        self.currentOffset(),
+    );
     return Node.new(.loop_continue, self.currentOffset());
 }
 
 fn parseDefine(self: *Parser, name: Node) anyerror!Node {
-    if (name.ty != .ident) {
-        const location = Location.getLocation(self.filename, self.src, name.offset);
-        std.log.err("Name definition of non-name {s}; {}", .{ @tagName(name.ty), location });
-        return error.InvalidDefine;
-    }
+    if (name.ty != .ident) return self.ctx.err(
+        "{s} := ?",
+        .{@tagName(name.ty)},
+        error.InvalidDefine,
+        name.offset,
+    );
 
     var node = Node.new(
         .{ .define = .{ .lvalue = try self.allocator.create(Node), .rvalue = try self.allocator.create(Node) } },
@@ -588,7 +595,7 @@ fn parseEvent(self: *Parser) anyerror!Node {
 fn parseFloat(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
-    const float = try std.fmt.parseFloat(f64, self.src[start..end]);
+    const float = try std.fmt.parseFloat(f64, self.ctx.src[start..end]);
 
     return Node.new(.{ .float = float }, self.currentOffset());
 }
@@ -603,12 +610,12 @@ fn parseFunc(self: *Parser) anyerror!Node {
         var params_list = std.ArrayList([]const u8).init(self.allocator);
         while (!self.skipTag(.punct_fat_rarrow)) {
             try self.expectNext();
-            if (!self.currentIs(.ident)) {
-                const location = Location.getLocation(self.filename, self.src, self.currentOffset());
-                std.log.err("Function param must be identifier; {}", .{location});
-                return error.InvalidParam;
-            }
-
+            if (!self.currentIs(.ident)) return self.ctx.err(
+                "Non-identifier function param.",
+                .{},
+                error.InvalidParam,
+                self.currentOffset(),
+            );
             const param_node = try self.parseIdent();
             try params_list.append(param_node.ty.ident);
             _ = self.skipTag(.punct_comma);
@@ -638,7 +645,7 @@ fn parseFunc(self: *Parser) anyerror!Node {
 fn parseGlobal(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
-    return Node.new(.{ .ident = self.src[start..end] }, start);
+    return Node.new(.{ .ident = self.ctx.src[start..end] }, start);
 }
 
 fn parseGrouped(self: *Parser) anyerror!Node {
@@ -651,7 +658,7 @@ fn parseGrouped(self: *Parser) anyerror!Node {
 fn parseIdent(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
-    return Node.new(.{ .ident = self.src[start..end] }, start);
+    return Node.new(.{ .ident = self.ctx.src[start..end] }, start);
 }
 
 fn parseIf(self: *Parser) anyerror!Node {
@@ -716,7 +723,7 @@ fn parseInfix(self: *Parser, left: Node) anyerror!Node {
 fn parseInt(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
-    const int = try std.fmt.parseInt(i64, self.src[start..end], 0);
+    const int = try std.fmt.parseInt(i64, self.ctx.src[start..end], 0);
 
     return Node.new(.{ .int = int }, self.currentOffset());
 }
@@ -973,26 +980,24 @@ fn parseIpol(self: *Parser, src: []const u8, offset: u16) anyerror!Node.Ipol {
             }
         }
 
-        if (reached_eof) {
-            const location = Location.getLocation(self.filename, self.src, offset);
-            std.log.err("Incomplete format spec; {}", .{location});
-            return error.InvalidFormat;
-        }
+        if (reached_eof) return self.ctx.err(
+            "Unterminated format spec.",
+            .{},
+            error.InvalidFormat,
+            offset,
+        );
 
         format = src[1..end];
         parsable = src[end + 1 ..];
     }
 
-    var sub_lexer = Lexer{
-        .allocator = self.allocator,
-        .filename = self.filename,
-        .src = parsable,
-    };
+    // NOTE: Made this mistake more than once; using the same input as the main parser here will cause an infinite loop,
+    // subsequent stack overfflow, and NO error message, which will drive you crazy!
+    var sub_lexer = Lexer{ .allocator = self.allocator, .ctx = Context{ .filename = self.ctx.filename, .src = parsable } };
     const sub_tokens = try sub_lexer.lex();
     var sub_parser = Parser{
         .allocator = self.allocator,
-        .filename = self.filename,
-        .src = parsable,
+        .ctx = Context{ .filename = self.ctx.filename, .src = parsable },
         .tokens = sub_tokens,
     };
     const sub_program = try sub_parser.parse();
@@ -1007,7 +1012,7 @@ fn parseIpol(self: *Parser, src: []const u8, offset: u16) anyerror!Node.Ipol {
 
 fn parseString(self: *Parser) anyerror!Node {
     const offset = self.currentOffset();
-    const src = try self.processEscapes(self.src[self.currentOffset() + 1 .. self.currentOffset() + self.currentLen() - 1]);
+    const src = try self.processEscapes(self.ctx.src[self.currentOffset() + 1 .. self.currentOffset() + self.currentLen() - 1]);
 
     const src_len = src.len;
     var start: usize = 0;
@@ -1064,12 +1069,12 @@ fn parseString(self: *Parser) anyerror!Node {
                 end += 1;
             }
 
-            if (reached_eof) {
-                const location = Location.getLocation(self.filename, self.src, offset);
-                std.log.err("Incomplete string interpolation; {}", .{location});
-                return error.InvalidInterpolation;
-            }
-
+            if (reached_eof) return self.ctx.err(
+                "Unterminated string interpolation.",
+                .{},
+                error.InvalidIpol,
+                offset,
+            );
             const ipol_segment = Node.Segment{ .ipol = try self.parseIpol(src[start..end], offset + @intCast(u16, start)) };
             try segments.append(ipol_segment);
 
@@ -1116,7 +1121,7 @@ fn parseTernary(self: *Parser, condition: Node) anyerror!Node {
 fn parseUint(self: *Parser) anyerror!Node {
     const start = self.currentOffset();
     const end = self.currentOffset() + self.currentLen();
-    const uint = try std.fmt.parseUnsigned(u64, self.src[start..end], 0);
+    const uint = try std.fmt.parseUnsigned(u64, self.ctx.src[start..end], 0);
 
     return Node.new(.{ .uint = uint }, self.currentOffset());
 }
@@ -1244,20 +1249,22 @@ fn skipTag(self: *Parser, tag: Token.Tag) bool {
 }
 
 fn expectNext(self: *Parser) !void {
-    if (!self.advance()) {
-        const location = Location.getLocation(self.filename, self.src, self.len() - 1);
-        std.log.err("Unexpected end of tokens; {}", .{location});
-        return error.UnexpectedEndOfTokens;
-    }
+    if (!self.advance()) return self.ctx.err(
+        "Unexpected end of tokens.",
+        .{},
+        error.ExpectNext,
+        @intCast(u16, self.ctx.src.len - 1),
+    );
 }
 
 fn expectTag(self: *Parser, tag: Token.Tag) !void {
     try self.expectNext();
-    if (!self.currentIs(tag)) {
-        const location = Location.getLocation(self.filename, self.src, self.currentOffset());
-        std.log.err("Expected {}; {}", .{ tag, location });
-        return error.UnexpectedToken;
-    }
+    if (!self.currentIs(tag)) return self.ctx.err(
+        "Expected {s}, got {s}.",
+        .{ @tagName(tag), @tagName(self.currentTag()) },
+        error.expectTag,
+        self.currentOffset(),
+    );
 }
 
 // Helpers
@@ -1283,17 +1290,12 @@ test "Parser booleans" {
     const allocator = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const input = "false true";
-    var lexer = Lexer{
-        .allocator = arena.allocator(),
-        .filename = "inline",
-        .src = input,
-    };
+    const ctx = Context{ .filename = "inline", .src = "false true" };
+    var lexer = Lexer{ .allocator = arena.allocator(), .ctx = ctx };
     var tokens = try lexer.lex();
     var parser = Parser{
         .allocator = arena.allocator(),
-        .filename = "inline",
-        .src = input,
+        .ctx = ctx,
         .tokens = tokens,
     };
     const program = try parser.parse();

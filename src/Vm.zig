@@ -898,17 +898,14 @@ fn testVmValue(allocator: std.mem.Allocator, input: []const u8) !Value {
     const Lexer = @import("Lexer.zig");
     const Parser = @import("Parser.zig");
 
-    var lexer = Lexer{
-        .allocator = allocator,
-        .filename = "inline",
-        .src = input,
-    };
+    const ctx = Context{ .filename = "inline", .src = input };
+
+    var lexer = Lexer{ .allocator = allocator, .ctx = ctx };
     var tokens = try lexer.lex();
 
     var parser = Parser{
         .allocator = allocator,
-        .filename = "inline",
-        .src = input,
+        .ctx = ctx,
         .tokens = tokens,
     };
     const program = try parser.parse();
@@ -919,7 +916,6 @@ fn testVmValue(allocator: std.mem.Allocator, input: []const u8) !Value {
     var scope_stack = ScopeStack.init(allocator);
     _ = try scope_stack.push(Scope.init(allocator, .block));
 
-    const ctx = Context{ .filename = "inline", .src = input };
     var output = std.ArrayList(u8).init(allocator);
 
     var vm = try init(

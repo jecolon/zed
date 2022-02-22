@@ -1,12 +1,11 @@
 const std = @import("std");
 
-const Location = @import("Location.zig");
+const Context = @import("Context.zig");
 const Token = @import("Token.zig");
 
 allocator: std.mem.Allocator,
-filename: []const u8,
+ctx: Context,
 offset: ?u16 = null,
-src: []const u8,
 
 const Lexer = @This();
 
@@ -16,21 +15,17 @@ pub fn lex(self: *Lexer) !std.MultiArrayList(Token) {
     errdefer tokens.deinit(self.allocator);
     var after_newline = false;
 
-    while (true) {
-        const token_opt = self.next() catch |err| return self.reportErr(err, self.offset.?);
-
-        if (token_opt) |token| {
-            if (token.is(.punct_newline)) {
-                after_newline = true;
-            } else {
-                if (after_newline) {
-                    if (token.is(.punct_lparen) or token.is(.punct_lbracket)) try tokens.append(self.allocator, self.oneChar(.punct_semicolon));
-                    after_newline = false;
-                }
-
-                try tokens.append(self.allocator, token);
+    while (try self.next()) |token| {
+        if (token.is(.punct_newline)) {
+            after_newline = true;
+        } else {
+            if (after_newline) {
+                if (token.is(.punct_lparen) or token.is(.punct_lbracket)) try tokens.append(self.allocator, self.oneChar(.punct_semicolon));
+                after_newline = false;
             }
-        } else break;
+
+            try tokens.append(self.allocator, token);
+        }
     }
 
     return tokens;
@@ -71,7 +66,7 @@ fn next(self: *Lexer) !?Token {
             ']' => self.oneChar(.punct_rbracket),
             '|' => self.oneChar(.punct_pipe),
 
-            else => error.UnknownByte,
+            else => self.ctx.err("Unknown byte {c}.", .{byte}, error.UnknownByte, self.offset.?),
         };
     }
     return null;
@@ -93,11 +88,11 @@ fn lexGlobal(self: *Lexer) !Token {
 
     if (self.peek()) |peek_byte| {
         if (isWhitespace(peek_byte)) return self.oneChar(.punct_at);
-        if (!isIdentByte(peek_byte)) return error.InvalidGlobal;
+        if (!isIdentByte(peek_byte)) return self.ctx.err("Invalid global variable.", .{}, error.InvalidGlobal, start);
     } else return self.oneChar(.punct_at);
 
     self.run(isIdentByte);
-    const src = self.src[start .. self.offset.? + 1];
+    const src = self.ctx.src[start .. self.offset.? + 1];
 
     return Token.new(.op_global, start, src.len);
 }
@@ -105,7 +100,7 @@ fn lexGlobal(self: *Lexer) !Token {
 fn lexIdent(self: *Lexer) Token {
     const start = self.offset.?;
     self.run(isIdentByte);
-    const src = self.src[start .. self.offset.? + 1];
+    const src = self.ctx.src[start .. self.offset.? + 1];
     const tag = if (Token.predef.get(src)) |tag| tag else Token.Tag.ident;
     return Token.new(tag, start, src.len);
 }
@@ -156,7 +151,7 @@ fn lexNumber(self: *Lexer, byte: u8) Token {
         _ = self.advance();
     }
 
-    const src = self.src[start .. self.offset.? + 1];
+    const src = self.ctx.src[start .. self.offset.? + 1];
     var token = Token.new(.uint, start, src.len);
 
     if (src.len > 2) {
@@ -272,30 +267,30 @@ fn lexString(self: *Lexer) !Token {
         }
     }
 
-    if (reached_eof) return error.UnterminatedString;
+    if (reached_eof) return self.ctx.err("Unterminated string.", .{}, error.UnterminatedString, start);
 
-    const src = self.src[start .. self.offset.? + 1];
+    const src = self.ctx.src[start .. self.offset.? + 1];
     return Token.new(.string, start, src.len);
 }
 
 // Scanning
 fn advance(self: *Lexer) ?u8 {
-    if (self.src.len == 0) return null;
+    if (self.ctx.src.len == 0) return null;
     if (self.offset) |*offset| {
         offset.* += 1;
-        if (offset.* >= self.src.len) return null;
+        if (offset.* >= self.ctx.src.len) return null;
     } else self.offset = 0;
 
-    return self.src[self.offset.?];
+    return self.ctx.src[self.offset.?];
 }
 
 fn peekN(self: Lexer, n: u16) ?u8 {
-    if (self.src.len == 0) return null;
+    if (self.ctx.src.len == 0) return null;
 
     if (self.offset) |offset| {
-        return if (offset + n < self.src.len) return self.src[offset + n] else null;
+        return if (offset + n < self.ctx.src.len) return self.ctx.src[offset + n] else null;
     } else {
-        return if (n - 1 < self.src.len) self.src[n - 1] else null;
+        return if (n - 1 < self.ctx.src.len) self.ctx.src[n - 1] else null;
     }
 }
 
@@ -319,9 +314,9 @@ fn peekStr(self: Lexer, str: []const u8) bool {
     if (self.peek() == null) return false;
 
     if (self.offset) |offset| {
-        return std.mem.startsWith(u8, self.src[offset + 1 ..], str);
+        return std.mem.startsWith(u8, self.ctx.src[offset + 1 ..], str);
     } else {
-        return std.mem.startsWith(u8, self.src, str);
+        return std.mem.startsWith(u8, self.ctx.src, str);
     }
 }
 
@@ -442,19 +437,9 @@ fn twoChar(self: Lexer, tag: Token.Tag) Token {
     return Token.new(tag, self.offset.? - 1, 2);
 }
 
-fn reportErr(self: Lexer, err: anyerror, offset: u16) anyerror {
-    const location = Location.getLocation(self.filename, self.src, offset);
-    std.log.err("Lexer: {}; {}", .{ err, location });
-    return err;
-}
-
 // Tests
 fn testLex(allocator: std.mem.Allocator, input: []const u8) !std.MultiArrayList(Token) {
-    var lexer = Lexer{
-        .allocator = allocator,
-        .filename = "inline",
-        .src = input,
-    };
+    var lexer = Lexer{ .allocator = allocator, .ctx = Context{ .filename = "inline", .src = input } };
     return try lexer.lex();
 }
 
