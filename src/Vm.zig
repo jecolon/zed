@@ -11,6 +11,7 @@ const runtimePrint = @import("fmt.zig").runtimePrint;
 allocator: std.mem.Allocator,
 ctx: Context,
 last_popped: Value = Value.new(.nil, 0),
+output: *std.ArrayList(u8),
 
 instructions: []const u8 = undefined,
 ip: *u16 = undefined,
@@ -26,10 +27,12 @@ pub fn init(
     instructions: []const u8,
     scope_stack: ScopeStack,
     ctx: Context,
+    output: *std.ArrayList(u8),
 ) !Vm {
     var self = Vm{
         .allocator = allocator,
         .ctx = ctx,
+        .output = output,
         .frame_stack = std.ArrayList(Frame).init(allocator),
         .scope_stack = scope_stack,
         .value_stack = std.ArrayList(Value).init(allocator),
@@ -72,10 +75,10 @@ pub fn run(self: *Vm) !void {
             .func => try self.execFunc(),
             .func_return => {
                 if (self.frame_stack.items.len == 1) {
-                    // Return from main.
+                    // Top-level return
                     self.last_popped = self.value_stack.pop();
                     self.ip.* += 1;
-                    break;
+                    break; // VM exit
                 }
 
                 self.execReturn();
@@ -106,8 +109,13 @@ pub fn run(self: *Vm) !void {
             .range => try self.execRange(),
             .subscript => try self.execSubscript(),
             .set => try self.execSet(),
+            // Record Ranges
+            .rec_range => try self.execRecRange(),
 
-            else => unreachable,
+            else => {
+                std.log.err("{s}", .{@tagName(opcode)});
+                unreachable;
+            },
         }
     }
 }
@@ -710,6 +718,83 @@ fn execRange(self: *Vm) anyerror!void {
     try self.value_stack.append(Value.new(.{ .range = [2]usize{ from_uint, to_uint } }, offset));
 }
 
+fn execRecRange(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const range_id = self.instructions[self.ip.*];
+    self.ip.* += 1;
+    const exclusive = self.instructions[self.ip.*] == 1;
+    self.ip.* += 1;
+
+    const len = self.getU16(self.ip.*);
+    self.ip.* += 2;
+    const action_instructions: []const u8 = if (len != 0) self.instructions[self.ip.* .. self.ip.* + len] else "";
+    self.ip.* += len;
+
+    const has_from = self.instructions[self.ip.*] == 1;
+    self.ip.* += 1;
+    const has_to = self.instructions[self.ip.*] == 1;
+    self.ip.* += 1;
+
+    const nil_value = Value.new(.nil, offset);
+    const from = if (has_from) self.value_stack.pop() else nil_value;
+    const to = if (has_to) self.value_stack.pop() else nil_value;
+
+    var result = nil_value;
+    var eval_action = false;
+
+    if (self.scope_stack.stack.items[0].rec_ranges.contains(range_id)) {
+        // In range
+        eval_action = true;
+
+        if (isTruthy(to)) {
+            // Range end.
+            _ = self.scope_stack.stack.items[0].rec_ranges.remove(range_id);
+            if (exclusive) eval_action = false;
+        }
+    } else {
+        // Not in range
+        var start_range = false;
+
+        if (from.ty != .nil) {
+            // We have from
+            start_range = isTruthy(from);
+        } else {
+            // No from; start only at row == 1.
+            const rnum = self.scope_stack.stack.items[0].map.get("@rnum").?;
+            start_range = rnum.ty.uint == 1;
+        }
+
+        if (start_range) {
+            // We start a new range.
+            try self.scope_stack.stack.items[0].rec_ranges.put(range_id, {});
+            eval_action = true;
+        }
+    }
+
+    if (eval_action) {
+        if (len != 0) {
+            var vm = try init(
+                self.allocator,
+                action_instructions,
+                self.scope_stack,
+                self.ctx,
+                self.output,
+            );
+            try vm.run();
+
+            result = vm.last_popped;
+        } else {
+            // Default action
+            var writer = self.output.writer();
+            _ = try writer.print("{s}", .{self.scope_stack.stack.items[0].record});
+        }
+    }
+
+    try self.value_stack.append(result);
+}
+
 // Stack Frame
 
 const Frame = struct {
@@ -835,8 +920,15 @@ fn testVmValue(allocator: std.mem.Allocator, input: []const u8) !Value {
     _ = try scope_stack.push(Scope.init(allocator, .block));
 
     const ctx = Context{ .filename = "inline", .src = input };
+    var output = std.ArrayList(u8).init(allocator);
 
-    var vm = try init(allocator, compiler.instructions.items, scope_stack, ctx);
+    var vm = try init(
+        allocator,
+        compiler.instructions.items,
+        scope_stack,
+        ctx,
+        &output,
+    );
     try vm.run();
 
     try std.testing.expectEqual(@as(usize, 0), vm.value_stack.items.len);

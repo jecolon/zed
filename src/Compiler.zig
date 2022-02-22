@@ -60,6 +60,8 @@ pub const Opcode = enum {
     jump,
     jump_true,
     jump_false,
+    // Record Range
+    rec_range,
 };
 
 const Index = struct {
@@ -124,6 +126,8 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         .loop => try self.compileLoop(node),
         .loop_break => try self.compileBreak(),
         .loop_continue => try self.compileContinue(),
+        // Record Range
+        .rec_range => try self.compileRecRange(node),
 
         else => unreachable,
     }
@@ -266,6 +270,7 @@ fn compileDefine(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.define.rvalue.*);
     try self.pushInstruction(.define);
     try self.pushOffset(node.offset);
+
     if (std.mem.indexOf(u8, self.instructions.items, node.ty.define.lvalue.ty.ident)) |index| {
         try self.pushInstruction(.ident_ref);
         try self.pushLen(index); // pushIndex?
@@ -280,6 +285,7 @@ fn compileDefine(self: *Compiler, node: Node) anyerror!void {
 fn compileLoad(self: *Compiler, node: Node) anyerror!void {
     try self.pushInstruction(.load);
     try self.pushOffset(node.offset);
+
     if (std.mem.indexOf(u8, self.instructions.items, node.ty.ident)) |index| {
         try self.pushInstruction(.ident_ref);
         try self.pushLen(index); // pushIndex?
@@ -491,6 +497,33 @@ fn compileRange(self: *Compiler, node: Node) anyerror!void {
     try self.pushInstruction(.range);
     try self.pushOffset(node.offset);
     try self.pushByte(@boolToInt(node.ty.range.inclusive));
+}
+
+fn compileRecRange(self: *Compiler, node: Node) anyerror!void {
+    // Action
+    var action_instructions: []const u8 = "";
+
+    if (node.ty.rec_range.action.len > 0) {
+        try self.pushContext();
+        for (node.ty.rec_range.action) |n| try self.compile(n);
+        action_instructions = self.popContext();
+    }
+
+    if (node.ty.rec_range.to) |to| {
+        try self.compile(to.*);
+    }
+    if (node.ty.rec_range.from) |from| {
+        try self.compile(from.*);
+    }
+
+    try self.pushInstruction(.rec_range);
+    try self.pushOffset(node.offset);
+    try self.pushByte(node.ty.rec_range.id);
+    try self.pushByte(@boolToInt(node.ty.rec_range.exclusive));
+    try self.pushLen(action_instructions.len);
+    if (action_instructions.len != 0) try self.pushSlice(action_instructions);
+    try self.pushByte(@boolToInt(node.ty.rec_range.from != null));
+    try self.pushByte(@boolToInt(node.ty.rec_range.to != null));
 }
 
 // Helpers

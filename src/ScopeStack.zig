@@ -41,10 +41,9 @@ pub fn load(self: ScopeStack, key: []const u8) ?Value {
     if (std.mem.eql(u8, key, "@rec")) {
         return Value.new(.{ .string = self.stack.items[0].record }, 0);
     }
-    //TODO: Load @cols
-    //if (std.mem.eql(u8, key, "@cols")) {
-    //    return Value.new(.{ .list = self.stack.items[0].columns }, 0);
-    //}
+    if (std.mem.eql(u8, key, "@cols")) {
+        return Value.new(.{ .list = self.stack.items[0].columns }, 0);
+    }
 
     const len = self.stack.items.len;
     var i: usize = 1;
@@ -67,12 +66,11 @@ pub fn update(self: *ScopeStack, key: []const u8, value: Value) !void {
         self.stack.items[0].record = value.ty.string;
         return;
     }
-    //TODO: Store @cols
-    //if (std.mem.eql(u8, key, "@cols")) {
-    //    if (value.ty != .list) return error.InvalidAtCols;
-    //    self.stack.items[0].columns = value.ty.list;
-    //    return;
-    //}
+    if (std.mem.eql(u8, key, "@cols")) {
+        if (value.ty != .list) return error.InvalidAtCols;
+        self.stack.items[0].columns = value.ty.list;
+        return;
+    }
 
     const len = self.stack.items.len;
     var i: usize = 1;
