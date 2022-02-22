@@ -48,6 +48,9 @@ pub const Opcode = enum {
     gte,
     eq,
     neq,
+    // Prefix
+    neg,
+    not,
 };
 
 allocator: std.mem.Allocator,
@@ -88,6 +91,7 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         .assign => try self.compileStore(node),
         // Operators
         .infix => try self.compileInfix(node),
+        .prefix => try self.compilePrefix(node),
 
         else => unreachable,
     }
@@ -301,6 +305,18 @@ fn compileInfix(self: *Compiler, node: Node) anyerror!void {
         .op_gte => try self.pushInstruction(.gte),
         .op_eq => try self.pushInstruction(.eq),
         .op_neq => try self.pushInstruction(.neq),
+        else => unreachable,
+    }
+
+    try self.pushOffset(node.offset);
+}
+
+fn compilePrefix(self: *Compiler, node: Node) !void {
+    try self.compile(node.ty.prefix.operand.*);
+
+    switch (node.ty.prefix.op) {
+        .op_neg => try self.pushInstruction(.neg),
+        .punct_bang => try self.pushInstruction(.not),
         else => unreachable,
     }
 

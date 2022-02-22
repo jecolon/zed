@@ -93,6 +93,8 @@ pub fn run(self: *Vm) !void {
             .gte,
             => try self.execComparison(opcode),
             .eq, .neq => try self.execEqNeq(opcode),
+            .neg => try self.execNeg(),
+            .not => try self.execNot(),
 
             else => unreachable,
         }
@@ -503,6 +505,28 @@ fn execEqNeq(self: *Vm, opcode: Compiler.Opcode) !void {
     try self.value_stack.append(Value.new(.{ .boolean = comparison }, offset));
 }
 
+fn execNot(self: *Vm) !void {
+    const value = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    if (value.ty != .boolean) return self.ctx.err("!{s} ?", .{@tagName(value.ty)}, error.InvalidNot, offset);
+    try self.value_stack.append(Value.new(.{ .boolean = !value.ty.boolean }, offset));
+}
+fn execNeg(self: *Vm) !void {
+    const value = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    switch (value.ty) {
+        .float => |f| try self.value_stack.append(Value.new(.{ .float = -f }, offset)),
+        .int => |i| try self.value_stack.append(Value.new(.{ .int = -i }, offset)),
+        .uint => |u| try self.value_stack.append(Value.new(.{ .int = -@intCast(isize, u) }, offset)),
+        else => return self.ctx.err("-{s} ?", .{@tagName(value.ty)}, error.InvalidNeg, offset),
+    }
+}
+
 // Stack Frame
 
 const Frame = struct {
@@ -756,6 +780,20 @@ test "Vm infix" {
     try std.testing.expectEqual(true, got.ty.boolean);
 
     got = try testVmValue(allocator, "(1 + 2) * 3 / 2 % 2 > 2");
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(false, got.ty.boolean);
+}
+
+test "Vm prefix" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator, "foo := 42; -foo");
+    try std.testing.expectEqual(Value.Tag.int, got.ty);
+    try std.testing.expectEqual(@as(i64, -42), got.ty.int);
+
+    got = try testVmValue(allocator, "!true");
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(false, got.ty.boolean);
 }
