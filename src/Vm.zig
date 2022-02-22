@@ -47,6 +47,7 @@ pub fn run(self: *Vm) !void {
             .pop => try self.execPop(),
             .jump => self.execJump(),
             .jump_false => self.execJumpFalse(),
+            .jump_true => self.execJumpTrue(),
             // Scope
             .scope_in => try self.execScopeIn(),
             .scope_out => try self.execScopeOut(),
@@ -673,6 +674,10 @@ fn execJumpFalse(self: *Vm) void {
     const condition = self.value_stack.pop();
     if (!isTruthy(condition)) self.execJump() else self.ip.* += 3;
 }
+fn execJumpTrue(self: *Vm) void {
+    const condition = self.value_stack.pop();
+    if (isTruthy(condition)) self.execJump() else self.ip.* += 3;
+}
 
 // Stack Frame
 
@@ -1028,4 +1033,114 @@ test "Vm conditionals" {
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 6), got.ty.uint);
+}
+
+test "Vm while loop" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\i := 0
+        \\while (i < 9) {
+        \\  i += 1
+        \\}
+        \\i
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 9), got.ty.uint);
+}
+
+test "Vm do while loop" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\i := 10
+        \\do {
+        \\  i += 1
+        \\} while (i < 10)
+        \\i
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 11), got.ty.uint);
+}
+
+test "Vm loop break" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\i := 0
+        \\while (i < 9) {
+        \\  i += 1
+        \\  if (i == 4) break
+        \\}
+        \\i
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 4), got.ty.uint);
+}
+
+test "Vm loop continue" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\i := 0
+        \\total := 0
+        \\while (i < 4) {
+        \\  i += 1
+        \\  if (i == 2) continue
+        \\  total += i
+        \\}
+        \\total
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 8), got.ty.uint);
+}
+
+test "Vm fibonacci" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\fib := {
+        \\  a := 0
+        \\  b := 1
+        \\  i := 0
+        \\
+        \\  while (i < it) {
+        \\      tmp := a
+        \\      a = b
+        \\      b = tmp + a
+        \\      i += 1
+        \\  }
+        \\
+        \\  return a
+        \\}
+        \\fib(7)
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 13), got.ty.uint);
+}
+
+test "Vm recursive fibonacci" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\fib := {
+        \\  if (it < 2) return it
+        \\  return fib(it - 1) + fib(it - 2)
+        \\}
+        \\fib(7)
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 13), got.ty.uint);
 }

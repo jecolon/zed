@@ -57,12 +57,25 @@ pub const Opcode = enum {
     subscript,
     // Stack ops
     jump,
+    jump_true,
     jump_false,
+};
+
+const Index = struct {
+    index: u16,
+    prev: ?*Index = null,
+};
+
+const JumpUpdates = struct {
+    prev: ?*JumpUpdates = null,
+    updates: std.ArrayList(usize),
 };
 
 allocator: std.mem.Allocator,
 ctx_stack: std.ArrayList(std.ArrayList(u8)),
+current_loop_start: ?*Index = null, // Index of instruction at current loop start; if applicable.
 instructions: *std.ArrayList(u8) = undefined,
+jump_updates: ?*JumpUpdates = null, // Indexes of jump instruciton operands that need updating.
 
 const Compiler = @This();
 
@@ -105,6 +118,10 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         .subscript => try self.compileSubscript(node),
         // Conditionals
         .conditional => try self.compileConditional(node),
+        // Loops
+        .loop => try self.compileLoop(node),
+        .loop_break => try self.compileBreak(),
+        .loop_continue => try self.compileContinue(),
 
         else => unreachable,
     }
@@ -387,6 +404,85 @@ fn compileConditional(self: *Compiler, node: Node) anyerror!void {
     self.updateJumpIndex(jump_operand_index);
 }
 
+fn compileLoop(self: *Compiler, node: Node) anyerror!void {
+    if (node.ty.loop.is_do) return self.compileDoWhile(node);
+
+    // Breaks
+    try self.pushJumpUpdates();
+    defer self.popJumpUpdates();
+
+    // Iterate / Continues
+    try self.pushCurrentLoopIndex();
+    defer self.popCurrentLoopIndex();
+
+    // Condition
+    try self.compile(node.ty.loop.condition.*);
+
+    // Jump if false
+    try self.pushInstruction(.jump_false);
+    try self.jump_updates.?.updates.append(try self.pushZeroes());
+
+    // Body
+    try self.pushInstruction(.scope_in);
+    try self.pushEnum(Scope.Type.loop);
+    for (node.ty.loop.body) |n| try self.compile(n);
+    try self.pushInstruction(.scope_out);
+    try self.pushEnum(Scope.Type.loop);
+
+    // Unconditional jump
+    try self.pushInstruction(.jump);
+    try self.pushLen(self.current_loop_start.?.index);
+
+    // Update break out jumps.
+    while (self.jump_updates.?.updates.popOrNull()) |index| self.updateJumpIndex(index);
+
+    // while loops always return nul.
+    try self.pushInstruction(.nil);
+    try self.pushOffset(node.offset);
+}
+
+fn compileDoWhile(self: *Compiler, node: Node) anyerror!void {
+    // Breaks
+    try self.pushJumpUpdates();
+    defer self.popJumpUpdates();
+
+    // Iterate / Continues
+    try self.pushCurrentLoopIndex();
+    defer self.popCurrentLoopIndex();
+
+    // Body
+    try self.pushInstruction(.scope_in);
+    try self.pushEnum(Scope.Type.loop);
+    for (node.ty.loop.body) |n| try self.compile(n);
+    try self.pushInstruction(.scope_out);
+    try self.pushEnum(Scope.Type.loop);
+
+    // Condition
+    try self.compile(node.ty.loop.condition.*);
+
+    // Jump true
+    try self.pushInstruction(.jump_true);
+    try self.pushLen(self.current_loop_start.?.index);
+
+    // while loops always return nul.
+    try self.pushInstruction(.nil);
+    try self.pushOffset(node.offset);
+}
+
+fn compileBreak(self: *Compiler) anyerror!void {
+    try self.pushInstruction(.scope_out);
+    try self.pushEnum(Scope.Type.loop);
+    try self.pushInstruction(.jump);
+    try self.jump_updates.?.updates.append(try self.pushZeroes());
+}
+
+fn compileContinue(self: *Compiler) anyerror!void {
+    try self.pushInstruction(.scope_out);
+    try self.pushEnum(Scope.Type.loop);
+    try self.pushInstruction(.jump);
+    try self.pushLen(self.current_loop_start.?.index);
+}
+
 // Helpers
 
 fn head(self: Compiler) *std.ArrayList(u8) {
@@ -443,6 +539,29 @@ fn updateJumpIndex(self: *Compiler, index: usize) void {
     self.instructions.items[index] = jump_index_bytes[0];
     self.instructions.items[index + 1] = jump_index_bytes[1];
 }
+
+fn pushJumpUpdates(self: *Compiler) anyerror!void {
+    var jump_updates_ptr = try self.allocator.create(JumpUpdates);
+    jump_updates_ptr.* = .{ .prev = self.jump_updates, .updates = std.ArrayList(usize).init(self.allocator) };
+    self.jump_updates = jump_updates_ptr;
+}
+
+fn popJumpUpdates(self: *Compiler) void {
+    std.debug.assert(self.jump_updates != null);
+    self.jump_updates = self.jump_updates.?.prev;
+}
+
+fn pushCurrentLoopIndex(self: *Compiler) anyerror!void {
+    var current_loop_start_ptr = try self.allocator.create(Index);
+    current_loop_start_ptr.* = .{ .index = @intCast(u16, self.instructions.items.len), .prev = self.current_loop_start };
+    self.current_loop_start = current_loop_start_ptr;
+}
+
+fn popCurrentLoopIndex(self: *Compiler) void {
+    std.debug.assert(self.current_loop_start != null);
+    self.current_loop_start = self.current_loop_start.?.prev;
+}
+
 // Tests
 
 test "Compiler predefined constant values" {
