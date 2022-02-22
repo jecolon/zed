@@ -100,6 +100,7 @@ pub fn run(self: *Vm) !void {
             // Data structures
             .list => try self.execList(),
             .map => try self.execMap(),
+            .subscript => try self.execSubscript(),
 
             else => unreachable,
         }
@@ -565,6 +566,32 @@ fn execMap(self: *Vm) !void {
 
     try self.value_stack.append(Value.new(.{ .map = map_ptr }, offset));
 }
+fn execSubscript(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    const container = self.value_stack.pop();
+
+    if (container.ty != .list and container.ty != .map)
+        return self.ctx.err("{s}[] ?", .{@tagName(container.ty)}, error.InvalidSubscript, offset);
+
+    return if (container.ty == .list)
+        try self.execSubscriptList(container, offset)
+    else
+        try self.execSubscriptMap(container, offset);
+}
+fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
+    const index = self.value_stack.pop();
+    if (index.ty != .uint) return self.ctx.err("list[{s}] ?", .{@tagName(index.ty)}, error.InvalidSubscript, offset);
+    if (index.ty.uint >= list.ty.list.items.len) return self.ctx.err("Index out of bounds.", .{}, error.InvalidSubscript, offset);
+    try self.value_stack.append(list.ty.list.items[index.ty.uint]);
+}
+fn execSubscriptMap(self: *Vm, map: Value, offset: u16) !void {
+    const key = self.value_stack.pop();
+    if (key.ty != .string) return self.ctx.err("map[{s}] ?", .{@tagName(key.ty)}, error.InvalidSubscript, offset);
+    const value = if (map.ty.map.get(key.ty.string)) |v| v else Value.new(.nil, offset);
+    try self.value_stack.append(value);
+}
 
 // Stack Frame
 
@@ -861,4 +888,17 @@ test "Vm map literal" {
     try std.testing.expectEqual(@as(usize, 2), got.ty.map.count());
     try std.testing.expectEqual(Value.Tag.uint, got.ty.map.get("a").?.ty);
     try std.testing.expectEqual(@as(u64, 1), got.ty.map.get("a").?.ty.uint);
+}
+
+test "Vm subscripts" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\["a": 1, "b": 2]["b"] + [1, 2, 3][1]
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 4), got.ty.uint);
+    try std.testing.expectEqual(@as(u16, 14), got.offset);
 }

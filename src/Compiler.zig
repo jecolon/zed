@@ -54,6 +54,7 @@ pub const Opcode = enum {
     // Data structures
     list,
     map,
+    subscript,
 };
 
 allocator: std.mem.Allocator,
@@ -98,6 +99,7 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         // Data structures
         .list => try self.compileList(node),
         .map => try self.compileMap(node),
+        .subscript => try self.compileSubscript(node),
 
         else => unreachable,
     }
@@ -345,6 +347,13 @@ fn compileMap(self: *Compiler, node: Node) anyerror!void {
     try self.pushInstruction(.map);
     try self.pushOffset(node.offset);
     try self.pushLen(node.ty.map.len);
+}
+
+fn compileSubscript(self: *Compiler, node: Node) anyerror!void {
+    try self.compile(node.ty.subscript.index.*);
+    try self.compile(node.ty.subscript.container.*);
+    try self.pushInstruction(.subscript);
+    try self.pushOffset(node.offset);
 }
 
 // Helpers
