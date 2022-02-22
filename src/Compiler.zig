@@ -55,6 +55,9 @@ pub const Opcode = enum {
     list,
     map,
     subscript,
+    // Stack ops
+    jump,
+    jump_false,
 };
 
 allocator: std.mem.Allocator,
@@ -100,6 +103,8 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         .list => try self.compileList(node),
         .map => try self.compileMap(node),
         .subscript => try self.compileSubscript(node),
+        // Conditionals
+        .conditional => try self.compileConditional(node),
 
         else => unreachable,
     }
@@ -356,6 +361,32 @@ fn compileSubscript(self: *Compiler, node: Node) anyerror!void {
     try self.pushOffset(node.offset);
 }
 
+fn compileConditional(self: *Compiler, node: Node) anyerror!void {
+    // Condition
+    try self.compile(node.ty.conditional.condition.*);
+    // Jump if false
+    try self.pushInstruction(.jump_false);
+    const jump_false_operand_index = try self.pushZeroes();
+    // Then branch
+    try self.pushInstruction(.scope_in);
+    try self.pushEnum(Scope.Type.block);
+    for (node.ty.conditional.then_branch) |n| try self.compile(n);
+    try self.pushInstruction(.scope_out);
+    try self.pushEnum(Scope.Type.block);
+    // Unconditional jump
+    try self.pushInstruction(.jump);
+    const jump_operand_index = try self.pushZeroes();
+    self.updateJumpIndex(jump_false_operand_index);
+    // Else branch
+    try self.pushInstruction(.scope_in);
+    try self.pushEnum(Scope.Type.block);
+    for (node.ty.conditional.else_branch) |n| try self.compile(n);
+    try self.pushInstruction(.scope_out);
+    try self.pushEnum(Scope.Type.block);
+
+    self.updateJumpIndex(jump_operand_index);
+}
+
 // Helpers
 
 fn head(self: Compiler) *std.ArrayList(u8) {
@@ -399,6 +430,19 @@ fn pushByte(self: *Compiler, n: anytype) !void {
     try self.instructions.append(@intCast(u8, n));
 }
 
+// Returns index of first byte pushed.
+fn pushZeroes(self: *Compiler) !usize {
+    try self.instructions.append(0);
+    try self.instructions.append(0);
+    return self.instructions.items.len - 2;
+}
+
+fn updateJumpIndex(self: *Compiler, index: usize) void {
+    std.debug.assert(index < self.instructions.items.len);
+    var jump_index_bytes = std.mem.sliceAsBytes(&[_]u16{@intCast(u16, self.instructions.items.len)});
+    self.instructions.items[index] = jump_index_bytes[0];
+    self.instructions.items[index + 1] = jump_index_bytes[1];
+}
 // Tests
 
 test "Compiler predefined constant values" {

@@ -45,6 +45,8 @@ pub fn run(self: *Vm) !void {
         switch (opcode) {
             // Stack operations
             .pop => try self.execPop(),
+            .jump => self.execJump(),
+            .jump_false => self.execJumpFalse(),
             // Scope
             .scope_in => try self.execScopeIn(),
             .scope_out => try self.execScopeOut(),
@@ -662,6 +664,16 @@ fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
     }
 }
 
+fn execJump(self: *Vm) void {
+    self.ip.* += 1;
+    const index = self.getU16(self.ip.*);
+    self.ip.* = index;
+}
+fn execJumpFalse(self: *Vm) void {
+    const condition = self.value_stack.pop();
+    if (!isTruthy(condition)) self.execJump() else self.ip.* += 3;
+}
+
 // Stack Frame
 
 const Frame = struct {
@@ -711,6 +723,18 @@ fn popScope(self: *Vm) Scope {
 }
 
 // Helpers
+fn isTruthy(value: Value) bool {
+    return switch (value.ty) {
+        .boolean => |b| b,
+        .float => |f| f != 0.0,
+        .int => |i| i != 0,
+        .string => |s| s.len != 0,
+        .uint => |u| u != 0,
+
+        else => false,
+    };
+}
+
 fn getName(self: Vm) []const u8 {
     var name: []const u8 = undefined;
     if (@intToEnum(Compiler.Opcode, self.instructions[self.ip.*]) == .ident) {
@@ -988,4 +1012,20 @@ test "Vm subscript assign" {
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 7), got.ty.uint);
     try std.testing.expectEqual(@as(u16, 41), got.offset);
+}
+
+test "Vm conditionals" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\a := if (false) 1 else 0
+        \\a ?= 1
+        \\b := a ?: 3
+        \\c := b ? 4 : 5
+        \\a + b + c
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 6), got.ty.uint);
 }
