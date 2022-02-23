@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Node = @import("Node.zig");
+const Parser = @import("Parser.zig");
 const Scope = @import("Scope.zig");
 
 pub const Opcode = enum {
@@ -89,6 +90,39 @@ pub fn init(allocator: std.mem.Allocator) !Compiler {
     };
     try self.pushContext();
     return self;
+}
+
+pub fn compileProgram(self: *Compiler, allocator: std.mem.Allocator, program: Parser.Program) ![5][]const u8 {
+    var compiled: [5][]const u8 = undefined;
+    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
+    var compiler = try init(arena_allocator);
+    for (program.inits) |n| try compiler.compile(n);
+    compiled[0] = try allocator.dupe(u8, compiler.instructions.items);
+    errdefer allocator.free(compiled[0]);
+
+    compiler = try init(arena_allocator);
+    for (program.files) |n| try compiler.compile(n);
+    compiled[1] = try allocator.dupe(u8, compiler.instructions.items);
+    errdefer allocator.free(compiled[1]);
+
+    compiler = try init(arena_allocator);
+    for (program.recs) |n| try compiler.compile(n);
+    compiled[2] = try allocator.dupe(u8, compiler.instructions.items);
+    errdefer allocator.free(compiled[2]);
+
+    compiler = try init(arena_allocator);
+    for (program.rules) |n| try compiler.compile(n);
+    compiled[3] = try allocator.dupe(u8, compiler.instructions.items);
+    errdefer allocator.free(compiled[3]);
+
+    compiler = try init(arena_allocator);
+    for (program.exits) |n| try compiler.compile(n);
+    compiled[4] = try allocator.dupe(u8, compiler.instructions.items);
+
+    return compiled;
 }
 
 pub fn compile(self: *Compiler, node: Node) anyerror!void {
@@ -611,7 +645,6 @@ fn popCurrentLoopIndex(self: *Compiler) void {
 test "Compiler predefined constant values" {
     const Context = @import("Context.zig");
     const Lexer = @import("Lexer.zig");
-    const Parser = @import("Parser.zig");
 
     const allocator = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(allocator);

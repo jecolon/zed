@@ -48,27 +48,27 @@ pub fn main() anyerror!void {
     var prev_output_len: usize = 0;
 
     // Frontend
-    //var compiler_arena = std.heap.ArenaAllocator.init(allocator);
-    //errdefer compiler_arena.deinit();
-    //const compiler_allocator = compiler_arena.allocator();
+    var compiler_arena = std.heap.ArenaAllocator.init(allocator);
+    errdefer compiler_arena.deinit();
+    const compiler_allocator = compiler_arena.allocator();
 
     // Context
     const ctx = Context{ .filename = program_filename, .src = program_src };
 
-    var lexer = Lexer{ .allocator = static_allocator, .ctx = ctx };
+    var lexer = Lexer{ .allocator = compiler_allocator, .ctx = ctx };
     const tokens = try lexer.lex();
     var parser = Parser{
-        .allocator = static_allocator,
+        .allocator = compiler_allocator,
         .ctx = ctx,
         .tokens = tokens,
     };
     const program = try parser.parse();
 
     // Backend
-    var compiler = try Compiler.init(static_allocator);
+    var compiler = try Compiler.init(compiler_allocator);
     for (program.rules) |n| try compiler.compile(n);
-    //const compiled = try compiler.compileProgram(static_allocator, program);
-    //compiler_arena.deinit();
+    const compiled = try compiler.compileProgram(static_allocator, program);
+    compiler_arena.deinit();
 
     // Program global scope
     var scope_stack = ScopeStack.init(static_allocator);
@@ -89,19 +89,17 @@ pub fn main() anyerror!void {
     //var inits_arena = std.heap.ArenaAllocator.init(allocator);
     //errdefer inits_arena.deinit();
     //const inits_allocator = inits_arena.allocator();
-    //var inits_vm = try Vm.init(
-    //    inits_allocator,
-    //    program_filename,
-    //    program_src,
-    //    compiled.inits.constants,
-    //    compiled.inits.instructions,
-    //    scope_stack,
-    //    &output,
-    //);
-    //inits_vm.run() catch |err| {
-    //    std.log.err("Error executing onInit blocks: {}.", .{err});
-    //    return err;
-    //};
+    var inits_vm = try Vm.init(
+        static_allocator,
+        compiled[0],
+        scope_stack,
+        ctx,
+        &output,
+    );
+    inits_vm.run() catch |err| {
+        std.log.err("Error executing onInit blocks: {}.", .{err});
+        return err;
+    };
     //inits_arena.deinit();
 
     // Global record numbering
@@ -116,19 +114,17 @@ pub fn main() anyerror!void {
         //var files_arena = std.heap.ArenaAllocator.init(allocator);
         //errdefer files_arena.deinit();
         //const files_allocator = files_arena.allocator();
-        //var files_vm = try Vm.init(
-        //    files_allocator,
-        //    program_filename,
-        //    program_src,
-        //    compiled.files.constants,
-        //    compiled.files.instructions,
-        //    scope_stack,
-        //    &output,
-        //);
-        //files_vm.run() catch |err| {
-        //    std.log.err("Error executing onFile blocls: {}.", .{err});
-        //    return err;
-        //};
+        var files_vm = try Vm.init(
+            static_allocator,
+            compiled[1],
+            scope_stack,
+            ctx,
+            &output,
+        );
+        files_vm.run() catch |err| {
+            std.log.err("Error executing onFile blocls: {}.", .{err});
+            return err;
+        };
         //files_arena.deinit();
 
         // Data file
@@ -159,27 +155,23 @@ pub fn main() anyerror!void {
             try global_scope.store("@frnum", Value.new(.{ .uint = frnum }, 0));
             global_scope.record = record;
 
-            //var recs_vm = Vm.init(
-            //    recs_allocator,
-            //    program_filename,
-            //    program_src,
-            //    compiled.recs.constants,
-            //    compiled.recs.instructions,
-            //    static_allocator,
-            //    scope_stack,
-            //    ctx,
-            //    &output,
-            //);
-            //recs_vm.run() catch |err| {
-            //    std.log.err("Error executing onRec blocks: {}.", .{err});
-            //    return err;
-            //};
+            var recs_vm = try Vm.init(
+                static_allocator,
+                compiled[2],
+                scope_stack,
+                ctx,
+                &output,
+            );
+            recs_vm.run() catch |err| {
+                std.log.err("Error executing onRec blocks: {}.", .{err});
+                return err;
+            };
 
             // New record, new fileds.
             global_scope.columns = try static_allocator.create(std.ArrayList(Value));
-            //defer static_allocator.destroy(global_scope.columns);
+            defer static_allocator.destroy(global_scope.columns);
             global_scope.columns.* = std.ArrayList(Value).init(static_allocator);
-            //defer global_scope.columns.deinit();
+            defer global_scope.columns.deinit();
 
             // Loop over fields
             var field_iter = std.mem.split(u8, global_scope.record, global_scope.map.get("@ifs").?.ty.string);
@@ -188,7 +180,7 @@ pub fn main() anyerror!void {
             // Eval the program
             var rules_vm = try Vm.init(
                 static_allocator,
-                compiler.instructions.items,
+                compiled[3],
                 scope_stack,
                 ctx,
                 &output,
@@ -213,19 +205,17 @@ pub fn main() anyerror!void {
     //var exits_arena = std.heap.ArenaAllocator.init(allocator);
     //defer exits_arena.deinit();
     //const exits_allocator = exits_arena.allocator();
-    //var exits_vm = try Vm.init(
-    //    exits_allocator,
-    //    program_filename,
-    //    program_src,
-    //    compiled.exits.constants,
-    //    compiled.exits.instructions,
-    //    scope_stack,
-    //    &output,
-    //);
-    //exits_vm.run() catch |err| {
-    //    std.log.err("Error executing onExit blocks: {}.", .{err});
-    //    return err;
-    //};
+    var exits_vm = try Vm.init(
+        static_allocator,
+        compiled[4],
+        scope_stack,
+        ctx,
+        &output,
+    );
+    exits_vm.run() catch |err| {
+        std.log.err("Error executing onExit blocks: {}.", .{err});
+        return err;
+    };
 
     // Print hte output.
     _ = try std.io.getStdOut().writer().print("{s}", .{output.items});
