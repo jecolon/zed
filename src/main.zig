@@ -74,7 +74,7 @@ pub fn main() anyerror!void {
     var scope_stack = ScopeStack.init(static_allocator);
     try scope_stack.push(Scope.init(static_allocator, .function));
     const global_scope = scope_stack.head();
-    //try Vm.addBuiltins(global_scope);
+    try Vm.addBuiltins(global_scope);
 
     // Some global state
     try global_scope.store("@ifs", Value.new(.{ .string = ifs }, 0));

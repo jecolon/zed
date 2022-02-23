@@ -28,10 +28,8 @@ pub fn isDefined(self: ScopeStack, key: []const u8) bool {
     var i: usize = 1;
 
     while (i <= len) : (i += 1) {
-        if (self.stack.items[len - i].map.contains(key)) return true;
-        if (self.stack.items[len - i].ty == .function) {
-            return self.stack.items[0].map.contains(key);
-        }
+        if (self.stack.items[len - i].isDefined(key)) return true;
+        //if (self.stack.items[len - i].ty == .function) return self.stack.items[0].isDefined(key);
     }
 
     return false;
@@ -50,7 +48,7 @@ pub fn load(self: ScopeStack, key: []const u8) ?Value {
 
     while (i <= len) : (i += 1) {
         if (self.stack.items[len - i].load(key)) |value| return value;
-        if (self.stack.items[len - i].ty == .function) return self.stack.items[0].load(key);
+        //if (self.stack.items[len - i].ty == .function) return self.stack.items[0].load(key);
     }
 
     return null;
@@ -77,7 +75,7 @@ pub fn update(self: *ScopeStack, key: []const u8, value: Value) !void {
 
     while (i <= len) : (i += 1) {
         if (self.stack.items[len - i].map.contains(key)) return self.stack.items[len - i].update(key, value);
-        if (self.stack.items[len - i].ty == .function) return self.stack.items[0].update(key, value);
+        //if (self.stack.items[len - i].ty == .function) return self.stack.items[0].update(key, value);
     }
 }
 

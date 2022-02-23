@@ -740,10 +740,11 @@ fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
         offset,
     );
     const rvalue = self.value_stack.pop();
+    const key_copy = try self.allocator.dupe(u8, key.ty.string);
 
     // Store
     if (combo == .none) {
-        try map.ty.map.put(key.ty.string, rvalue); //TODO: Deinit old value?
+        try map.ty.map.put(key_copy, rvalue); //TODO: Deinit old value?
         try self.value_stack.append(rvalue);
     } else {
         const old_value = map.ty.map.get(key.ty.string) orelse Value.new(.{ .uint = 0 }, offset);
@@ -757,7 +758,7 @@ fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
             .mod => try old_value.mod(rvalue),
         };
 
-        try map.ty.map.put(key.ty.string, new_value);
+        try map.ty.map.put(key_copy, new_value);
         try self.value_stack.append(new_value);
     }
 }
