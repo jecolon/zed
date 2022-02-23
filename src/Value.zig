@@ -2,8 +2,46 @@ const std = @import("std");
 
 const Value = @This();
 
+const Builtin = enum {
+    atan2,
+    chars,
+    contains,
+    cos,
+    each,
+    endsWith,
+    exp,
+    filter,
+    indexOf,
+    int,
+    join,
+    keys,
+    lastIndexOf,
+    len,
+    log,
+    map,
+    max,
+    mean,
+    median,
+    min,
+    mode,
+    pop,
+    print,
+    push,
+    rand,
+    reduce,
+    reverse,
+    sin,
+    sort,
+    sqrt,
+    split,
+    startsWith,
+    stdev,
+    values,
+};
+
 pub const Tag = enum {
     boolean,
+    builtin,
     float,
     func,
     int,
@@ -17,6 +55,7 @@ pub const Tag = enum {
 
 pub const Type = union(Tag) {
     boolean: bool,
+    builtin: Builtin,
     float: f64,
     func: Function,
     int: i64,
@@ -121,7 +160,7 @@ pub fn eql(self: Value, other: Value) bool {
 pub fn eqlType(self: Value, other: Value) bool {
     return switch (self.ty) {
         .boolean => other.ty == .boolean,
-        //.builtin => other.ty == .builtin,
+        .builtin => other.ty == .builtin,
         .float => other.ty == .float,
         .func => other.ty == .func,
         .int => other.ty == .int,

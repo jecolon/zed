@@ -263,6 +263,7 @@ fn compileCall(self: *Compiler, node: Node) anyerror!void {
     while (i <= num_args) : (i += 1) try self.compile(node.ty.call.args[num_args - i]);
     try self.compile(node.ty.call.callee.*);
     try self.pushInstruction(.call);
+    try self.pushOffset(node.offset);
     try self.pushByte(num_args);
 }
 

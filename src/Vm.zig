@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Compiler = @import("Compiler.zig");
 const Context = @import("Context.zig");
+const GraphemeIterator = @import("ziglyph").GraphemeIterator;
 const Node = @import("Node.zig");
 const Scope = @import("Scope.zig");
 const ScopeStack = @import("ScopeStack.zig");
@@ -302,47 +303,51 @@ fn execCall(self: *Vm) anyerror!void {
     // Get the function.
     const callee = self.value_stack.pop();
 
-    //TODO: Builtins
-    //if (callee.ty == .builtin) {
-    //    return switch (callee.ty.builtin) {
-    //        .atan2 => try self.atan2(callee.offset),
-    //        .chars => try self.strChars(callee.offset),
-    //        .contains => try self.contains(callee.offset),
-    //        .cos => try self.oneArgMath(callee),
-    //        .each => try self.each(callee.offset),
-    //        .endsWith => try self.strEndsWith(callee.offset),
-    //        .exp => try self.oneArgMath(callee),
-    //        .filter => try self.listFilter(callee.offset),
-    //        .join => try self.listJoin(callee.offset),
-    //        .indexOf => try self.indexOf(callee.offset),
-    //        .int => try self.oneArgMath(callee),
-    //        .keys => try self.mapKeys(callee.offset),
-    //        .lastIndexOf => try self.lastIndexOf(callee.offset),
-    //        .len => try self.length(callee.offset),
-    //        .log => try self.oneArgMath(callee),
-    //        .map => try self.listMap(callee.offset),
-    //        .max => try self.listMax(callee.offset),
-    //        .mean => try self.listMean(callee.offset),
-    //        .median => try self.listMedian(callee.offset),
-    //        .min => try self.listMin(callee.offset),
-    //        .mode => try self.listMode(callee.offset),
-    //        .print => try self.print(callee.offset, self.output.writer()),
-    //        .pop => try self.listPop(callee.offset),
-    //        .push => try self.listPush(callee.offset),
-    //        .rand => try self.rand(callee.offset),
-    //        .reduce => try self.listReduce(callee.offset),
-    //        .reverse => try self.listReverse(callee.offset),
-    //        .sin => try self.oneArgMath(callee),
-    //        .sort => try self.listSort(callee.offset),
-    //        .split => try self.strSplit(callee.offset),
-    //        .sqrt => try self.oneArgMath(callee),
-    //        .startsWith => try self.strStartsWith(callee.offset),
-    //        .stdev => try self.listStdev(callee.offset),
-    //        .values => try self.mapValues(callee.offset),
-    //    };
-    //}
+    if (callee.ty == .builtin) {
+        return switch (callee.ty.builtin) {
+            .atan2 => try self.atan2(),
+            .chars => try self.strChars(),
+            .contains => try self.contains(),
+            .cos => try self.oneArgMath(callee),
+            .each => try self.each(),
+            .endsWith => try self.strEndsWith(),
+            .exp => try self.oneArgMath(callee),
+            .filter => try self.listFilter(),
+            .join => try self.listJoin(),
+            .indexOf => try self.indexOf(),
+            .int => try self.oneArgMath(callee),
+            .keys => try self.mapKeys(),
+            .lastIndexOf => try self.lastIndexOf(),
+            .len => try self.length(),
+            .log => try self.oneArgMath(callee),
+            .map => try self.listMap(),
+            .max => try self.listMax(),
+            .mean => try self.listMean(),
+            .median => try self.listMedian(),
+            .min => try self.listMin(),
+            .mode => try self.listMode(),
+            .print => try self.print(self.output.writer()),
+            .pop => try self.listPop(),
+            .push => try self.listPush(),
+            .rand => try self.rand(),
+            .reduce => try self.listReduce(),
+            .reverse => try self.listReverse(),
+            .sin => try self.oneArgMath(callee),
+            .sort => try self.listSort(),
+            .split => try self.strSplit(),
+            .sqrt => try self.oneArgMath(callee),
+            .startsWith => try self.strStartsWith(),
+            .stdev => try self.listStdev(),
+            .values => try self.mapValues(),
+        };
+    }
 
-    if (callee.ty != .func) return self.ctx.err("{s} is not callable.", .{@tagName(callee.ty)}, error.InvalidCall, callee.offset);
+    if (callee.ty != .func) return self.ctx.err(
+        "{s} is not callable.",
+        .{@tagName(callee.ty)},
+        error.InvalidCall,
+        callee.offset,
+    );
 
     // Prepare the child scope.
     var func_scope = Scope.init(self.allocator, .function);
@@ -351,23 +356,24 @@ fn execCall(self: *Vm) anyerror!void {
     if (callee.ty.func.name.len != 0) try func_scope.store(callee.ty.func.name, callee);
 
     // Process args
-    self.ip.* += 1;
+    self.ip.* += 3;
     const num_args = self.instructions[self.ip.*];
 
     var i: usize = 0;
     while (i < num_args) : (i += 1) {
         const arg = self.value_stack.pop();
         if (i == 0) try func_scope.store("it", arg); // it
-        //TODO: Auto func arg names
-        //var buf: [4]u8 = undefined;
-        //const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{i});
-        //try func_scope.store(try func_scope.allocator.dupe(u8, auto_arg_name), arg); // @0, @1, ...
+        var buf: [4]u8 = undefined;
+        const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{i});
+        try func_scope.store(try self.allocator.dupe(u8, auto_arg_name), arg); // @0, @1, ...
         if (i < callee.ty.func.params.len) try func_scope.store(callee.ty.func.params[i], arg);
     }
 
     // Push the function's frame.
     try self.pushScope(func_scope);
     try self.pushFrame(callee.ty.func.instructions);
+
+    // NOTE: Final self.ip.* += 1 is done on return.
 }
 
 fn execDefine(self: *Vm) !void {
@@ -378,7 +384,12 @@ fn execDefine(self: *Vm) !void {
     // Name
     const name = self.getName();
     // Is it already defined?
-    if (self.scope_stack.isDefined(name)) return self.ctx.err("{s} already defined.", .{name}, error.NameAlreadyDefined, offset);
+    if (self.scope_stack.isDefined(name)) return self.ctx.err(
+        "{s} already defined.",
+        .{name},
+        error.NameAlreadyDefined,
+        offset,
+    );
     // Value
     const rvalue = self.value_stack.pop();
     // Define
@@ -393,7 +404,12 @@ fn execLoad(self: *Vm) !void {
     // Name
     const name = self.getName();
     // Is the name defined?
-    if (!self.scope_stack.isDefined(name)) return self.ctx.err("{s} is undefined.", .{name}, error.NameUndefined, offset);
+    if (!self.scope_stack.isDefined(name)) return self.ctx.err(
+        "{s} is undefined.",
+        .{name},
+        error.NameUndefined,
+        offset,
+    );
     // Load
     try self.value_stack.append(self.scope_stack.load(name).?);
 }
@@ -408,7 +424,12 @@ fn execStore(self: *Vm) !void {
     // Name
     const name = self.getName();
     // Is the name defined?
-    if (!self.scope_stack.isDefined(name)) return self.ctx.err("{s} is undefined.", .{name}, error.NameUndefined, offset);
+    if (!self.scope_stack.isDefined(name)) return self.ctx.err(
+        "{s} is undefined.",
+        .{name},
+        error.NameUndefined,
+        offset,
+    );
     // Value
     const rvalue = self.value_stack.pop();
     // Store
@@ -529,7 +550,12 @@ fn execNot(self: *Vm) !void {
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
-    if (value.ty != .boolean) return self.ctx.err("!{s} ?", .{@tagName(value.ty)}, error.InvalidNot, offset);
+    if (value.ty != .boolean) return self.ctx.err(
+        "!{s} ?",
+        .{@tagName(value.ty)},
+        error.InvalidNot,
+        offset,
+    );
     try self.value_stack.append(Value.new(.{ .boolean = !value.ty.boolean }, offset));
 }
 fn execNeg(self: *Vm) !void {
@@ -542,7 +568,12 @@ fn execNeg(self: *Vm) !void {
         .float => |f| try self.value_stack.append(Value.new(.{ .float = -f }, offset)),
         .int => |i| try self.value_stack.append(Value.new(.{ .int = -i }, offset)),
         .uint => |u| try self.value_stack.append(Value.new(.{ .int = -@intCast(isize, u) }, offset)),
-        else => return self.ctx.err("-{s} ?", .{@tagName(value.ty)}, error.InvalidNeg, offset),
+        else => return self.ctx.err(
+            "-{s} ?",
+            .{@tagName(value.ty)},
+            error.InvalidNeg,
+            offset,
+        ),
     }
 }
 
@@ -586,7 +617,12 @@ fn execSubscript(self: *Vm) !void {
     const container = self.value_stack.pop();
 
     if (container.ty != .list and container.ty != .map)
-        return self.ctx.err("{s}[] ?", .{@tagName(container.ty)}, error.InvalidSubscript, offset);
+        return self.ctx.err(
+            "{s}[] ?",
+            .{@tagName(container.ty)},
+            error.InvalidSubscript,
+            offset,
+        );
 
     return if (container.ty == .list)
         try self.execSubscriptList(container, offset)
@@ -595,13 +631,28 @@ fn execSubscript(self: *Vm) !void {
 }
 fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
     const index = self.value_stack.pop();
-    if (index.ty != .uint and index.ty != .range) return self.ctx.err("list[{s}] ?", .{@tagName(index.ty)}, error.InvalidSubscript, offset);
+    if (index.ty != .uint and index.ty != .range) return self.ctx.err(
+        "list[{s}] ?",
+        .{@tagName(index.ty)},
+        error.InvalidSubscript,
+        offset,
+    );
 
     if (index.ty == .uint) {
-        if (index.ty.uint >= list.ty.list.items.len) return self.ctx.err("Index out of bounds.", .{}, error.InvalidSubscript, offset);
+        if (index.ty.uint >= list.ty.list.items.len) return self.ctx.err(
+            "Index out of bounds.",
+            .{},
+            error.InvalidSubscript,
+            offset,
+        );
         try self.value_stack.append(list.ty.list.items[index.ty.uint]);
     } else {
-        if (index.ty.range[1] > list.ty.list.items.len) return self.ctx.err("Index out of bounds.", .{}, error.InvalidSubscript, offset);
+        if (index.ty.range[1] > list.ty.list.items.len) return self.ctx.err(
+            "Index out of bounds.",
+            .{},
+            error.InvalidSubscript,
+            offset,
+        );
 
         var new_list_ptr = try self.allocator.create(std.ArrayList(Value));
         new_list_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, index.ty.range[1] - index.ty.range[0]);
@@ -613,7 +664,12 @@ fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
 }
 fn execSubscriptMap(self: *Vm, map: Value, offset: u16) !void {
     const key = self.value_stack.pop();
-    if (key.ty != .string) return self.ctx.err("map[{s}] ?", .{@tagName(key.ty)}, error.InvalidSubscript, offset);
+    if (key.ty != .string) return self.ctx.err(
+        "map[{s}] ?",
+        .{@tagName(key.ty)},
+        error.InvalidSubscript,
+        offset,
+    );
     const value = if (map.ty.map.get(key.ty.string)) |v| v else Value.new(.nil, offset);
     try self.value_stack.append(value);
 }
@@ -627,7 +683,12 @@ fn execSet(self: *Vm) !void {
     self.ip.* += 1;
 
     if (container.ty != .list and container.ty != .map)
-        return self.ctx.err("{s}[]= ?", .{@tagName(container.ty)}, error.InvalidSubscript, offset);
+        return self.ctx.err(
+            "{s}[]= ?",
+            .{@tagName(container.ty)},
+            error.InvalidSubscript,
+            offset,
+        );
 
     return if (container.ty == .list)
         try self.execSetList(container, offset, combo)
@@ -636,8 +697,18 @@ fn execSet(self: *Vm) !void {
 }
 fn execSetList(self: *Vm, list: Value, offset: u16, combo: Node.Combo) !void {
     const index = self.value_stack.pop();
-    if (index.ty != .uint) return self.ctx.err("list[{s}]= ?", .{@tagName(index.ty)}, error.InvalidSubscript, offset);
-    if (index.ty.uint >= list.ty.list.items.len) return self.ctx.err("Index out of bounds.", .{}, error.InvalidSubscript, offset);
+    if (index.ty != .uint) return self.ctx.err(
+        "list[{s}]= ?",
+        .{@tagName(index.ty)},
+        error.InvalidSubscript,
+        offset,
+    );
+    if (index.ty.uint >= list.ty.list.items.len) return self.ctx.err(
+        "Index out of bounds.",
+        .{},
+        error.InvalidSubscript,
+        offset,
+    );
     const rvalue = self.value_stack.pop();
 
     // Store
@@ -662,7 +733,12 @@ fn execSetList(self: *Vm, list: Value, offset: u16, combo: Node.Combo) !void {
 }
 fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
     const key = self.value_stack.pop();
-    if (key.ty != .string) return self.ctx.err("map[{s}]= ?", .{@tagName(key.ty)}, error.InvalidSubscript, offset);
+    if (key.ty != .string) return self.ctx.err(
+        "map[{s}]= ?",
+        .{@tagName(key.ty)},
+        error.InvalidSubscript,
+        offset,
+    );
     const rvalue = self.value_stack.pop();
 
     // Store
@@ -710,7 +786,12 @@ fn execRange(self: *Vm) anyerror!void {
     const to = self.value_stack.pop();
     const from = self.value_stack.pop();
 
-    if (from.ty != .uint or to.ty != .uint) return self.ctx.err("Invalid range.", .{}, error.InvalidRange, offset);
+    if (from.ty != .uint or to.ty != .uint) return self.ctx.err(
+        "Invalid range.",
+        .{},
+        error.InvalidRange,
+        offset,
+    );
 
     const from_uint = from.ty.uint;
     const to_uint = if (inclusive) to.ty.uint + 1 else to.ty.uint;
@@ -833,6 +914,972 @@ fn execScopeOut(self: *Vm) anyerror!void {
     self.ip.* += 2;
 }
 
+// Builtins
+
+fn atan2(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    // Get args count.
+    const num_args = self.instructions[self.ip.*];
+    self.ip.* += 1;
+
+    if (num_args != 2) return self.ctx.err(
+        "atan2 requires 2 arguments.",
+        .{},
+        error.InvalidAtan2,
+        offset,
+    );
+
+    const y_val = self.value_stack.pop();
+    const y = y_val.asFloat() orelse return self.ctx.err(
+        "atan2 y not convertible to float.",
+        .{},
+        error.InvalidAtan2,
+        y_val.offset,
+    );
+
+    const x_val = self.value_stack.pop();
+    const x = x_val.asFloat() orelse return self.ctx.err(
+        "atan2 x not convertible to float.",
+        .{},
+        error.InvalidAtan2,
+        x_val.offset,
+    );
+
+    const result = Value.new(.{ .float = std.math.atan2(f64, y.ty.float, x.ty.float) }, offset);
+    try self.value_stack.append(result);
+}
+fn strChars(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const str = self.value_stack.pop();
+    if (str.ty != .string) return self.ctx.err(
+        "{s}.chars() ?",
+        .{@tagName(str.ty)},
+        error.InvalidCharsCall,
+        str.offset,
+    );
+
+    var list_ptr = try self.allocator.create(std.ArrayList(Value));
+    list_ptr.* = std.ArrayList(Value).init(self.allocator);
+
+    var giter = GraphemeIterator.init(str.ty.string) catch |err| return self.ctx.err(
+        "Unicode error.",
+        .{},
+        err,
+        str.offset,
+    );
+    while (giter.next()) |grapheme| try list_ptr.append(Value.new(.{ .string = grapheme.bytes }, offset));
+
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
+    self.ip.* += 1;
+}
+fn print(self: *Vm, writer: anytype) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    // Get args count.
+    const num_args = self.instructions[self.ip.*];
+    self.ip.* += 1;
+
+    var i: usize = 0;
+    const ofs = if (self.scope_stack.load("@ofs")) |s| s.ty.string else ",";
+    while (i < num_args) : (i += 1) {
+        if (i != 0) try writer.writeAll(ofs);
+        _ = try writer.print("{}", .{self.value_stack.pop()});
+    }
+
+    try self.value_stack.append(Value.new(.nil, offset));
+}
+fn oneArgMath(self: *Vm, builtin: Value) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    // Get args count.
+    const num_args = self.instructions[self.ip.*];
+    self.ip.* += 1;
+
+    if (num_args != 1) return self.ctx.err(
+        "Math builtin call requires one argument.",
+        .{},
+        error.InvalidMathBuiltin,
+        offset,
+    );
+
+    const x_val = self.value_stack.pop();
+    const x = x_val.asFloat() orelse return self.ctx.err(
+        "Arg not convertible to float.",
+        .{},
+        error.InvalidArg,
+        x_val.offset,
+    );
+
+    const result = switch (builtin.ty.builtin) {
+        .cos => Value.new(.{ .float = @cos(x.ty.float) }, builtin.offset),
+        .exp => Value.new(.{ .float = std.math.exp(x.ty.float) }, builtin.offset),
+        .int => Value.new(.{ .int = @floatToInt(isize, @trunc(x.ty.float)) }, builtin.offset),
+        .log => Value.new(.{ .float = @log(x.ty.float) }, builtin.offset),
+        .rand => Value.new(.{ .uint = std.rand.DefaultPrng.init(@intCast(usize, std.time.timestamp())).random().uintAtMost(usize, x.ty.uint) }, builtin.offset),
+        .sin => Value.new(.{ .float = @sin(x.ty.float) }, builtin.offset),
+        .sqrt => Value.new(.{ .float = @sqrt(x.ty.float) }, builtin.offset),
+        else => unreachable,
+    };
+    try self.value_stack.append(result);
+}
+fn contains(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const haystack = self.value_stack.pop();
+    const needle = self.value_stack.pop();
+    if (haystack.ty != .list and
+        haystack.ty != .map and
+        haystack.ty != .string)
+        return self.ctx.err(
+            "contains not allowed on {s}.",
+            .{@tagName(haystack.ty)},
+            error.InvalidContains,
+            offset,
+        );
+
+    const result = switch (haystack.ty) {
+        .list => |l| for (l.items) |item| {
+            if (needle.eql(item)) break Value.new(.{ .boolean = true }, offset);
+        } else Value.new(.{ .boolean = false }, offset),
+        .map => |m| mp: {
+            var iter = m.valueIterator();
+            break :mp while (iter.next()) |value_ptr| {
+                if (needle.eql(value_ptr.*)) break Value.new(.{ .boolean = true }, offset);
+            } else Value.new(.{ .boolean = false }, offset);
+        },
+        .string => |s| str: {
+            if (needle.ty != .string) return self.ctx.err(
+                "contains arg on strings must be a string.",
+                .{},
+                error.InvalidContains,
+                offset,
+            );
+
+            break :str Value.new(.{ .boolean = std.mem.containsAtLeast(u8, s, 1, needle.ty.string) }, offset);
+        },
+        else => unreachable,
+    };
+
+    try self.value_stack.append(result);
+    self.ip.* += 1;
+}
+fn indexOf(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const haystack = self.value_stack.pop();
+    const needle = self.value_stack.pop();
+    if (haystack.ty != .list and haystack.ty != .string) return self.ctx.err(
+        "indexOf not allowed on {s}.",
+        .{@tagName(haystack.ty)},
+        error.InvalidIndexOf,
+        offset,
+    );
+
+    const result = switch (haystack.ty) {
+        .list => |l| for (l.items) |item, i| {
+            if (needle.eql(item)) break Value.new(.{ .uint = i }, offset);
+        } else Value.new(.nil, offset),
+        .string => |s| str: {
+            if (needle.ty != .string) return self.ctx.err(
+                "indexOf arg on strings must be a string.",
+                .{},
+                error.InvalidIndexOf,
+                offset,
+            );
+
+            var giter = try GraphemeIterator.init(s);
+            var i: usize = 0;
+            break :str while (giter.next()) |grapheme| : (i += 1) {
+                if (std.mem.eql(u8, needle.ty.string, grapheme.bytes)) break Value.new(.{ .uint = i }, offset);
+            } else Value.new(.nil, offset);
+        },
+        else => unreachable,
+    };
+
+    try self.value_stack.append(result);
+    self.ip.* += 1;
+}
+fn lastIndexOf(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const haystack = self.value_stack.pop();
+    const needle = self.value_stack.pop();
+    if (haystack.ty != .list and haystack.ty != .string) return self.ctx.err(
+        "lastIndexOf not allowed on {s}.",
+        .{@tagName(haystack.ty)},
+        error.InvalidLastIndexOf,
+        offset,
+    );
+
+    const result = switch (haystack.ty) {
+        .list => |l| lst: {
+            var i: usize = 0;
+            const len = l.items.len;
+            break :lst while (i <= len) : (i += 1) {
+                if (needle.eql(l.items[len - i])) break Value.new(.{ .uint = i }, offset);
+            } else Value.new(.nil, offset);
+        },
+        .string => |s| str: {
+            if (needle.ty != .string) return self.ctx.err(
+                "lastIndexOf arg on strings must be a string.",
+                .{},
+                error.InvalidLastIndexOf,
+                offset,
+            );
+
+            var giter = try GraphemeIterator.init(s);
+            var i: usize = 0;
+            var index = Value.new(.nil, offset);
+            while (giter.next()) |grapheme| : (i += 1) {
+                if (std.mem.eql(u8, needle.ty.string, grapheme.bytes)) index = Value.new(.{ .uint = i }, offset);
+            }
+
+            break :str index;
+        },
+        else => unreachable,
+    };
+
+    try self.value_stack.append(result);
+    self.ip.* += 1;
+}
+fn length(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const value = self.value_stack.pop();
+    if (value.ty != .list and
+        value.ty != .map and
+        value.ty != .string)
+        return self.ctx.err(
+            "len not allowed on {s}.",
+            .{@tagName(value.ty)},
+            error.InvalidLen,
+            offset,
+        );
+
+    const result = switch (value.ty) {
+        .list => |l| Value.new(.{ .uint = l.items.len }, offset),
+        .map => |m| Value.new(.{ .uint = m.count() }, offset),
+        .string => |s| Value.new(.{ .uint = s.len }, offset),
+        else => unreachable,
+    };
+
+    try self.value_stack.append(result);
+    self.ip.* += 1;
+}
+fn mapKeys(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const m = self.value_stack.pop();
+    if (m.ty != .map) return self.ctx.err(
+        "keys not allowed on {s}.",
+        .{@tagName(m.ty)},
+        error.InvalidKeys,
+        offset,
+    );
+
+    const keys_ptr = try self.allocator.create(std.ArrayList(Value));
+    keys_ptr.* = if (m.ty.map.count() == 0)
+        std.ArrayList(Value).init(self.allocator)
+    else
+        try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
+    var key_iter = m.ty.map.keyIterator();
+    while (key_iter.next()) |key| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = key.* }, offset));
+
+    try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
+    self.ip.* += 1;
+}
+fn mapValues(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const m = self.value_stack.pop();
+    if (m.ty != .map) return self.ctx.err(
+        "values not allowed on {s}.",
+        .{@tagName(m.ty)},
+        error.InvalidValues,
+        offset,
+    );
+
+    const values_ptr = try self.allocator.create(std.ArrayList(Value));
+    values_ptr.* = if (m.ty.map.count() == 0)
+        std.ArrayList(Value).init(self.allocator)
+    else
+        try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
+    var value_iter = m.ty.map.valueIterator();
+    while (value_iter.next()) |value| values_ptr.appendAssumeCapacity(value.*);
+
+    try self.value_stack.append(Value.new(.{ .list = values_ptr }, offset));
+    self.ip.* += 1;
+}
+fn listMeanHelper(list: std.ArrayList(Value)) f64 {
+    var sum: f64 = 0;
+    var count: f64 = 0;
+    for (list.items) |item| {
+        if (item.asFloat()) |f| {
+            sum += f.ty.float;
+            count += 1;
+        }
+    }
+
+    return sum / count;
+}
+fn listMean(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "mean not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidMean,
+        offset,
+    );
+
+    if (l.ty.list.items.len == 0) {
+        try self.value_stack.append(Value.new(.{ .float = 0 }, offset));
+        self.ip.* += 1;
+        return;
+    }
+
+    try self.value_stack.append(Value.new(.{ .float = listMeanHelper(l.ty.list.*) }, offset));
+    self.ip.* += 1;
+}
+fn listMedian(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "median not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidMedian,
+        offset,
+    );
+
+    if (l.ty.list.items.len == 0) {
+        try self.value_stack.append(Value.new(.{ .float = 0 }, offset));
+        self.ip.* += 1;
+        return;
+    }
+
+    var list_copy = try std.ArrayList(f64).initCapacity(self.allocator, l.ty.list.items.len);
+
+    for (l.ty.list.items) |item| {
+        if (item.asFloat()) |f| list_copy.appendAssumeCapacity(f.ty.float);
+    }
+    std.sort.sort(f64, list_copy.items, {}, comptime std.sort.asc(f64));
+
+    var median: f64 = @intToFloat(f64, list_copy.items.len) + 1 / 2 - 1;
+    if (list_copy.items.len % 2 == 0) {
+        const mid = list_copy.items.len / 2 - 1;
+        median = (list_copy.items[mid] + list_copy.items[mid + 1]) / 2;
+    }
+
+    try self.value_stack.append(Value.new(.{ .float = median }, offset));
+    self.ip.* += 1;
+}
+fn listMode(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "mode not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidMode,
+        offset,
+    );
+
+    if (l.ty.list.items.len == 0) {
+        try self.value_stack.append(Value.new(.nil, offset));
+        self.ip.* += 1;
+        return;
+    }
+
+    var counts = std.StringHashMap(usize).init(self.allocator);
+    var key_buf: [4096]u8 = undefined;
+
+    for (l.ty.list.items) |item| {
+        if (item.asFloat()) |f| {
+            const key_str = try std.fmt.bufPrint(&key_buf, "{}", .{f});
+            var entry = try counts.getOrPut(try self.allocator.dupe(u8, key_str));
+            if (entry.found_existing) entry.value_ptr.* += 1 else entry.value_ptr.* = 1;
+        }
+    }
+
+    var iter = counts.iterator();
+    var highest: usize = 0;
+    while (iter.next()) |entry| {
+        if (entry.value_ptr.* > highest) highest = entry.value_ptr.*;
+    }
+
+    iter = counts.iterator();
+    var mode_ptr = try self.allocator.create(std.ArrayList(Value));
+    mode_ptr.* = std.ArrayList(Value).init(self.allocator);
+    while (iter.next()) |entry| {
+        if (entry.value_ptr.* == highest) try mode_ptr.append(Value.new(.{ .float = std.fmt.parseFloat(f64, entry.key_ptr.*) catch unreachable }, offset));
+    }
+    std.sort.sort(Value, mode_ptr.items, {}, Value.lessThan);
+
+    const result = if (mode_ptr.items.len == counts.count()) Value.new(.nil, offset) else Value.new(.{ .list = mode_ptr }, offset);
+    try self.value_stack.append(result);
+    self.ip.* += 1;
+}
+fn listStdev(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "stdev not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidStdev,
+        offset,
+    );
+
+    if (l.ty.list.items.len == 0) {
+        try self.value_stack.append(Value.new(.{ .float = 0 }, offset));
+        self.ip.* += 1;
+        return;
+    }
+
+    const mean = listMeanHelper(l.ty.list.*);
+
+    var sum_of_squares: f64 = 0;
+    var count: f64 = 0;
+    for (l.ty.list.items) |item| {
+        if (item.asFloat()) |f| {
+            const diff = f.ty.float - mean;
+            const square = diff * diff;
+            sum_of_squares += square;
+            count += 1;
+        }
+    }
+
+    const sos_by_count = sum_of_squares / count;
+
+    try self.value_stack.append(Value.new(.{ .float = @sqrt(sos_by_count) }, offset));
+    self.ip.* += 1;
+}
+fn listMin(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "min not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidMin,
+        offset,
+    );
+
+    if (l.ty.list.items.len == 0) {
+        try self.value_stack.append(Value.new(.nil, offset));
+        self.ip.* += 1;
+        return;
+    }
+
+    var min = l.ty.list.items[0];
+    for (l.ty.list.items) |item| {
+        const comparison = try min.cmp(item);
+        if (comparison == .gt) min = item;
+    }
+
+    try self.value_stack.append(min);
+    self.ip.* += 1;
+}
+fn listMax(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "max not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidMax,
+        offset,
+    );
+
+    if (l.ty.list.items.len == 0) {
+        try self.value_stack.append(Value.new(.nil, offset));
+        self.ip.* += 1;
+        return;
+    }
+
+    var max = l.ty.list.items[0];
+    for (l.ty.list.items) |item| {
+        const comparison = try max.cmp(item);
+        if (comparison == .lt) max = item;
+    }
+
+    try self.value_stack.append(max);
+    self.ip.* += 1;
+}
+fn listSort(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "sort not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidSort,
+        offset,
+    );
+
+    if (l.ty.list.items.len == 0) {
+        try self.value_stack.append(l);
+        self.ip.* += 1;
+        return;
+    }
+
+    std.sort.sort(Value, l.ty.list.items, {}, Value.lessThan);
+    try self.value_stack.append(l);
+    self.ip.* += 1;
+}
+fn listReverse(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "reverse not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidReverse,
+        offset,
+    );
+
+    if (l.ty.list.items.len == 0) {
+        try self.value_stack.append(l);
+        self.ip.* += 1;
+        return;
+    }
+
+    std.mem.reverse(Value, l.ty.list.items);
+    try self.value_stack.append(l);
+    self.ip.* += 1;
+}
+fn strSplit(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const str = self.value_stack.pop();
+    if (str.ty != .string) return self.ctx.err(
+        "split not allowed on {s}.",
+        .{@tagName(str.ty)},
+        error.InvalidSplit,
+        offset,
+    );
+
+    const delim = self.value_stack.pop();
+    if (delim.ty != .string) return self.ctx.err(
+        "split delimiter must be a string",
+        .{},
+        error.InvalidSplit,
+        offset,
+    );
+
+    var list_ptr = try self.allocator.create(std.ArrayList(Value));
+    list_ptr.* = std.ArrayList(Value).init(self.allocator);
+    var iter = std.mem.split(u8, str.ty.string, delim.ty.string);
+    while (iter.next()) |sub| try list_ptr.append(Value.new(.{ .string = sub }, 0));
+
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
+    self.ip.* += 1;
+}
+fn listJoin(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "join not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidJoin,
+        offset,
+    );
+
+    const delim = self.value_stack.pop();
+    if (delim.ty != .string) return self.ctx.err(
+        "join delimiter must be a string",
+        .{},
+        error.InvalidJoin,
+        offset,
+    );
+
+    var buf = std.ArrayList(u8).init(self.allocator);
+    var writer = buf.writer();
+
+    for (l.ty.list.items) |item, i| {
+        if (i != 0 and delim.ty.string.len > 0) try buf.appendSlice(delim.ty.string);
+        _ = try writer.print("{}", .{item});
+    }
+
+    try self.value_stack.append(Value.new(.{ .string = buf.items }, offset));
+    self.ip.* += 1;
+}
+fn strEndsWith(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const str = self.value_stack.pop();
+    const ending = self.value_stack.pop();
+    if (str.ty != .string or ending.ty != .string) return self.ctx.err(
+        "endsWith callee and arg must be strings.",
+        .{},
+        error.InvalidEndsWith,
+        offset,
+    );
+
+    const result = Value.new(.{ .boolean = std.mem.endsWith(u8, str.ty.string, ending.ty.string) }, offset);
+
+    try self.value_stack.append(result);
+    self.ip.* += 1;
+}
+fn strStartsWith(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const str = self.value_stack.pop();
+    const start = self.value_stack.pop();
+    if (str.ty != .string or start.ty != .string) return self.ctx.err(
+        "startsWith callee and arg must be strings.",
+        .{},
+        error.InvalidStartsWith,
+        offset,
+    );
+
+    const result = Value.new(.{ .boolean = std.mem.startsWith(u8, str.ty.string, start.ty.string) }, offset);
+    try self.value_stack.append(result);
+
+    self.ip.* += 1;
+}
+fn listMap(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "map not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidMap,
+        offset,
+    );
+
+    const f = self.value_stack.pop();
+    if (f.ty != .func) return self.ctx.err(
+        "map requres function argument.",
+        .{},
+        error.InvalidMap,
+        offset,
+    );
+
+    var list_ptr = try self.allocator.create(std.ArrayList(Value));
+    list_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, l.ty.list.items.len);
+
+    for (l.ty.list.items) |item, i| {
+        const v = try self.evalListPredicate(f, item, i);
+        list_ptr.appendAssumeCapacity(v);
+    }
+
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
+    self.ip.* += 1;
+}
+fn listFilter(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "filter not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidFilter,
+        offset,
+    );
+
+    const f = self.value_stack.pop();
+    if (f.ty != .func) return self.ctx.err(
+        "filter requires function argument",
+        .{},
+        error.InvalidFilter,
+        offset,
+    );
+
+    var list_ptr = try self.allocator.create(std.ArrayList(Value));
+    list_ptr.* = std.ArrayList(Value).init(self.allocator);
+
+    for (l.ty.list.items) |item, i| {
+        const v = try self.evalListPredicate(f, item, i);
+        if (isTruthy(v)) try list_ptr.append(item);
+    }
+
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
+    self.ip.* += 1;
+}
+fn each(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const container = self.value_stack.pop();
+    if (container.ty != .list and container.ty != .map) return self.ctx.err(
+        "each not allowed on {s}.",
+        .{@tagName(container.ty)},
+        error.InvalidEach,
+        offset,
+    );
+
+    const f = self.value_stack.pop();
+    if (f.ty != .func) return self.ctx.err(
+        "each requres function argument.",
+        .{},
+        error.InvalidEach,
+        offset,
+    );
+
+    const container_len = switch (container.ty) {
+        .list => |l| l.items.len,
+        .map => |m| m.count(),
+        else => unreachable,
+    };
+
+    if (container_len == 0) {
+        try self.value_stack.append(container);
+        self.ip.* += 1;
+        return;
+    }
+
+    if (container.ty == .list) {
+        for (container.ty.list.items) |item, i| _ = try self.evalListPredicate(f, item, i);
+    } else {
+        var iter = container.ty.map.iterator();
+        var i: usize = 0;
+        while (iter.next()) |entry| : (i += 1) _ = try self.evalMapPredicate(f, entry.key_ptr.*, entry.value_ptr.*, i);
+    }
+
+    try self.value_stack.append(container);
+    self.ip.* += 1;
+}
+fn listReduce(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "reduce not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidReduce,
+        offset,
+    );
+
+    var acc = self.value_stack.pop();
+    const f = self.value_stack.pop();
+    if (f.ty != .func) return self.ctx.err(
+        "reduce requires function argument.",
+        .{},
+        error.InvalidReduce,
+        offset,
+    );
+
+    if (l.ty.list.items.len == 0) {
+        try self.value_stack.append(Value.new(.nil, offset));
+        self.ip.* += 1;
+        return;
+    }
+
+    // Set up sub-VM arena.
+    //var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
+    //defer vm_arena.deinit();
+    //const vm_allocator = vm_arena.allocator();
+
+    for (l.ty.list.items) |item, i| {
+        // Set up function scope.
+        var func_scope = Scope.init(self.allocator, .function);
+        //defer func_scope.deinit();
+
+        // Assign args as locals in function scope.
+        try func_scope.store("acc", acc);
+        try func_scope.store("it", item);
+        try func_scope.store("@0", item);
+        if (f.ty.func.params.len > 0) try func_scope.store(f.ty.func.params[0], acc);
+        if (f.ty.func.params.len > 1) try func_scope.store(f.ty.func.params[1], item);
+        try func_scope.store("index", Value.new(.{ .uint = i }, 0));
+
+        _ = try self.pushScope(func_scope);
+
+        var vm = try init(
+            self.allocator,
+            f.ty.func.instructions,
+            self.scope_stack,
+            self.ctx,
+            self.output,
+        );
+        try vm.run();
+
+        _ = self.scope_stack.pop();
+
+        acc = vm.last_popped;
+    }
+
+    try self.value_stack.append(acc);
+    self.ip.* += 1;
+}
+fn rand(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    // Get args count.
+    const num_args = self.instructions[self.ip.*];
+    self.ip.* += 1;
+    if (num_args != 1) return self.ctx.err(
+        "rand requires a single argument.",
+        .{},
+        error.InvalidRand,
+        offset,
+    );
+
+    const x_val = self.value_stack.pop();
+    if (x_val.ty != .uint) return self.ctx.err(
+        "rand argument must be unsigned integer.",
+        .{},
+        error.InvalidRand,
+        offset,
+    );
+
+    const result = Value.new(.{ .uint = std.rand.DefaultPrng.init(@intCast(usize, std.time.timestamp())).random().uintAtMost(usize, x_val.ty.uint) }, offset);
+    try self.value_stack.append(result);
+}
+fn listPush(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "push not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidPush,
+        offset,
+    );
+
+    var item = self.value_stack.pop();
+    try l.ty.list.append(item);
+    try self.value_stack.append(l);
+
+    self.ip.* += 1;
+}
+fn listPop(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "pop not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidPop,
+        offset,
+    );
+
+    try self.value_stack.append(l.ty.list.pop());
+    self.ip.* += 1;
+}
+
+fn evalListPredicate(self: *Vm, func: Value, item: Value, index: usize) anyerror!Value {
+    // Assign args as locals in function scope.
+    var func_scope = Scope.init(self.allocator, .function);
+
+    const index_val = Value.new(.{ .uint = index }, 0);
+
+    try func_scope.store("it", item);
+    try func_scope.store("index", index_val);
+
+    if (func.ty.func.params.len > 0) try func_scope.store(func.ty.func.params[0], item);
+    if (func.ty.func.params.len > 1) try func_scope.store(func.ty.func.params[1], index_val);
+
+    return self.evalPredicate(func.ty.func.instructions, func_scope);
+}
+
+fn evalMapPredicate(self: *Vm, func: Value, key: []const u8, item: Value, index: usize) anyerror!Value {
+    // Assign args as locals in function scope.
+    var func_scope = Scope.init(self.allocator, .function);
+
+    const key_val = Value.new(.{ .string = key }, 0);
+    const index_val = Value.new(.{ .uint = index }, 0);
+
+    try func_scope.store("key", key_val);
+    try func_scope.store("value", item);
+    try func_scope.store("index", Value.new(.{ .uint = index }, 0));
+
+    if (func.ty.func.params.len > 0) try func_scope.store(func.ty.func.params[0], key_val);
+    if (func.ty.func.params.len > 1) try func_scope.store(func.ty.func.params[1], item);
+    if (func.ty.func.params.len > 2) try func_scope.store(func.ty.func.params[2], index_val);
+
+    return self.evalPredicate(func.ty.func.instructions, func_scope);
+}
+
+fn evalPredicate(self: *Vm, instructions: []const u8, func_scope: Scope) anyerror!Value {
+    // Set up Sub-VM arena.
+    //var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
+    //defer vm_arena.deinit();
+    //const vm_allocator = vm_arena.allocator();
+
+    _ = try self.scope_stack.push(func_scope);
+
+    var vm = try init(
+        self.allocator,
+        instructions,
+        self.scope_stack,
+        self.ctx,
+        self.output,
+    );
+    try vm.run();
+
+    _ = self.scope_stack.pop();
+    //used_func_scope.deinit();
+
+    return vm.last_popped;
+}
+
+// Scopes
+
 fn pushScope(self: *Vm, scope: Scope) !void {
     try self.scope_stack.push(scope);
 }
@@ -844,6 +1891,44 @@ fn popScope(self: *Vm) Scope {
 }
 
 // Helpers
+
+pub fn addBuiltins(scope: *Scope) anyerror!void {
+    try scope.store("atan2", Value.new(.{ .builtin = .atan2 }, 0));
+    try scope.store("chars", Value.new(.{ .builtin = .chars }, 0));
+    try scope.store("contains", Value.new(.{ .builtin = .contains }, 0));
+    try scope.store("cos", Value.new(.{ .builtin = .cos }, 0));
+    try scope.store("each", Value.new(.{ .builtin = .each }, 0));
+    try scope.store("endsWith", Value.new(.{ .builtin = .endsWith }, 0));
+    try scope.store("exp", Value.new(.{ .builtin = .exp }, 0));
+    try scope.store("filter", Value.new(.{ .builtin = .filter }, 0));
+    try scope.store("int", Value.new(.{ .builtin = .int }, 0));
+    try scope.store("indexOf", Value.new(.{ .builtin = .indexOf }, 0));
+    try scope.store("join", Value.new(.{ .builtin = .join }, 0));
+    try scope.store("keys", Value.new(.{ .builtin = .keys }, 0));
+    try scope.store("lastIndexOf", Value.new(.{ .builtin = .lastIndexOf }, 0));
+    try scope.store("len", Value.new(.{ .builtin = .len }, 0));
+    try scope.store("log", Value.new(.{ .builtin = .log }, 0));
+    try scope.store("map", Value.new(.{ .builtin = .map }, 0));
+    try scope.store("max", Value.new(.{ .builtin = .max }, 0));
+    try scope.store("mean", Value.new(.{ .builtin = .mean }, 0));
+    try scope.store("median", Value.new(.{ .builtin = .median }, 0));
+    try scope.store("min", Value.new(.{ .builtin = .min }, 0));
+    try scope.store("mode", Value.new(.{ .builtin = .mode }, 0));
+    try scope.store("print", Value.new(.{ .builtin = .print }, 0));
+    try scope.store("pop", Value.new(.{ .builtin = .pop }, 0));
+    try scope.store("push", Value.new(.{ .builtin = .push }, 0));
+    try scope.store("rand", Value.new(.{ .builtin = .rand }, 0));
+    try scope.store("reduce", Value.new(.{ .builtin = .reduce }, 0));
+    try scope.store("reverse", Value.new(.{ .builtin = .reverse }, 0));
+    try scope.store("sin", Value.new(.{ .builtin = .sin }, 0));
+    try scope.store("sort", Value.new(.{ .builtin = .sort }, 0));
+    try scope.store("split", Value.new(.{ .builtin = .split }, 0));
+    try scope.store("sqrt", Value.new(.{ .builtin = .sqrt }, 0));
+    try scope.store("startsWith", Value.new(.{ .builtin = .startsWith }, 0));
+    try scope.store("stdev", Value.new(.{ .builtin = .stdev }, 0));
+    try scope.store("values", Value.new(.{ .builtin = .values }, 0));
+}
+
 fn isTruthy(value: Value) bool {
     return switch (value.ty) {
         .boolean => |b| b,
@@ -914,7 +1999,8 @@ fn testVmValue(allocator: std.mem.Allocator, input: []const u8) !Value {
     for (program.rules) |n| try compiler.compile(n);
 
     var scope_stack = ScopeStack.init(allocator);
-    _ = try scope_stack.push(Scope.init(allocator, .block));
+    try scope_stack.push(Scope.init(allocator, .block));
+    try Vm.addBuiltins(scope_stack.head());
 
     var output = std.ArrayList(u8).init(allocator);
 
@@ -1274,4 +2360,217 @@ test "Vm list range subscript" {
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 4), got.ty.uint);
+}
+
+test "Vm math builtins" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator, "atan2(0, -1)");
+    try std.testing.expectEqual(Value.Tag.float, got.ty);
+    try std.testing.expectEqual(@as(f64, 3.141592653589793e+00), got.ty.float);
+    got = try testVmValue(allocator, "cos(-1)");
+    try std.testing.expectEqual(Value.Tag.float, got.ty);
+    try std.testing.expectEqual(@as(f64, 5.403023058681398e-01), got.ty.float);
+    got = try testVmValue(allocator, "exp(5)");
+    try std.testing.expectEqual(Value.Tag.float, got.ty);
+    try std.testing.expectEqual(@as(f64, 1.484131591025766e+02), got.ty.float);
+    got = try testVmValue(allocator, "int(-3.9)");
+    try std.testing.expectEqual(Value.Tag.int, got.ty);
+    try std.testing.expectEqual(@as(i64, -3), got.ty.int);
+    got = try testVmValue(allocator, "int(3.9)");
+    try std.testing.expectEqual(Value.Tag.int, got.ty);
+    try std.testing.expectEqual(@as(i64, 3), got.ty.int);
+    got = try testVmValue(allocator, "log(3.14)");
+    try std.testing.expectEqual(Value.Tag.float, got.ty);
+    try std.testing.expectEqual(@as(f64, 1.144222799920162e+00), got.ty.float);
+    //try testLastValue("rand(10)", Value.new(.{ .uint = 10 }, 0));
+    got = try testVmValue(allocator, "sin(3.14)");
+    try std.testing.expectEqual(Value.Tag.float, got.ty);
+    try std.testing.expectEqual(@as(f64, 1.5926529164868282e-03), got.ty.float);
+    got = try testVmValue(allocator, "sqrt(49)");
+    try std.testing.expectEqual(Value.Tag.float, got.ty);
+    try std.testing.expectEqual(@as(f64, 7), got.ty.float);
+}
+
+test "Vm method builtins" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const mean_input =
+        \\l := [1, 2, "foo", 3, nil]
+        \\l.mean()
+    ;
+    const median_input =
+        \\l := [1, 2, "foo", 3, nil, 4]
+        \\l.median()
+    ;
+    const mode_input =
+        \\l := [1, 1, "foo", 2, nil, 2, 3, 4]
+        \\l.mode().len()
+    ;
+    const stdev_input =
+        \\l := [1, 1, "foo", 2, nil, 2, 3, 4]
+        \\l.stdev()
+    ;
+
+    var got = try testVmValue(allocator, "[1, 2, 3].len()");
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\["a": 1, "b": 2, "c": 3].len()
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\"foo".len()
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\["a": 1, "b": 2, "c": 3].keys().len()
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\["a": 1, "b": 2, "c": 3].values().len()
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+    got = try testVmValue(allocator, mean_input);
+    try std.testing.expectEqual(Value.Tag.float, got.ty);
+    try std.testing.expectEqual(@as(f64, 2), got.ty.float);
+    got = try testVmValue(allocator, median_input);
+    try std.testing.expectEqual(Value.Tag.float, got.ty);
+    try std.testing.expectEqual(@as(f64, 2.5), got.ty.float);
+    got = try testVmValue(allocator, mode_input);
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 2), got.ty.uint);
+    got = try testVmValue(allocator, stdev_input);
+    try std.testing.expectEqual(Value.Tag.float, got.ty);
+    try std.testing.expectEqual(@as(f64, 1.0671873729054748), got.ty.float);
+    got = try testVmValue(allocator, "[1, 2, 3].min()");
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 1), got.ty.uint);
+    got = try testVmValue(allocator, "[1, 2, 3].max()");
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\["a", "z", "B"].min()
+    );
+    try std.testing.expectEqual(Value.Tag.string, got.ty);
+    try std.testing.expectEqualStrings("B", got.ty.string);
+    got = try testVmValue(allocator, "[2, 3, 1].sort()[0]");
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 1), got.ty.uint);
+    got = try testVmValue(allocator, "[2, 3, 1].reverse()[0]");
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 1), got.ty.uint);
+    got = try testVmValue(allocator, "[2, 3, 1].contains(3)");
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(true, got.ty.boolean);
+    got = try testVmValue(allocator, "[2, 3, 1].contains(4)");
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(false, got.ty.boolean);
+    got = try testVmValue(allocator,
+        \\"foo".contains("oo")
+    );
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(true, got.ty.boolean);
+    got = try testVmValue(allocator,
+        \\["a": 2, "b": 3].contains(3)
+    );
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(true, got.ty.boolean);
+    got = try testVmValue(allocator, "[2, 3, 1].indexOf(1)");
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 2), got.ty.uint);
+    got = try testVmValue(allocator, "[2, 3, 1].indexOf(4)");
+    try std.testing.expectEqual(Value.Tag.nil, got.ty);
+    got = try testVmValue(allocator,
+        \\"H\u65\u301llo".indexOf("l")
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 2), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\"H\u65\u301llo".lastIndexOf("l")
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+    //try testLastValue(
+    //, Value.new(.{ .string = "bar" }, 0));
+    got = try testVmValue(allocator,
+        \\"foo,bar,baz".split(",")[1]
+    );
+    try std.testing.expectEqual(Value.Tag.string, got.ty);
+    try std.testing.expectEqualStrings("bar", got.ty.string);
+    got = try testVmValue(allocator,
+        \\["foo", 1, 2.3, nil].join(",")
+    );
+    try std.testing.expectEqual(Value.Tag.string, got.ty);
+    try std.testing.expectEqualStrings("foo,1,2.3,", got.ty.string);
+    got = try testVmValue(allocator,
+        \\f := { a => a * 2 + index }
+        \\[1, 2, 3].map(f)[1]
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 5), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\[1, 2, 3].filter() { it > 1 }[1]
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\total := 0
+        \\[1, 2, 3].each() { total = total + it }
+        \\total
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 6), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\[1, 2, 3].reduce(1) { acc * it }
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 6), got.ty.uint);
+    //try testLastValueWithOutput(
+    //    \\print("foo", 1, 2, 3.14)
+    //, Value.new(.nil, 0), "foo,1,2,3.14");
+    //try testLastValueWithOutput(
+    //    \\print("foo", 1, 2, 3.14, "foo {1}")
+    //, Value.new(.nil, 0), "foo,1,2,3.14,foo 1");
+    //try testLastValueWithOutput(
+    //    \\print("foo", 1, 2, 3.14, "{#d:0>3# 1}")
+    //, Value.new(.nil, 0), "foo,1,2,3.14,001");
+    //try testLastValue(
+    //, Value.new(.{ .string = "\u{65}\u{301}" }, 0));
+    got = try testVmValue(allocator,
+        \\"H\u65\u301llo".chars()[1]
+    );
+    try std.testing.expectEqual(Value.Tag.string, got.ty);
+    try std.testing.expectEqualStrings("\u{65}\u{301}", got.ty.string);
+    got = try testVmValue(allocator,
+        \\"Hello".startsWith("Hell")
+    );
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(true, got.ty.boolean);
+    got = try testVmValue(allocator,
+        \\"Hello".endsWith("llo")
+    );
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(true, got.ty.boolean);
+    got = try testVmValue(allocator,
+        \\l := [1]
+        \\l.push(2)
+        \\l[1]
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 2), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\l := [1]
+        \\l.pop()
+    );
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 1), got.ty.uint);
 }
