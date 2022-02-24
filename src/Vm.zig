@@ -17,7 +17,7 @@ output: *std.ArrayList(u8),
 instructions: []const u8 = undefined,
 ip: *u16 = undefined,
 
-scope_stack: ScopeStack,
+scope_stack: *ScopeStack,
 frame_stack: std.ArrayList(Frame),
 value_stack: std.ArrayList(Value),
 
@@ -26,7 +26,7 @@ const Vm = @This();
 pub fn init(
     allocator: std.mem.Allocator,
     instructions: []const u8,
-    scope_stack: ScopeStack,
+    scope_stack: *ScopeStack,
     ctx: Context,
     output: *std.ArrayList(u8),
 ) !Vm {
@@ -353,7 +353,7 @@ fn execCall(self: *Vm) anyerror!void {
     var func_scope = Scope.init(self.allocator, .function);
 
     // Self-references
-    if (callee.ty.func.name.len != 0) try func_scope.store(callee.ty.func.name, callee);
+    if (callee.ty.func.name.len != 0) try func_scope.map.put(callee.ty.func.name, callee);
 
     // Process args
     self.ip.* += 3;
@@ -362,11 +362,11 @@ fn execCall(self: *Vm) anyerror!void {
     var i: usize = 0;
     while (i < num_args) : (i += 1) {
         const arg = self.value_stack.pop();
-        if (i == 0) try func_scope.store("it", arg); // it
+        if (i == 0) try func_scope.map.put("it", arg); // it
         var buf: [4]u8 = undefined;
         const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{i});
-        try func_scope.store(try self.allocator.dupe(u8, auto_arg_name), arg); // @0, @1, ...
-        if (i < callee.ty.func.params.len) try func_scope.store(callee.ty.func.params[i], arg);
+        try func_scope.map.put(try self.allocator.dupe(u8, auto_arg_name), arg); // @0, @1, ...
+        if (i < callee.ty.func.params.len) try func_scope.map.put(callee.ty.func.params[i], arg);
     }
 
     // Push the function's frame.
@@ -740,11 +740,11 @@ fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
         offset,
     );
     const rvalue = self.value_stack.pop();
-    const key_copy = try self.allocator.dupe(u8, key.ty.string);
+    const key_copy = try map.ty.map.allocator.dupe(u8, key.ty.string);
 
     // Store
     if (combo == .none) {
-        try map.ty.map.put(key_copy, rvalue); //TODO: Deinit old value?
+        try map.ty.map.put(key_copy, try rvalue.copy(map.ty.map.allocator)); //TODO: Deinit old value?
         try self.value_stack.append(rvalue);
     } else {
         const old_value = map.ty.map.get(key.ty.string) orelse Value.new(.{ .uint = 0 }, offset);
@@ -758,7 +758,7 @@ fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
             .mod => try old_value.mod(rvalue),
         };
 
-        try map.ty.map.put(key_copy, new_value);
+        try map.ty.map.put(key_copy, try new_value.copy(map.ty.map.allocator));
         try self.value_stack.append(new_value);
     }
 }
@@ -826,13 +826,13 @@ fn execRecRange(self: *Vm) anyerror!void {
     var result = nil_value;
     var eval_action = false;
 
-    if (self.scope_stack.stack.items[0].rec_ranges.contains(range_id)) {
+    if (self.scope_stack.rec_ranges.contains(range_id)) {
         // In range
         eval_action = true;
 
         if (isTruthy(to)) {
             // Range end.
-            _ = self.scope_stack.stack.items[0].rec_ranges.remove(range_id);
+            _ = self.scope_stack.rec_ranges.remove(range_id);
             if (exclusive) eval_action = false;
         }
     } else {
@@ -844,13 +844,13 @@ fn execRecRange(self: *Vm) anyerror!void {
             start_range = isTruthy(from);
         } else {
             // No from; start only at row == 1.
-            const rnum = self.scope_stack.stack.items[0].map.get("@rnum").?;
-            start_range = rnum.ty.uint == 1;
+            const rnum = self.scope_stack.rnum;
+            start_range = rnum == 1;
         }
 
         if (start_range) {
             // We start a new range.
-            try self.scope_stack.stack.items[0].rec_ranges.put(range_id, {});
+            try self.scope_stack.rec_ranges.put(range_id, {});
             eval_action = true;
         }
     }
@@ -870,7 +870,7 @@ fn execRecRange(self: *Vm) anyerror!void {
         } else {
             // Default action
             var writer = self.output.writer();
-            _ = try writer.print("{s}", .{self.scope_stack.stack.items[0].record});
+            _ = try writer.print("{s}", .{self.scope_stack.record});
         }
     }
 
@@ -989,9 +989,8 @@ fn print(self: *Vm, writer: anytype) anyerror!void {
     self.ip.* += 1;
 
     var i: usize = 0;
-    const ofs = if (self.scope_stack.load("@ofs")) |s| s.ty.string else ",";
     while (i < num_args) : (i += 1) {
-        if (i != 0) try writer.writeAll(ofs);
+        if (i != 0) try writer.writeAll(self.scope_stack.ofs);
         _ = try writer.print("{}", .{self.value_stack.pop()});
     }
 
@@ -1735,12 +1734,12 @@ fn listReduce(self: *Vm) anyerror!void {
         //defer func_scope.deinit();
 
         // Assign args as locals in function scope.
-        try func_scope.store("acc", acc);
-        try func_scope.store("it", item);
-        try func_scope.store("@0", item);
-        if (f.ty.func.params.len > 0) try func_scope.store(f.ty.func.params[0], acc);
-        if (f.ty.func.params.len > 1) try func_scope.store(f.ty.func.params[1], item);
-        try func_scope.store("index", Value.new(.{ .uint = i }, 0));
+        try func_scope.map.put("acc", acc);
+        try func_scope.map.put("it", item);
+        try func_scope.map.put("@0", item);
+        if (f.ty.func.params.len > 0) try func_scope.map.put(f.ty.func.params[0], acc);
+        if (f.ty.func.params.len > 1) try func_scope.map.put(f.ty.func.params[1], item);
+        try func_scope.map.put("index", Value.new(.{ .uint = i }, 0));
 
         _ = try self.pushScope(func_scope);
 
@@ -1753,7 +1752,7 @@ fn listReduce(self: *Vm) anyerror!void {
         );
         try vm.run();
 
-        _ = self.scope_stack.pop();
+        _ = self.popScope();
 
         acc = vm.last_popped;
     }
@@ -1801,7 +1800,7 @@ fn listPush(self: *Vm) anyerror!void {
     );
 
     var item = self.value_stack.pop();
-    try l.ty.list.append(item);
+    try l.ty.list.append(try item.copy(l.ty.list.allocator));
     try self.value_stack.append(l);
 
     self.ip.* += 1;
@@ -1819,7 +1818,7 @@ fn listPop(self: *Vm) anyerror!void {
         offset,
     );
 
-    try self.value_stack.append(l.ty.list.pop());
+    try self.value_stack.append(l.ty.list.pop()); //TODO: Deinit popped value?
     self.ip.* += 1;
 }
 
@@ -1829,11 +1828,11 @@ fn evalListPredicate(self: *Vm, func: Value, item: Value, index: usize) anyerror
 
     const index_val = Value.new(.{ .uint = index }, 0);
 
-    try func_scope.store("it", item);
-    try func_scope.store("index", index_val);
+    try func_scope.map.put("it", item);
+    try func_scope.map.put("index", index_val);
 
-    if (func.ty.func.params.len > 0) try func_scope.store(func.ty.func.params[0], item);
-    if (func.ty.func.params.len > 1) try func_scope.store(func.ty.func.params[1], index_val);
+    if (func.ty.func.params.len > 0) try func_scope.map.put(func.ty.func.params[0], item);
+    if (func.ty.func.params.len > 1) try func_scope.map.put(func.ty.func.params[1], index_val);
 
     return self.evalPredicate(func.ty.func.instructions, func_scope);
 }
@@ -1845,13 +1844,13 @@ fn evalMapPredicate(self: *Vm, func: Value, key: []const u8, item: Value, index:
     const key_val = Value.new(.{ .string = key }, 0);
     const index_val = Value.new(.{ .uint = index }, 0);
 
-    try func_scope.store("key", key_val);
-    try func_scope.store("value", item);
-    try func_scope.store("index", Value.new(.{ .uint = index }, 0));
+    try func_scope.map.put("key", key_val);
+    try func_scope.map.put("value", item);
+    try func_scope.map.put("index", Value.new(.{ .uint = index }, 0));
 
-    if (func.ty.func.params.len > 0) try func_scope.store(func.ty.func.params[0], key_val);
-    if (func.ty.func.params.len > 1) try func_scope.store(func.ty.func.params[1], item);
-    if (func.ty.func.params.len > 2) try func_scope.store(func.ty.func.params[2], index_val);
+    if (func.ty.func.params.len > 0) try func_scope.map.put(func.ty.func.params[0], key_val);
+    if (func.ty.func.params.len > 1) try func_scope.map.put(func.ty.func.params[1], item);
+    if (func.ty.func.params.len > 2) try func_scope.map.put(func.ty.func.params[2], index_val);
 
     return self.evalPredicate(func.ty.func.instructions, func_scope);
 }
@@ -1862,7 +1861,7 @@ fn evalPredicate(self: *Vm, instructions: []const u8, func_scope: Scope) anyerro
     //defer vm_arena.deinit();
     //const vm_allocator = vm_arena.allocator();
 
-    _ = try self.scope_stack.push(func_scope);
+    _ = try self.pushScope(func_scope);
 
     var vm = try init(
         self.allocator,
@@ -1873,7 +1872,7 @@ fn evalPredicate(self: *Vm, instructions: []const u8, func_scope: Scope) anyerro
     );
     try vm.run();
 
-    _ = self.scope_stack.pop();
+    _ = self.popScope();
     //used_func_scope.deinit();
 
     return vm.last_popped;
@@ -1886,49 +1885,10 @@ fn pushScope(self: *Vm, scope: Scope) !void {
 }
 
 fn popScope(self: *Vm) Scope {
-    std.debug.assert(self.scope_stack.stack.items.len > 1);
-    var old_scope = self.scope_stack.pop();
-    return old_scope;
+    return self.scope_stack.pop();
 }
 
 // Helpers
-
-pub fn addBuiltins(scope: *Scope) anyerror!void {
-    try scope.store("atan2", Value.new(.{ .builtin = .atan2 }, 0));
-    try scope.store("chars", Value.new(.{ .builtin = .chars }, 0));
-    try scope.store("contains", Value.new(.{ .builtin = .contains }, 0));
-    try scope.store("cos", Value.new(.{ .builtin = .cos }, 0));
-    try scope.store("each", Value.new(.{ .builtin = .each }, 0));
-    try scope.store("endsWith", Value.new(.{ .builtin = .endsWith }, 0));
-    try scope.store("exp", Value.new(.{ .builtin = .exp }, 0));
-    try scope.store("filter", Value.new(.{ .builtin = .filter }, 0));
-    try scope.store("int", Value.new(.{ .builtin = .int }, 0));
-    try scope.store("indexOf", Value.new(.{ .builtin = .indexOf }, 0));
-    try scope.store("join", Value.new(.{ .builtin = .join }, 0));
-    try scope.store("keys", Value.new(.{ .builtin = .keys }, 0));
-    try scope.store("lastIndexOf", Value.new(.{ .builtin = .lastIndexOf }, 0));
-    try scope.store("len", Value.new(.{ .builtin = .len }, 0));
-    try scope.store("log", Value.new(.{ .builtin = .log }, 0));
-    try scope.store("map", Value.new(.{ .builtin = .map }, 0));
-    try scope.store("max", Value.new(.{ .builtin = .max }, 0));
-    try scope.store("mean", Value.new(.{ .builtin = .mean }, 0));
-    try scope.store("median", Value.new(.{ .builtin = .median }, 0));
-    try scope.store("min", Value.new(.{ .builtin = .min }, 0));
-    try scope.store("mode", Value.new(.{ .builtin = .mode }, 0));
-    try scope.store("print", Value.new(.{ .builtin = .print }, 0));
-    try scope.store("pop", Value.new(.{ .builtin = .pop }, 0));
-    try scope.store("push", Value.new(.{ .builtin = .push }, 0));
-    try scope.store("rand", Value.new(.{ .builtin = .rand }, 0));
-    try scope.store("reduce", Value.new(.{ .builtin = .reduce }, 0));
-    try scope.store("reverse", Value.new(.{ .builtin = .reverse }, 0));
-    try scope.store("sin", Value.new(.{ .builtin = .sin }, 0));
-    try scope.store("sort", Value.new(.{ .builtin = .sort }, 0));
-    try scope.store("split", Value.new(.{ .builtin = .split }, 0));
-    try scope.store("sqrt", Value.new(.{ .builtin = .sqrt }, 0));
-    try scope.store("startsWith", Value.new(.{ .builtin = .startsWith }, 0));
-    try scope.store("stdev", Value.new(.{ .builtin = .stdev }, 0));
-    try scope.store("values", Value.new(.{ .builtin = .values }, 0));
-}
 
 fn isTruthy(value: Value) bool {
     return switch (value.ty) {
@@ -2000,15 +1960,12 @@ fn testVmValue(allocator: std.mem.Allocator, input: []const u8) !Value {
     for (program.rules) |n| try compiler.compile(n);
 
     var scope_stack = ScopeStack.init(allocator);
-    try scope_stack.push(Scope.init(allocator, .block));
-    try Vm.addBuiltins(scope_stack.head());
-
     var output = std.ArrayList(u8).init(allocator);
 
     var vm = try init(
         allocator,
         compiler.instructions.items,
-        scope_stack,
+        &scope_stack,
         ctx,
         &output,
     );

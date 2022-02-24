@@ -17,12 +17,6 @@ fn printUsage() !void {
 }
 
 pub fn main() anyerror!void {
-    // Set defaults for field and record globals.
-    const ifs = ",";
-    const irs = "\n";
-    const ofs = ",";
-    const ors = "\n";
-
     // Allocation
     //var allocator = std.testing.allocator;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -55,8 +49,10 @@ pub fn main() anyerror!void {
     // Context
     const ctx = Context{ .filename = program_filename, .src = program_src };
 
+    // Lex
     var lexer = Lexer{ .allocator = compiler_allocator, .ctx = ctx };
     const tokens = try lexer.lex();
+    // Parse
     var parser = Parser{
         .allocator = compiler_allocator,
         .ctx = ctx,
@@ -64,68 +60,44 @@ pub fn main() anyerror!void {
     };
     const program = try parser.parse();
 
-    // Backend
+    // Backend / Compile to bytecode
     var compiler = try Compiler.init(compiler_allocator);
-    for (program.rules) |n| try compiler.compile(n);
     const compiled = try compiler.compileProgram(static_allocator, program);
     compiler_arena.deinit();
 
-    // Program global scope
+    // Program scope stack with global scope
     var scope_stack = ScopeStack.init(static_allocator);
-    try scope_stack.push(Scope.init(static_allocator, .function));
-    const global_scope = scope_stack.head();
-    try Vm.addBuiltins(global_scope);
-
-    // Some global state
-    try global_scope.store("@ifs", Value.new(.{ .string = ifs }, 0));
-    try global_scope.store("@irs", Value.new(.{ .string = irs }, 0));
-    try global_scope.store("@ofs", Value.new(.{ .string = ofs }, 0));
-    try global_scope.store("@ors", Value.new(.{ .string = ors }, 0));
-
-    // Ranges map init.
-    global_scope.rec_ranges = std.AutoHashMap(u8, void).init(static_allocator);
 
     // Init blocks
-    //var inits_arena = std.heap.ArenaAllocator.init(allocator);
-    //errdefer inits_arena.deinit();
-    //const inits_allocator = inits_arena.allocator();
+    var inits_arena = std.heap.ArenaAllocator.init(allocator);
+    errdefer inits_arena.deinit();
     var inits_vm = try Vm.init(
-        static_allocator,
+        inits_arena.allocator(),
         compiled[0],
-        scope_stack,
+        &scope_stack,
         ctx,
         &output,
     );
-    inits_vm.run() catch |err| {
-        std.log.err("Error executing onInit blocks: {}.", .{err});
-        return err;
-    };
-    //inits_arena.deinit();
-
-    // Global record numbering
-    var rnum: usize = 1;
+    try inits_vm.run();
+    inits_arena.deinit();
 
     // Loop over input files.
     while (args.next()) |filename| {
         // Filename
-        try global_scope.store("@file", Value.new(.{ .string = filename }, 0));
+        scope_stack.file = filename;
 
         // onFile
-        //var files_arena = std.heap.ArenaAllocator.init(allocator);
-        //errdefer files_arena.deinit();
-        //const files_allocator = files_arena.allocator();
+        var files_arena = std.heap.ArenaAllocator.init(allocator);
+        errdefer files_arena.deinit();
         var files_vm = try Vm.init(
-            static_allocator,
+            files_arena.allocator(),
             compiled[1],
-            scope_stack,
+            &scope_stack,
             ctx,
             &output,
         );
-        files_vm.run() catch |err| {
-            std.log.err("Error executing onFile blocls: {}.", .{err});
-            return err;
-        };
-        //files_arena.deinit();
+        try files_vm.run();
+        files_arena.deinit();
 
         // Data file
         var data_file: std.fs.File = undefined;
@@ -139,61 +111,49 @@ pub fn main() anyerror!void {
         var data_reader = std.io.bufferedReader(data_file.reader()).reader();
 
         // File record numbering
-        var frnum: usize = 1;
+        scope_stack.frnum = 1;
 
         // Loop over records.
-        while (try data_reader.readUntilDelimiterOrEof(&global_scope.rec_buf, global_scope.map.get("@irs").?.ty.string[0])) |record| : ({
-            rnum += 1;
-            frnum += 1;
+        while (try data_reader.readUntilDelimiterOrEof(&scope_stack.rec_buf, scope_stack.irs[0])) |record| : ({
+            scope_stack.rnum += 1;
+            scope_stack.frnum += 1;
         }) {
-            //var recs_arena = std.heap.ArenaAllocator.init(allocator);
-            //defer recs_arena.deinit();
-            //const recs_allocator = recs_arena.allocator();
-
-            // Record vars
-            try global_scope.store("@rnum", Value.new(.{ .uint = rnum }, 0));
-            try global_scope.store("@frnum", Value.new(.{ .uint = frnum }, 0));
-            global_scope.record = record;
+            var recs_arena = std.heap.ArenaAllocator.init(allocator);
+            defer recs_arena.deinit();
+            const recs_allocator = recs_arena.allocator();
+            //
+            scope_stack.record = record;
 
             var recs_vm = try Vm.init(
-                static_allocator,
+                recs_allocator,
                 compiled[2],
-                scope_stack,
+                &scope_stack,
                 ctx,
                 &output,
             );
-            recs_vm.run() catch |err| {
-                std.log.err("Error executing onRec blocks: {}.", .{err});
-                return err;
-            };
+            try recs_vm.run();
 
             // New record, new fileds.
-            global_scope.columns = try static_allocator.create(std.ArrayList(Value));
-            defer static_allocator.destroy(global_scope.columns);
-            global_scope.columns.* = std.ArrayList(Value).init(static_allocator);
-            defer global_scope.columns.deinit();
+            scope_stack.columns = try recs_allocator.create(std.ArrayList(Value));
+            scope_stack.columns.* = std.ArrayList(Value).init(recs_allocator);
 
             // Loop over fields
-            var field_iter = std.mem.split(u8, global_scope.record, global_scope.map.get("@ifs").?.ty.string);
-            while (field_iter.next()) |field| try global_scope.columns.append(Value.new(.{ .string = field }, 0));
+            var field_iter = std.mem.split(u8, scope_stack.record, scope_stack.ifs);
+            while (field_iter.next()) |field| try scope_stack.columns.append(Value.new(.{ .string = field }, 0));
 
             // Eval the program
             var rules_vm = try Vm.init(
-                static_allocator,
+                recs_allocator,
                 compiled[3],
-                scope_stack,
+                &scope_stack,
                 ctx,
                 &output,
             );
             try rules_vm.run();
-            //rules_vm.run() catch |err| {
-            //    std.log.err("Error executing per-record rules: {}.", .{err});
-            //    return err;
-            //};
 
             // Output
             if (output.items.len != 0 and output.items.len != prev_output_len) {
-                try output.appendSlice(global_scope.map.get("@ors").?.ty.string);
+                try output.appendSlice(scope_stack.ors);
             }
 
             // To know if we have new output.
@@ -202,20 +162,16 @@ pub fn main() anyerror!void {
     }
 
     // Exit blocks
-    //var exits_arena = std.heap.ArenaAllocator.init(allocator);
-    //defer exits_arena.deinit();
-    //const exits_allocator = exits_arena.allocator();
+    var exits_arena = std.heap.ArenaAllocator.init(allocator);
+    defer exits_arena.deinit();
     var exits_vm = try Vm.init(
-        static_allocator,
+        exits_arena.allocator(),
         compiled[4],
-        scope_stack,
+        &scope_stack,
         ctx,
         &output,
     );
-    exits_vm.run() catch |err| {
-        std.log.err("Error executing onExit blocks: {}.", .{err});
-        return err;
-    };
+    try exits_vm.run();
 
     // Print hte output.
     _ = try std.io.getStdOut().writer().print("{s}", .{output.items});
