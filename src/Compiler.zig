@@ -49,6 +49,7 @@ pub const Opcode = enum {
     gte,
     eq,
     neq,
+    concat,
     // Prefix
     neg,
     not,
@@ -378,6 +379,7 @@ fn compileInfix(self: *Compiler, node: Node) anyerror!void {
         .op_gte => try self.pushInstruction(.gte),
         .op_eq => try self.pushInstruction(.eq),
         .op_neq => try self.pushInstruction(.neq),
+        .op_concat => try self.pushInstruction(.concat),
         else => unreachable,
     }
 

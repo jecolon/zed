@@ -222,6 +222,7 @@ fn infixFn(self: Parser) InfixFn {
         .op_neq,
         .kw_and,
         .kw_or,
+        .op_concat,
         => Parser.parseInfix,
 
         .punct_equals,

@@ -94,6 +94,7 @@ pub fn run(self: *Vm) !void {
             .mul => try self.execMul(),
             .div => try self.execDiv(),
             .mod => try self.execMod(),
+            .concat => try self.execConcat(),
             // Comparison
             .lt,
             .lte,
@@ -543,6 +544,25 @@ fn execEqNeq(self: *Vm, opcode: Compiler.Opcode) !void {
     var comparison = left.eql(right);
     if (opcode == .neq) comparison = !comparison;
     try self.value_stack.append(Value.new(.{ .boolean = comparison }, offset));
+}
+fn execConcat(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    if (left.ty != .string or right.ty != .string) return self.ctx.err(
+        "{s} ++ {s} ?",
+        .{ @tagName(left.ty), @tagName(right.ty) },
+        error.InvalidConcat,
+        offset,
+    );
+
+    var buf = try self.allocator.alloc(u8, left.ty.string.len + right.ty.string.len);
+    std.mem.copy(u8, buf, left.ty.string);
+    std.mem.copy(u8, buf[left.ty.string.len..], right.ty.string);
+    try self.value_stack.append(Value.new(.{ .string = buf }, offset));
 }
 
 fn execNot(self: *Vm) !void {
@@ -2109,6 +2129,12 @@ test "Vm infix" {
     got = try testVmValue(allocator, "(1 + 2) * 3 / 2 % 2 > 2");
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(false, got.ty.boolean);
+
+    got = try testVmValue(allocator,
+        \\"foo" ++ "bar"
+    );
+    try std.testing.expectEqual(Value.Tag.string, got.ty);
+    try std.testing.expectEqualStrings("foobar", got.ty.string);
 }
 
 test "Vm prefix" {
