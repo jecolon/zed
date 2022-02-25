@@ -64,6 +64,10 @@ pub const Opcode = enum {
     jump_false,
     // Record Range
     rec_range,
+    // Output redirection
+    redir,
+    // Printing
+    sprint,
 };
 
 const Index = struct {
@@ -163,6 +167,8 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         .loop_continue => try self.compileContinue(),
         // Record Range
         .rec_range => try self.compileRecRange(node),
+        // Output redirection
+        .redir => try self.compileRedir(node),
 
         else => unreachable,
     }
@@ -561,6 +567,28 @@ fn compileRecRange(self: *Compiler, node: Node) anyerror!void {
     if (action_instructions.len != 0) try self.pushSlice(action_instructions);
     try self.pushByte(@boolToInt(node.ty.rec_range.from != null));
     try self.pushByte(@boolToInt(node.ty.rec_range.to != null));
+}
+
+fn compileRedir(self: *Compiler, node: Node) anyerror!void {
+    if (node.ty.redir.expr.ty == .call and
+        node.ty.redir.expr.ty.call.callee.ty == .ident and
+        std.mem.eql(u8, node.ty.redir.expr.ty.call.callee.ty.ident, "print"))
+    {
+        const num_args = node.ty.redir.expr.ty.call.args.len;
+        var i: usize = 1;
+        while (i <= num_args) : (i += 1) try self.compile(node.ty.redir.expr.ty.call.args[num_args - i]);
+        try self.pushInstruction(.sprint);
+        try self.pushOffset(node.offset);
+        try self.pushByte(num_args);
+    } else {
+        try self.compile(node.ty.redir.expr.*);
+    }
+
+    try self.compile(node.ty.redir.file.*);
+
+    try self.pushInstruction(.redir);
+    try self.pushOffset(node.offset);
+    try self.pushByte(@boolToInt(node.ty.redir.clobber));
 }
 
 // Helpers

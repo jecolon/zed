@@ -113,9 +113,13 @@ pub fn run(self: *Vm) !void {
             .set => try self.execSet(),
             // Record Ranges
             .rec_range => try self.execRecRange(),
+            // Output redirection
+            .redir => try self.execRedir(),
+            // Printing
+            .sprint => try self.execSprint(),
 
             else => {
-                std.log.err("{s}", .{@tagName(opcode)});
+                std.log.err("{s}", .{@tagName(opcode)}); //TODO: Remove this.
                 unreachable;
             },
         }
@@ -327,7 +331,7 @@ fn execCall(self: *Vm) anyerror!void {
             .median => try self.listMedian(),
             .min => try self.listMin(),
             .mode => try self.listMode(),
-            .print => try self.print(self.output.writer()),
+            .print => try self.execPrint(),
             .pop => try self.listPop(),
             .push => try self.listPush(),
             .rand => try self.rand(),
@@ -999,7 +1003,7 @@ fn strChars(self: *Vm) anyerror!void {
     try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
     self.ip.* += 1;
 }
-fn print(self: *Vm, writer: anytype) anyerror!void {
+fn execPrint(self: *Vm) anyerror!void {
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
@@ -1008,6 +1012,7 @@ fn print(self: *Vm, writer: anytype) anyerror!void {
     const num_args = self.instructions[self.ip.*];
     self.ip.* += 1;
 
+    var writer = self.output.writer();
     var i: usize = 0;
     while (i < num_args) : (i += 1) {
         if (i != 0) try writer.writeAll(self.scope_stack.ofs);
@@ -1015,6 +1020,26 @@ fn print(self: *Vm, writer: anytype) anyerror!void {
     }
 
     try self.value_stack.append(Value.new(.nil, offset));
+}
+fn execSprint(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    // Get args count.
+    const num_args = self.instructions[self.ip.*];
+    self.ip.* += 1;
+
+    var buf = std.ArrayList(u8).init(self.allocator);
+    var writer = buf.writer();
+
+    var i: usize = 0;
+    while (i < num_args) : (i += 1) {
+        if (i != 0) try writer.writeAll(self.scope_stack.ofs);
+        _ = try writer.print("{}", .{self.value_stack.pop()});
+    }
+
+    try self.value_stack.append(Value.new(.{ .string = buf.items }, offset));
 }
 fn oneArgMath(self: *Vm, builtin: Value) anyerror!void {
     self.ip.* += 1;
@@ -1896,6 +1921,42 @@ fn evalPredicate(self: *Vm, instructions: []const u8, func_scope: Scope) anyerro
     //used_func_scope.deinit();
 
     return vm.last_popped;
+}
+
+fn execRedir(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const clobber = self.instructions[self.ip.*] == 1;
+    self.ip.* += 1;
+
+    // Get filename
+    const filename = self.value_stack.pop();
+    if (filename.ty != .string) return self.ctx.err(
+        "Redirection filename must evaluate to a string",
+        .{},
+        error.InvalidRedirect,
+        offset,
+    );
+
+    // Open file
+    var create_flags: std.fs.File.CreateFlags = .{};
+    if (!clobber) create_flags.truncate = false;
+    var file = try std.fs.cwd().createFile(filename.ty.string, create_flags);
+    defer file.close();
+    if (!clobber) try file.seekFromEnd(0);
+
+    // Buffering
+    var file_buf = std.io.bufferedWriter(file.writer());
+    var writer = file_buf.writer();
+
+    // Write
+    const value = self.value_stack.pop();
+    _ = try writer.print("{}", .{value});
+    try file_buf.flush();
+
+    try self.value_stack.append(value);
 }
 
 // Scopes

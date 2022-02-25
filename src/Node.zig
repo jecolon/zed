@@ -26,6 +26,7 @@ pub const Type = union(enum) {
     prefix: Prefix,
     range: Range,
     rec_range: RecRange,
+    redir: Redir,
     subscript: Subscript,
 };
 
@@ -116,6 +117,12 @@ const RecRange = struct {
     action: []Node,
     id: u8,
     exclusive: bool,
+};
+
+const Redir = struct {
+    expr: *Node,
+    file: *Node,
+    clobber: bool,
 };
 
 pub const Ipol = struct {

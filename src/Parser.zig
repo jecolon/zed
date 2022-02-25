@@ -237,6 +237,7 @@ fn infixFn(self: Parser) InfixFn {
         .op_elvis => Parser.parseElvis,
         .op_elvis_eq => Parser.parseElvisAssign,
         .op_range_ex, .op_range_in => Parser.parseRange,
+        .op_redir_append, .op_redir_clobber => Parser.parseRedir,
 
         .punct_dot => Parser.parseBuiltin,
         .punct_lbracket => Parser.parseSubscript,
@@ -713,11 +714,14 @@ fn parseInfix(self: *Parser, left: Node) anyerror!Node {
         } },
         self.currentOffset(),
     );
-    try self.expectNext();
+
     node.ty.infix.right = try self.allocator.create(Node);
     var precedence = Precedence.forTag(node.ty.infix.op);
+
+    try self.expectNext();
     if (Precedence.isRightAssociative(node.ty.infix.op)) precedence.demote();
     node.ty.infix.right.* = try self.parseExpression(precedence);
+
     return node;
 }
 
@@ -867,6 +871,30 @@ fn parseRecRange(self: *Parser) anyerror!Node {
         node.ty.rec_range.action = try self.allocator.alloc(Node, 1);
         node.ty.rec_range.action[0] = try self.parseExpression(.lowest);
     }
+
+    return node;
+}
+
+fn parseRedir(self: *Parser, expr: Node) anyerror!Node {
+    const expr_ptr = try self.allocator.create(Node);
+    expr_ptr.* = expr;
+
+    const current_tag = self.currentTag();
+    var node = Node.new(
+        .{ .redir = .{
+            .expr = expr_ptr,
+            .file = undefined,
+            .clobber = current_tag == .op_redir_clobber,
+        } },
+        self.currentOffset(),
+    );
+
+    var precedence = Precedence.forTag(current_tag);
+    if (Precedence.isRightAssociative(current_tag)) precedence.demote();
+
+    try self.expectNext();
+    node.ty.redir.file = try self.allocator.create(Node);
+    node.ty.redir.file.* = try self.parseExpression(precedence);
 
     return node;
 }
