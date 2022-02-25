@@ -1769,14 +1769,13 @@ fn listReduce(self: *Vm) anyerror!void {
     }
 
     // Set up sub-VM arena.
-    //var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
-    //defer vm_arena.deinit();
-    //const vm_allocator = vm_arena.allocator();
+    var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer vm_arena.deinit();
+    const vm_allocator = vm_arena.allocator();
 
     for (l.ty.list.items) |item, i| {
         // Set up function scope.
-        var func_scope = Scope.init(self.allocator, .function);
-        //defer func_scope.deinit();
+        var func_scope = Scope.init(vm_allocator, .function);
 
         // Assign args as locals in function scope.
         try func_scope.map.put("acc", acc);
@@ -1789,7 +1788,7 @@ fn listReduce(self: *Vm) anyerror!void {
         _ = try self.pushScope(func_scope);
 
         var vm = try init(
-            self.allocator,
+            vm_allocator,
             f.ty.func.instructions,
             self.scope_stack,
             self.ctx,
@@ -1902,14 +1901,14 @@ fn evalMapPredicate(self: *Vm, func: Value, key: []const u8, item: Value, index:
 
 fn evalPredicate(self: *Vm, instructions: []const u8, func_scope: Scope) anyerror!Value {
     // Set up Sub-VM arena.
-    //var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
-    //defer vm_arena.deinit();
-    //const vm_allocator = vm_arena.allocator();
+    var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer vm_arena.deinit();
+    const vm_allocator = vm_arena.allocator();
 
     _ = try self.pushScope(func_scope);
 
     var vm = try init(
-        self.allocator,
+        vm_allocator,
         instructions,
         self.scope_stack,
         self.ctx,
@@ -1918,7 +1917,6 @@ fn evalPredicate(self: *Vm, instructions: []const u8, func_scope: Scope) anyerro
     try vm.run();
 
     _ = self.popScope();
-    //used_func_scope.deinit();
 
     return vm.last_popped;
 }
