@@ -848,16 +848,16 @@ fn execRecRange(self: *Vm) anyerror!void {
     const to = if (has_to) self.value_stack.pop() else nil_value;
 
     var result = nil_value;
-    var eval_action = false;
+    var exec_action = false;
 
     if (self.scope_stack.rec_ranges.contains(range_id)) {
         // In range
-        eval_action = true;
+        exec_action = true;
 
         if (isTruthy(to)) {
             // Range end.
             _ = self.scope_stack.rec_ranges.remove(range_id);
-            if (exclusive) eval_action = false;
+            if (exclusive) exec_action = false;
         }
     } else {
         // Not in range
@@ -875,11 +875,11 @@ fn execRecRange(self: *Vm) anyerror!void {
         if (start_range) {
             // We start a new range.
             try self.scope_stack.rec_ranges.put(range_id, {});
-            eval_action = true;
+            exec_action = true;
         }
     }
 
-    if (eval_action) {
+    if (exec_action) {
         if (len != 0) {
             var vm = try init(
                 self.allocator,
@@ -1657,7 +1657,7 @@ fn listMap(self: *Vm) anyerror!void {
     list_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, l.ty.list.items.len);
 
     for (l.ty.list.items) |item, i| {
-        const v = try self.evalListPredicate(f, item, i);
+        const v = try self.execListPredicate(f, item, i);
         list_ptr.appendAssumeCapacity(v);
     }
 
@@ -1689,7 +1689,7 @@ fn listFilter(self: *Vm) anyerror!void {
     list_ptr.* = std.ArrayList(Value).init(self.allocator);
 
     for (l.ty.list.items) |item, i| {
-        const v = try self.evalListPredicate(f, item, i);
+        const v = try self.execListPredicate(f, item, i);
         if (isTruthy(v)) try list_ptr.append(item);
     }
 
@@ -1730,11 +1730,11 @@ fn each(self: *Vm) anyerror!void {
     }
 
     if (container.ty == .list) {
-        for (container.ty.list.items) |item, i| _ = try self.evalListPredicate(f, item, i);
+        for (container.ty.list.items) |item, i| _ = try self.execListPredicate(f, item, i);
     } else {
         var iter = container.ty.map.iterator();
         var i: usize = 0;
-        while (iter.next()) |entry| : (i += 1) _ = try self.evalMapPredicate(f, entry.key_ptr.*, entry.value_ptr.*, i);
+        while (iter.next()) |entry| : (i += 1) _ = try self.execMapPredicate(f, entry.key_ptr.*, entry.value_ptr.*, i);
     }
 
     try self.value_stack.append(container);
@@ -1866,7 +1866,7 @@ fn listPop(self: *Vm) anyerror!void {
     self.ip.* += 1;
 }
 
-fn evalListPredicate(self: *Vm, func: Value, item: Value, index: usize) anyerror!Value {
+fn execListPredicate(self: *Vm, func: Value, item: Value, index: usize) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function);
 
@@ -1878,10 +1878,10 @@ fn evalListPredicate(self: *Vm, func: Value, item: Value, index: usize) anyerror
     if (func.ty.func.params.len > 0) try func_scope.map.put(func.ty.func.params[0], item);
     if (func.ty.func.params.len > 1) try func_scope.map.put(func.ty.func.params[1], index_val);
 
-    return self.evalPredicate(func.ty.func.instructions, func_scope);
+    return self.execPredicate(func.ty.func.instructions, func_scope);
 }
 
-fn evalMapPredicate(self: *Vm, func: Value, key: []const u8, item: Value, index: usize) anyerror!Value {
+fn execMapPredicate(self: *Vm, func: Value, key: []const u8, item: Value, index: usize) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function);
 
@@ -1896,10 +1896,10 @@ fn evalMapPredicate(self: *Vm, func: Value, key: []const u8, item: Value, index:
     if (func.ty.func.params.len > 1) try func_scope.map.put(func.ty.func.params[1], item);
     if (func.ty.func.params.len > 2) try func_scope.map.put(func.ty.func.params[2], index_val);
 
-    return self.evalPredicate(func.ty.func.instructions, func_scope);
+    return self.execPredicate(func.ty.func.instructions, func_scope);
 }
 
-fn evalPredicate(self: *Vm, instructions: []const u8, func_scope: Scope) anyerror!Value {
+fn execPredicate(self: *Vm, instructions: []const u8, func_scope: Scope) anyerror!Value {
     // Set up Sub-VM arena.
     var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
     defer vm_arena.deinit();

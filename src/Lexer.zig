@@ -106,6 +106,7 @@ fn lexIdent(self: *Lexer) Token {
 }
 
 fn lexNumber(self: *Lexer, byte: u8) Token {
+    //TODO: Fix 1+1
     if ('+' == byte) {
         // Plus is special
         var token = self.oneChar(.punct_plus);
@@ -146,7 +147,10 @@ fn lexNumber(self: *Lexer, byte: u8) Token {
     const start = self.offset.?;
 
     while (self.peek()) |peek_byte| {
+        const current_byte = self.ctx.src[self.offset.?];
         if ('.' == peek_byte and self.peekNIs(2, '.')) break;
+        if (('+' == peek_byte or '-' == peek_byte) and
+            ('e' != current_byte and 'p' != current_byte)) break;
         if (!isNumeric(peek_byte)) break;
         _ = self.advance();
     }
@@ -497,6 +501,21 @@ test "Lex float" {
     var tokens = try testLex(allocator, "3.14e+00");
     defer tokens.deinit(allocator);
     try singleTokenTests(tokens, .float, 8);
+}
+
+test "Lex 1+1" {
+    const allocator = std.testing.allocator;
+    var lexer = Lexer{ .allocator = allocator, .ctx = Context{ .filename = "inline", .src = "1+1" } };
+    var tokens = try lexer.lex();
+    defer tokens.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), tokens.items(.tag).len);
+    try std.testing.expectEqual(Token.Tag.uint, tokens.items(.tag)[0]);
+    try std.testing.expectEqual(@as(u16, 0), tokens.items(.offset)[0]);
+    try std.testing.expectEqual(@as(usize, 1), tokens.items(.len)[0]);
+    try std.testing.expectEqual(Token.Tag.int, tokens.items(.tag)[1]);
+    try std.testing.expectEqual(@as(u16, 1), tokens.items(.offset)[1]);
+    try std.testing.expectEqual(@as(usize, 2), tokens.items(.len)[1]);
 }
 
 test "Lex int" {
