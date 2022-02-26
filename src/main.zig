@@ -19,9 +19,7 @@ fn printUsage() !void {
 pub fn main() anyerror!void {
     // Allocation
     //var allocator = std.testing.allocator;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = std.heap.page_allocator;
 
     var static_arena = std.heap.ArenaAllocator.init(allocator);
     defer static_arena.deinit();
@@ -68,7 +66,7 @@ pub fn main() anyerror!void {
     // Program scope stack with global scope
     var scope_stack = ScopeStack.init(static_allocator);
 
-    // Init blocks
+    // onInit
     var inits_arena = std.heap.ArenaAllocator.init(allocator);
     errdefer inits_arena.deinit();
     var inits_vm = try Vm.init(
@@ -124,6 +122,7 @@ pub fn main() anyerror!void {
             //
             scope_stack.record = record;
 
+            // onRec
             var recs_vm = try Vm.init(
                 recs_allocator,
                 compiled[2],
@@ -141,7 +140,7 @@ pub fn main() anyerror!void {
             var field_iter = std.mem.split(u8, scope_stack.record, scope_stack.ifs);
             while (field_iter.next()) |field| try scope_stack.columns.append(Value.new(.{ .string = field }, 0));
 
-            // Eval the program
+            // For each record, exec the rules.
             var rules_vm = try Vm.init(
                 recs_allocator,
                 compiled[3],
@@ -161,7 +160,7 @@ pub fn main() anyerror!void {
         }
     }
 
-    // Exit blocks
+    // onExit
     var exits_arena = std.heap.ArenaAllocator.init(allocator);
     defer exits_arena.deinit();
     var exits_vm = try Vm.init(
