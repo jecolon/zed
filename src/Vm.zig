@@ -322,6 +322,8 @@ fn execCall(self: *Vm) anyerror!void {
             .indexOf => try self.indexOf(),
             .int => try self.oneArgMath(callee),
             .keys => try self.mapKeys(),
+            .keysByValueAsc => try self.mapKeysByValueAsc(),
+            .keysByValueDesc => try self.mapKeysByValueDesc(),
             .lastIndexOf => try self.lastIndexOf(),
             .len => try self.length(),
             .log => try self.oneArgMath(callee),
@@ -338,7 +340,8 @@ fn execCall(self: *Vm) anyerror!void {
             .reduce => try self.listReduce(),
             .reverse => try self.listReverse(),
             .sin => try self.oneArgMath(callee),
-            .sort => try self.listSort(),
+            .sortAsc => try self.listSortAsc(),
+            .sortDesc => try self.listSortDesc(),
             .split => try self.strSplit(),
             .sqrt => try self.oneArgMath(callee),
             .startsWith => try self.strStartsWith(),
@@ -1253,6 +1256,89 @@ fn mapKeys(self: *Vm) anyerror!void {
     try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
     self.ip.* += 1;
 }
+
+fn entryAsc(_: void, a: std.StringHashMap(Value).Entry, b: std.StringHashMap(Value).Entry) bool {
+    return a.value_ptr.cmp(b.value_ptr.*) catch unreachable == .lt;
+}
+fn entryDesc(_: void, a: std.StringHashMap(Value).Entry, b: std.StringHashMap(Value).Entry) bool {
+    return a.value_ptr.cmp(b.value_ptr.*) catch unreachable == .gt;
+}
+
+fn mapKeysByValueAsc(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const m = self.value_stack.pop();
+    if (m.ty != .map) return self.ctx.err(
+        "keysByValueAsc not allowed on {s}.",
+        .{@tagName(m.ty)},
+        error.InvalidKeysByValueAsc,
+        offset,
+    );
+
+    const keys_ptr = try self.allocator.create(std.ArrayList(Value));
+
+    if (m.ty.map.count() == 0) {
+        keys_ptr.* = std.ArrayList(Value).init(self.allocator);
+        try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
+        self.ip.* += 1;
+        return;
+    }
+
+    keys_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
+
+    var entries = try std.ArrayList(std.StringHashMap(Value).Entry).initCapacity(self.allocator, m.ty.map.count());
+    defer entries.deinit();
+
+    var iter = m.ty.map.iterator();
+    while (iter.next()) |entry| entries.appendAssumeCapacity(entry);
+
+    std.sort.sort(std.StringHashMap(Value).Entry, entries.items, {}, entryAsc);
+
+    for (entries.items) |entry| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr.* }, offset));
+
+    try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
+    self.ip.* += 1; // num_args
+}
+fn mapKeysByValueDesc(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const m = self.value_stack.pop();
+    if (m.ty != .map) return self.ctx.err(
+        "keysByValueDesc not allowed on {s}.",
+        .{@tagName(m.ty)},
+        error.InvalidKeysByValueDesc,
+        offset,
+    );
+
+    const keys_ptr = try self.allocator.create(std.ArrayList(Value));
+
+    if (m.ty.map.count() == 0) {
+        keys_ptr.* = std.ArrayList(Value).init(self.allocator);
+        try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
+        self.ip.* += 1;
+        return;
+    }
+
+    keys_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
+
+    var entries = try std.ArrayList(std.StringHashMap(Value).Entry).initCapacity(self.allocator, m.ty.map.count());
+    defer entries.deinit();
+
+    var iter = m.ty.map.iterator();
+    while (iter.next()) |entry| entries.appendAssumeCapacity(entry);
+
+    std.sort.sort(std.StringHashMap(Value).Entry, entries.items, {}, entryDesc);
+
+    for (entries.items) |entry| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr.* }, offset));
+
+    try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
+    self.ip.* += 1; // num_args
+}
+
 fn mapValues(self: *Vm) anyerror!void {
     self.ip.* += 1;
     const offset = self.getOffset();
@@ -1487,16 +1573,16 @@ fn listMax(self: *Vm) anyerror!void {
     try self.value_stack.append(max);
     self.ip.* += 1;
 }
-fn listSort(self: *Vm) anyerror!void {
+fn listSortAsc(self: *Vm) anyerror!void {
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
     if (l.ty != .list) return self.ctx.err(
-        "sort not allowed on {s}.",
+        "sortAsc not allowed on {s}.",
         .{@tagName(l.ty)},
-        error.InvalidSort,
+        error.InvalidSortAsc,
         offset,
     );
 
@@ -1507,6 +1593,29 @@ fn listSort(self: *Vm) anyerror!void {
     }
 
     std.sort.sort(Value, l.ty.list.items, {}, Value.lessThan);
+    try self.value_stack.append(l);
+    self.ip.* += 1;
+}
+fn listSortDesc(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    if (l.ty != .list) return self.ctx.err(
+        "sortDesc not allowed on {s}.",
+        .{@tagName(l.ty)},
+        error.InvalidSortDesc,
+        offset,
+    );
+
+    if (l.ty.list.items.len == 0) {
+        try self.value_stack.append(l);
+        self.ip.* += 1;
+        return;
+    }
+
+    std.sort.sort(Value, l.ty.list.items, {}, Value.greaterThan);
     try self.value_stack.append(l);
     self.ip.* += 1;
 }
@@ -2478,6 +2587,16 @@ test "Vm method builtins" {
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
     got = try testVmValue(allocator,
+        \\["a": 3, "b": 2, "c": 1].keysByValueAsc()[0]
+    );
+    try std.testing.expectEqual(Value.Tag.string, got.ty);
+    try std.testing.expectEqualStrings("c", got.ty.string);
+    got = try testVmValue(allocator,
+        \\["a": 3, "b": 2, "c": 1].keysByValueDesc()[0]
+    );
+    try std.testing.expectEqual(Value.Tag.string, got.ty);
+    try std.testing.expectEqualStrings("a", got.ty.string);
+    got = try testVmValue(allocator,
         \\["a": 1, "b": 2, "c": 3].values().len()
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
@@ -2505,9 +2624,12 @@ test "Vm method builtins" {
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("B", got.ty.string);
-    got = try testVmValue(allocator, "[2, 3, 1].sort()[0]");
+    got = try testVmValue(allocator, "[2, 3, 1].sortAsc()[0]");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 1), got.ty.uint);
+    got = try testVmValue(allocator, "[2, 3, 1].sortDesc()[0]");
+    try std.testing.expectEqual(Value.Tag.uint, got.ty);
+    try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
     got = try testVmValue(allocator, "[2, 3, 1].reverse()[0]");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 1), got.ty.uint);

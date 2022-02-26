@@ -15,6 +15,8 @@ const Builtin = enum {
     int,
     join,
     keys,
+    keysByValueAsc,
+    keysByValueDesc,
     lastIndexOf,
     len,
     log,
@@ -31,7 +33,8 @@ const Builtin = enum {
     reduce,
     reverse,
     sin,
-    sort,
+    sortAsc,
+    sortDesc,
     sqrt,
     split,
     startsWith,
@@ -546,4 +549,7 @@ pub fn cmp(self: Value, other: Value) anyerror!std.math.Order {
 
 pub fn lessThan(_: void, a: Value, b: Value) bool {
     return a.cmp(b) catch unreachable == .lt;
+}
+pub fn greaterThan(_: void, a: Value, b: Value) bool {
+    return a.cmp(b) catch unreachable == .gt;
 }
