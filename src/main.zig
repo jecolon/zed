@@ -5,7 +5,6 @@ const Context = @import("Context.zig");
 const Lexer = @import("Lexer.zig");
 const Node = @import("Node.zig");
 const Parser = @import("Parser.zig");
-//const Program = @import("Node.zig").Program;
 const Scope = @import("Scope.zig");
 const ScopeStack = @import("ScopeStack.zig");
 const Value = @import("Value.zig");
@@ -33,38 +32,54 @@ pub fn main() anyerror!void {
     const program_filename = args.next() orelse return printUsage();
     var program_file = try std.fs.cwd().openFile(program_filename, .{});
     defer program_file.close();
-    const program_src = try program_file.readToEndAlloc(static_allocator, 1024 * 64); // 64K
+
+    // Context
+    var ctx = Context{ .filename = program_filename, .src = undefined };
+
+    // Frontend
+    var compiled: [5][]const u8 = undefined;
+
+    if (std.mem.endsWith(u8, program_filename, ".zbc")) {
+        var i: usize = 0;
+        while (i < 5) : (i += 1) {
+            var bytes_len_buf: [2]u8 = undefined;
+            _ = try program_file.readAll(&bytes_len_buf);
+            const bytes_len = std.mem.bytesAsValue(u16, &bytes_len_buf);
+            var bytes_buf = try static_allocator.alloc(u8, bytes_len.*);
+            _ = try program_file.readAll(bytes_buf);
+            compiled[i] = bytes_buf;
+        }
+    } else {
+        const program_src = try program_file.readToEndAlloc(static_allocator, 1024 * 64); // 64K
+        ctx.src = program_src;
+
+        var compiler_arena = std.heap.ArenaAllocator.init(allocator);
+        errdefer compiler_arena.deinit();
+        const compiler_allocator = compiler_arena.allocator();
+
+        // Lex
+        var lexer = Lexer{ .allocator = compiler_allocator, .ctx = ctx };
+        const tokens = try lexer.lex();
+        // Parse
+        var parser = Parser{
+            .allocator = compiler_allocator,
+            .ctx = ctx,
+            .tokens = tokens,
+        };
+        const program = try parser.parse();
+
+        // Backend / Compile to bytecode
+        var compiler = try Compiler.init(compiler_allocator);
+        compiled = try compiler.compileProgram(static_allocator, program);
+        compiler_arena.deinit();
+    }
+
+    // Program scope stack with global scope
+    var scope_stack = ScopeStack.init(static_allocator);
 
     // Output change check
     var output = std.ArrayList(u8).init(static_allocator);
     var prev_output_len: usize = 0;
-
-    // Frontend
-    var compiler_arena = std.heap.ArenaAllocator.init(allocator);
-    errdefer compiler_arena.deinit();
-    const compiler_allocator = compiler_arena.allocator();
-
-    // Context
-    const ctx = Context{ .filename = program_filename, .src = program_src };
-
-    // Lex
-    var lexer = Lexer{ .allocator = compiler_allocator, .ctx = ctx };
-    const tokens = try lexer.lex();
-    // Parse
-    var parser = Parser{
-        .allocator = compiler_allocator,
-        .ctx = ctx,
-        .tokens = tokens,
-    };
-    const program = try parser.parse();
-
-    // Backend / Compile to bytecode
-    var compiler = try Compiler.init(compiler_allocator);
-    const compiled = try compiler.compileProgram(static_allocator, program);
-    compiler_arena.deinit();
-
-    // Program scope stack with global scope
-    var scope_stack = ScopeStack.init(static_allocator);
 
     // onInit
     var inits_arena = std.heap.ArenaAllocator.init(allocator);
