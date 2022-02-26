@@ -24,6 +24,9 @@ pub fn main() anyerror!void {
     defer static_arena.deinit();
     const static_allocator = static_arena.allocator();
 
+    var tmp_arena = std.heap.ArenaAllocator.init(allocator);
+    errdefer tmp_arena.deinit();
+
     // Command line args.
     var args = try std.process.argsWithAllocator(allocator);
     _ = args.skip(); // skip program name.
@@ -53,25 +56,21 @@ pub fn main() anyerror!void {
         const program_src = try program_file.readToEndAlloc(static_allocator, 1024 * 64); // 64K
         ctx.src = program_src;
 
-        var compiler_arena = std.heap.ArenaAllocator.init(allocator);
-        errdefer compiler_arena.deinit();
-        const compiler_allocator = compiler_arena.allocator();
-
         // Lex
-        var lexer = Lexer{ .allocator = compiler_allocator, .ctx = ctx };
+        var lexer = Lexer{ .allocator = tmp_arena.allocator(), .ctx = ctx };
         const tokens = try lexer.lex();
         // Parse
         var parser = Parser{
-            .allocator = compiler_allocator,
+            .allocator = tmp_arena.allocator(),
             .ctx = ctx,
             .tokens = tokens,
         };
         const program = try parser.parse();
 
         // Backend / Compile to bytecode
-        var compiler = try Compiler.init(compiler_allocator);
+        var compiler = try Compiler.init(tmp_arena.allocator());
         compiled = try compiler.compileProgram(static_allocator, program);
-        compiler_arena.deinit();
+        tmp_arena.deinit();
     }
 
     // Program scope stack with global scope
@@ -82,17 +81,16 @@ pub fn main() anyerror!void {
     var prev_output_len: usize = 0;
 
     // onInit
-    var inits_arena = std.heap.ArenaAllocator.init(allocator);
-    errdefer inits_arena.deinit();
+    tmp_arena = std.heap.ArenaAllocator.init(allocator);
     var inits_vm = try Vm.init(
-        inits_arena.allocator(),
+        tmp_arena.allocator(),
         compiled[0],
         &scope_stack,
         ctx,
         &output,
     );
     try inits_vm.run();
-    inits_arena.deinit();
+    tmp_arena.deinit();
 
     // Loop over input files.
     while (args.next()) |filename| {
@@ -100,17 +98,16 @@ pub fn main() anyerror!void {
         scope_stack.file = filename;
 
         // onFile
-        var files_arena = std.heap.ArenaAllocator.init(allocator);
-        errdefer files_arena.deinit();
+        tmp_arena = std.heap.ArenaAllocator.init(allocator);
         var files_vm = try Vm.init(
-            files_arena.allocator(),
+            tmp_arena.allocator(),
             compiled[1],
             &scope_stack,
             ctx,
             &output,
         );
         try files_vm.run();
-        files_arena.deinit();
+        tmp_arena.deinit();
 
         // Data file
         var data_file: std.fs.File = undefined;
@@ -131,15 +128,13 @@ pub fn main() anyerror!void {
             scope_stack.rnum += 1;
             scope_stack.frnum += 1;
         }) {
-            var recs_arena = std.heap.ArenaAllocator.init(allocator);
-            defer recs_arena.deinit();
-            const recs_allocator = recs_arena.allocator();
-            //
             scope_stack.record = record;
 
             // onRec
+            tmp_arena = std.heap.ArenaAllocator.init(allocator);
+            const tmp_allocator = tmp_arena.allocator();
             var recs_vm = try Vm.init(
-                recs_allocator,
+                tmp_allocator,
                 compiled[2],
                 &scope_stack,
                 ctx,
@@ -148,8 +143,8 @@ pub fn main() anyerror!void {
             try recs_vm.run();
 
             // New record, new fileds.
-            scope_stack.columns = try recs_allocator.create(std.ArrayList(Value));
-            scope_stack.columns.* = std.ArrayList(Value).init(recs_allocator);
+            scope_stack.columns = try tmp_allocator.create(std.ArrayList(Value));
+            scope_stack.columns.* = std.ArrayList(Value).init(tmp_allocator);
 
             // Loop over fields
             var field_iter = std.mem.split(u8, scope_stack.record, scope_stack.ifs);
@@ -157,13 +152,14 @@ pub fn main() anyerror!void {
 
             // For each record, exec the rules.
             var rules_vm = try Vm.init(
-                recs_allocator,
+                tmp_allocator,
                 compiled[3],
                 &scope_stack,
                 ctx,
                 &output,
             );
             try rules_vm.run();
+            tmp_arena.deinit();
 
             // Output
             if (output.items.len != 0 and output.items.len != prev_output_len) {
@@ -176,16 +172,16 @@ pub fn main() anyerror!void {
     }
 
     // onExit
-    var exits_arena = std.heap.ArenaAllocator.init(allocator);
-    defer exits_arena.deinit();
+    tmp_arena = std.heap.ArenaAllocator.init(allocator);
     var exits_vm = try Vm.init(
-        exits_arena.allocator(),
+        tmp_arena.allocator(),
         compiled[4],
         &scope_stack,
         ctx,
         &output,
     );
     try exits_vm.run();
+    tmp_arena.deinit();
 
     // Print hte output.
     _ = try std.io.getStdOut().writer().print("{s}", .{output.items});
