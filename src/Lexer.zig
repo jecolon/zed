@@ -213,7 +213,10 @@ fn lexOp(self: *Lexer, byte: u8) Token {
         '<' => self.lexCombineAssing(.punct_lt, .op_lte),
         '>' => self.lexCombineAssing(.punct_gt, .op_gte),
         '~' => self.lexCombineAssing(.punct_tilde, .op_xmatch),
-        '*' => self.lexCombineAssing(.punct_star, .op_mul_eq),
+        '*' => op: {
+            if (self.skipByte('*')) break :op self.twoChar(.op_repeat);
+            break :op self.lexCombineAssing(.punct_star, .op_mul_eq);
+        },
         '/' => self.lexCombineAssing(.punct_slash, .op_div_eq),
         '%' => self.lexCombineAssing(.punct_percent, .op_mod_eq),
         '.' => op: {

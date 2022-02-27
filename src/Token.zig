@@ -75,6 +75,7 @@ pub const Tag = enum {
     op_nomatch,
     op_range_ex,
     op_range_in,
+    op_repeat,
     op_sub_eq,
     op_redir_append,
     op_redir_clobber,

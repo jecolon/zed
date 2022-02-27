@@ -136,6 +136,7 @@ const Precedence = enum {
             .punct_star,
             .punct_slash,
             .punct_percent,
+            .op_repeat,
             => .product,
 
             .punct_dot => .mselect,
@@ -223,6 +224,7 @@ fn infixFn(self: Parser) InfixFn {
         .kw_and,
         .kw_or,
         .op_concat,
+        .op_repeat,
         => Parser.parseInfix,
 
         .punct_equals,

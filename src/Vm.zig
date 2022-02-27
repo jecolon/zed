@@ -96,6 +96,7 @@ pub fn run(self: *Vm) !void {
             .div => try self.execDiv(),
             .mod => try self.execMod(),
             .concat => try self.execConcat(),
+            .repeat => try self.execRepeat(),
             // Comparison
             .lt,
             .lte,
@@ -572,6 +573,25 @@ fn execConcat(self: *Vm) anyerror!void {
     var buf = try self.allocator.alloc(u8, left.ty.string.len + right.ty.string.len);
     std.mem.copy(u8, buf, left.ty.string);
     std.mem.copy(u8, buf[left.ty.string.len..], right.ty.string);
+    try self.value_stack.append(Value.new(.{ .string = buf }, offset));
+}
+fn execRepeat(self: *Vm) anyerror!void {
+    const right = self.value_stack.pop();
+    const left = self.value_stack.pop();
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    if (left.ty != .string or right.ty != .uint) return self.ctx.err(
+        "{s} ** {s} ?",
+        .{ @tagName(left.ty), @tagName(right.ty) },
+        error.InvalidRepeat,
+        offset,
+    );
+
+    var buf = try self.allocator.alloc(u8, left.ty.string.len * right.ty.uint);
+    var i: usize = 0;
+    while (i < right.ty.uint) : (i += 1) std.mem.copy(u8, buf[left.ty.string.len * i ..], left.ty.string);
     try self.value_stack.append(Value.new(.{ .string = buf }, offset));
 }
 
@@ -2355,6 +2375,12 @@ test "Vm infix" {
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("foobar", got.ty.string);
+
+    got = try testVmValue(allocator,
+        \\"-" ** 3
+    );
+    try std.testing.expectEqual(Value.Tag.string, got.ty);
+    try std.testing.expectEqualStrings("---", got.ty.string);
 }
 
 test "Vm prefix" {

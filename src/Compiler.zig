@@ -50,6 +50,7 @@ pub const Opcode = enum {
     eq,
     neq,
     concat,
+    repeat,
     // Prefix
     neg,
     not,
@@ -386,6 +387,7 @@ fn compileInfix(self: *Compiler, node: Node) anyerror!void {
         .op_eq => try self.pushInstruction(.eq),
         .op_neq => try self.pushInstruction(.neq),
         .op_concat => try self.pushInstruction(.concat),
+        .op_repeat => try self.pushInstruction(.repeat),
         else => unreachable,
     }
 
