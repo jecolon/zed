@@ -25,7 +25,8 @@ pub fn main() anyerror!void {
     const static_allocator = static_arena.allocator();
 
     var tmp_arena = std.heap.ArenaAllocator.init(allocator);
-    errdefer tmp_arena.deinit();
+    var need_tmp_deinit = true;
+    defer if (need_tmp_deinit) tmp_arena.deinit();
 
     // Command line args.
     var args = try std.process.argsWithAllocator(allocator);
@@ -71,6 +72,7 @@ pub fn main() anyerror!void {
         var compiler = try Compiler.init(tmp_arena.allocator());
         compiled = try compiler.compileProgram(static_allocator, program);
         tmp_arena.deinit();
+        need_tmp_deinit = false;
     }
 
     // Program scope stack with global scope
@@ -82,6 +84,7 @@ pub fn main() anyerror!void {
 
     // onInit
     tmp_arena = std.heap.ArenaAllocator.init(allocator);
+    need_tmp_deinit = true;
     var inits_vm = try Vm.init(
         tmp_arena.allocator(),
         compiled[0],
@@ -91,6 +94,7 @@ pub fn main() anyerror!void {
     );
     try inits_vm.run();
     tmp_arena.deinit();
+    need_tmp_deinit = false;
 
     // Loop over input files.
     while (args.next()) |filename| {
@@ -99,6 +103,7 @@ pub fn main() anyerror!void {
 
         // onFile
         tmp_arena = std.heap.ArenaAllocator.init(allocator);
+        need_tmp_deinit = true;
         var files_vm = try Vm.init(
             tmp_arena.allocator(),
             compiled[1],
@@ -108,6 +113,7 @@ pub fn main() anyerror!void {
         );
         try files_vm.run();
         tmp_arena.deinit();
+        need_tmp_deinit = false;
 
         // Data file
         var data_file: std.fs.File = undefined;
@@ -132,6 +138,7 @@ pub fn main() anyerror!void {
 
             // onRec
             tmp_arena = std.heap.ArenaAllocator.init(allocator);
+            need_tmp_deinit = true;
             const tmp_allocator = tmp_arena.allocator();
             var recs_vm = try Vm.init(
                 tmp_allocator,
@@ -160,6 +167,7 @@ pub fn main() anyerror!void {
             );
             try rules_vm.run();
             tmp_arena.deinit();
+            need_tmp_deinit = false;
 
             // Output
             if (output.items.len != 0 and output.items.len != prev_output_len) {
@@ -173,6 +181,7 @@ pub fn main() anyerror!void {
 
     // onExit
     tmp_arena = std.heap.ArenaAllocator.init(allocator);
+    need_tmp_deinit = true;
     var exits_vm = try Vm.init(
         tmp_arena.allocator(),
         compiled[4],
@@ -182,6 +191,7 @@ pub fn main() anyerror!void {
     );
     try exits_vm.run();
     tmp_arena.deinit();
+    need_tmp_deinit = false;
 
     // Print hte output.
     _ = try std.io.getStdOut().writer().print("{s}", .{output.items});

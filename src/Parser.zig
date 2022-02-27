@@ -348,6 +348,8 @@ fn parseBuiltin(self: *Parser, object: Node) anyerror!Node {
         .pd_split => self.parseOneArgBuiltin(object),
         .pd_startsWith => self.parseOneArgBuiltin(object),
         .pd_stdev => self.parseNoArgBuiltin(object),
+        .pd_toLower => self.parseNoArgBuiltin(object),
+        .pd_toUpper => self.parseNoArgBuiltin(object),
         .pd_values => self.parseNoArgBuiltin(object),
 
         else => self.ctx.err(
@@ -382,6 +384,8 @@ fn parseNoArgBuiltin(self: *Parser, object: Node) anyerror!Node {
         .pd_sortAsc => "sortAsc",
         .pd_sortDesc => "sortDesc",
         .pd_stdev => "stdev",
+        .pd_toLower => "toLower",
+        .pd_toUpper => "toUpper",
         .pd_values => "values",
         else => unreachable,
     };

@@ -49,6 +49,8 @@ pub const Tag = enum {
     pd_split,
     pd_startsWith,
     pd_stdev,
+    pd_toLower,
+    pd_toUpper,
     pd_values,
 
     pd_onInit,
@@ -148,6 +150,8 @@ pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "split", .pd_split },
     .{ "startsWith", .pd_startsWith },
     .{ "stdev", .pd_stdev },
+    .{ "toLower", .pd_toLower },
+    .{ "toUpper", .pd_toUpper },
     .{ "values", .pd_values },
 
     .{ "onInit", .pd_onInit },

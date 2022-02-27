@@ -63,6 +63,8 @@ const builtins = std.ComptimeStringMap(Value, .{
     .{ "sqrt", Value.new(.{ .builtin = .sqrt }, 0) },
     .{ "startsWith", Value.new(.{ .builtin = .startsWith }, 0) },
     .{ "stdev", Value.new(.{ .builtin = .stdev }, 0) },
+    .{ "toLower", Value.new(.{ .builtin = .toLower }, 0) },
+    .{ "toUpper", Value.new(.{ .builtin = .toUpper }, 0) },
     .{ "values", Value.new(.{ .builtin = .values }, 0) },
 });
 

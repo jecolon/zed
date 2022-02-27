@@ -39,6 +39,8 @@ const Builtin = enum {
     split,
     startsWith,
     stdev,
+    toLower,
+    toUpper,
     values,
 };
 

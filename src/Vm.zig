@@ -8,6 +8,7 @@ const Scope = @import("Scope.zig");
 const ScopeStack = @import("ScopeStack.zig");
 const Value = @import("Value.zig");
 const runtimePrint = @import("fmt.zig").runtimePrint;
+const ziglyph = @import("ziglyph");
 
 allocator: std.mem.Allocator,
 ctx: Context,
@@ -346,6 +347,8 @@ fn execCall(self: *Vm) anyerror!void {
             .sqrt => try self.oneArgMath(callee),
             .startsWith => try self.strStartsWith(),
             .stdev => try self.listStdev(),
+            .toLower => try self.strToLower(),
+            .toUpper => try self.strToUpper(),
             .values => try self.mapValues(),
         };
     }
@@ -2066,6 +2069,55 @@ fn execRedir(self: *Vm) !void {
     try self.value_stack.append(value);
 }
 
+fn strToLower(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const s = self.value_stack.pop();
+    if (s.ty != .string) return self.ctx.err(
+        "toLower not allowed on {s}.",
+        .{@tagName(s.ty)},
+        error.InvalidtoLower,
+        offset,
+    );
+
+    if (s.ty.string.len == 0) {
+        try self.value_stack.append(s);
+        self.ip.* += 1;
+        return;
+    }
+
+    const lower_s = Value.new(.{ .string = try ziglyph.toLowerStr(self.allocator, s.ty.string) }, offset);
+
+    try self.value_stack.append(lower_s);
+    self.ip.* += 1; // num_args
+}
+fn strToUpper(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const s = self.value_stack.pop();
+    if (s.ty != .string) return self.ctx.err(
+        "toUpper not allowed on {s}.",
+        .{@tagName(s.ty)},
+        error.InvalidtoUpper,
+        offset,
+    );
+
+    if (s.ty.string.len == 0) {
+        try self.value_stack.append(s);
+        self.ip.* += 1;
+        return;
+    }
+
+    const lower_s = Value.new(.{ .string = try ziglyph.toUpperStr(self.allocator, s.ty.string) }, offset);
+
+    try self.value_stack.append(lower_s);
+    self.ip.* += 1; // num_args
+}
+
 // Scopes
 
 fn pushScope(self: *Vm, scope: Scope) !void {
@@ -2738,4 +2790,14 @@ test "Vm method builtins" {
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 1), got.ty.uint);
+    got = try testVmValue(allocator,
+        \\"FOO".toLower()
+    );
+    try std.testing.expectEqual(Value.Tag.string, got.ty);
+    try std.testing.expectEqualStrings("foo", got.ty.string);
+    got = try testVmValue(allocator,
+        \\"foo".toUpper()
+    );
+    try std.testing.expectEqual(Value.Tag.string, got.ty);
+    try std.testing.expectEqualStrings("FOO", got.ty.string);
 }
