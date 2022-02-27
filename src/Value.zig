@@ -72,11 +72,10 @@ pub const Type = union(Tag) {
     uint: u64,
 };
 
-offset: u16,
 ty: Type,
 
-pub fn new(ty: Type, offset: u16) Value {
-    return .{ .offset = offset, .ty = ty };
+pub fn new(ty: Type) Value {
+    return .{ .ty = ty };
 }
 
 pub fn copy(self: Value, allocator: std.mem.Allocator) anyerror!Value {
@@ -103,13 +102,13 @@ fn copyFunc(self: Value, allocator: std.mem.Allocator) anyerror!Value {
         .instructions = instructions_copy,
         .name = name_copy,
         .params = params_copy,
-    } }, self.offset);
+    } });
 }
 fn copyList(self: Value, allocator: std.mem.Allocator) anyerror!Value {
     var copy_ptr = try allocator.create(std.ArrayList(Value));
     copy_ptr.* = try std.ArrayList(Value).initCapacity(allocator, self.ty.list.items.len);
     for (self.ty.list.items) |item| copy_ptr.appendAssumeCapacity(try item.copy(allocator));
-    return Value.new(.{ .list = copy_ptr }, self.offset);
+    return Value.new(.{ .list = copy_ptr });
 }
 fn copyMap(self: Value, allocator: std.mem.Allocator) anyerror!Value {
     const copy_ptr = try allocator.create(std.StringHashMap(Value));
@@ -122,11 +121,11 @@ fn copyMap(self: Value, allocator: std.mem.Allocator) anyerror!Value {
         try copy_ptr.put(key_copy, try entry.value_ptr.copy(allocator));
     }
 
-    return Value.new(.{ .map = copy_ptr }, self.offset);
+    return Value.new(.{ .map = copy_ptr });
 }
 fn copyString(self: Value, allocator: std.mem.Allocator) anyerror!Value {
     const str_copy = try allocator.dupe(u8, self.ty.string);
-    return Value.new(.{ .string = str_copy }, self.offset);
+    return Value.new(.{ .string = str_copy });
 }
 
 pub fn deinit(self: Value, allocator: std.mem.Allocator) void {
@@ -265,9 +264,9 @@ pub fn eqlType(self: Value, other: Value) bool {
 pub fn asFloat(self: Value) ?Value {
     return switch (self.ty) {
         .float => self,
-        .int => |i| Value.new(.{ .float = @intToFloat(f64, i) }, self.offset),
-        .string => |s| if (std.fmt.parseFloat(f64, s)) |f| Value.new(.{ .float = f }, self.offset) else |_| null,
-        .uint => |u| Value.new(.{ .float = @intToFloat(f64, u) }, self.offset),
+        .int => |i| Value.new(.{ .float = @intToFloat(f64, i) }),
+        .string => |s| if (std.fmt.parseFloat(f64, s)) |f| Value.new(.{ .float = f }) else |_| null,
+        .uint => |u| Value.new(.{ .float = @intToFloat(f64, u) }),
 
         else => null,
     };
@@ -285,11 +284,11 @@ fn isFloatStr(src: []const u8) bool {
 
 fn strToNum(self: Value) anyerror!Value {
     return if (isFloatStr(self.ty.string))
-        Value.new(.{ .float = try std.fmt.parseFloat(f64, self.ty.string) }, self.offset)
+        Value.new(.{ .float = try std.fmt.parseFloat(f64, self.ty.string) })
     else if ('-' == self.ty.string[0] or '+' == self.ty.string[0])
-        Value.new(.{ .int = try std.fmt.parseInt(isize, self.ty.string, 0) }, self.offset)
+        Value.new(.{ .int = try std.fmt.parseInt(isize, self.ty.string, 0) })
     else
-        Value.new(.{ .uint = try std.fmt.parseUnsigned(usize, self.ty.string, 0) }, self.offset);
+        Value.new(.{ .uint = try std.fmt.parseUnsigned(usize, self.ty.string, 0) });
 }
 
 fn addString(self: Value, other: Value) anyerror!Value {
@@ -298,16 +297,16 @@ fn addString(self: Value, other: Value) anyerror!Value {
 }
 
 fn addFloat(self: Value, other: Value) anyerror!Value {
-    if (other.ty == .float) return Value.new(.{ .float = self.ty.float + other.ty.float }, self.offset);
+    if (other.ty == .float) return Value.new(.{ .float = self.ty.float + other.ty.float });
     const other_float = other.asFloat() orelse return error.InvalidAddition;
-    return Value.new(.{ .float = self.ty.float + other_float.ty.float }, self.offset);
+    return Value.new(.{ .float = self.ty.float + other_float.ty.float });
 }
 
 fn addInt(self: Value, other: Value) anyerror!Value {
     return switch (other.ty) {
-        .int => Value.new(.{ .int = self.ty.int + other.ty.int }, self.offset),
-        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.int) + other.ty.float }, self.offset),
-        .uint => Value.new(.{ .int = self.ty.int + @intCast(isize, other.ty.uint) }, self.offset),
+        .int => Value.new(.{ .int = self.ty.int + other.ty.int }),
+        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.int) + other.ty.float }),
+        .uint => Value.new(.{ .int = self.ty.int + @intCast(isize, other.ty.uint) }),
         .string => self.add(try other.strToNum()),
         else => error.InvalidAddition,
     };
@@ -315,9 +314,9 @@ fn addInt(self: Value, other: Value) anyerror!Value {
 
 fn addUint(self: Value, other: Value) anyerror!Value {
     return switch (other.ty) {
-        .uint => Value.new(.{ .uint = self.ty.uint + other.ty.uint }, self.offset),
-        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.uint) + other.ty.float }, self.offset),
-        .int => Value.new(.{ .int = @intCast(isize, self.ty.uint) + other.ty.int }, self.offset),
+        .uint => Value.new(.{ .uint = self.ty.uint + other.ty.uint }),
+        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.uint) + other.ty.float }),
+        .int => Value.new(.{ .int = @intCast(isize, self.ty.uint) + other.ty.int }),
         .string => self.add(try other.strToNum()),
         else => error.InvalidAddition,
     };
@@ -339,16 +338,16 @@ fn subString(self: Value, other: Value) anyerror!Value {
 }
 
 fn subFloat(self: Value, other: Value) anyerror!Value {
-    if (other.ty == .float) return Value.new(.{ .float = self.ty.float - other.ty.float }, self.offset);
+    if (other.ty == .float) return Value.new(.{ .float = self.ty.float - other.ty.float });
     const other_float = other.asFloat() orelse return error.InvalidSubtraction;
-    return Value.new(.{ .float = self.ty.float - other_float.ty.float }, self.offset);
+    return Value.new(.{ .float = self.ty.float - other_float.ty.float });
 }
 
 fn subInt(self: Value, other: Value) anyerror!Value {
     return switch (other.ty) {
-        .int => Value.new(.{ .int = self.ty.int - other.ty.int }, self.offset),
-        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.int) - other.ty.float }, self.offset),
-        .uint => Value.new(.{ .int = self.ty.int - @intCast(isize, other.ty.uint) }, self.offset),
+        .int => Value.new(.{ .int = self.ty.int - other.ty.int }),
+        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.int) - other.ty.float }),
+        .uint => Value.new(.{ .int = self.ty.int - @intCast(isize, other.ty.uint) }),
         .string => self.sub(try other.strToNum()),
         else => error.InvalidSubtraction,
     };
@@ -356,12 +355,12 @@ fn subInt(self: Value, other: Value) anyerror!Value {
 
 fn subUint(self: Value, other: Value) anyerror!Value {
     return switch (other.ty) {
-        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.uint) - other.ty.float }, self.offset),
-        .int => Value.new(.{ .int = @intCast(isize, self.ty.uint) - other.ty.int }, self.offset),
+        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.uint) - other.ty.float }),
+        .int => Value.new(.{ .int = @intCast(isize, self.ty.uint) - other.ty.int }),
         .uint => if (self.ty.uint < other.ty.uint)
-            Value.new(.{ .int = @intCast(isize, self.ty.uint) - @intCast(isize, other.ty.uint) }, self.offset)
+            Value.new(.{ .int = @intCast(isize, self.ty.uint) - @intCast(isize, other.ty.uint) })
         else
-            Value.new(.{ .uint = self.ty.uint - other.ty.uint }, self.offset),
+            Value.new(.{ .uint = self.ty.uint - other.ty.uint }),
         .string => self.sub(try other.strToNum()),
         else => error.InvalidSubtraction,
     };
@@ -382,16 +381,16 @@ fn mulString(self: Value, other: Value) anyerror!Value {
 }
 
 fn mulFloat(self: Value, other: Value) anyerror!Value {
-    if (other.ty == .float) return Value.new(.{ .float = self.ty.float * other.ty.float }, self.offset);
+    if (other.ty == .float) return Value.new(.{ .float = self.ty.float * other.ty.float });
     const other_float = other.asFloat() orelse return error.InvalidMultiplication;
-    return Value.new(.{ .float = self.ty.float * other_float.ty.float }, self.offset);
+    return Value.new(.{ .float = self.ty.float * other_float.ty.float });
 }
 
 fn mulInt(self: Value, other: Value) anyerror!Value {
     return switch (other.ty) {
-        .int => Value.new(.{ .int = self.ty.int * other.ty.int }, self.offset),
-        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.int) * other.ty.float }, self.offset),
-        .uint => Value.new(.{ .int = self.ty.int * @intCast(isize, other.ty.uint) }, self.offset),
+        .int => Value.new(.{ .int = self.ty.int * other.ty.int }),
+        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.int) * other.ty.float }),
+        .uint => Value.new(.{ .int = self.ty.int * @intCast(isize, other.ty.uint) }),
         .string => self.mul(try other.strToNum()),
         else => error.InvalidMultiplication,
     };
@@ -399,9 +398,9 @@ fn mulInt(self: Value, other: Value) anyerror!Value {
 
 fn mulUint(self: Value, other: Value) anyerror!Value {
     return switch (other.ty) {
-        .uint => Value.new(.{ .uint = self.ty.uint * other.ty.uint }, self.offset),
-        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.uint) * other.ty.float }, self.offset),
-        .int => Value.new(.{ .int = @intCast(isize, self.ty.uint) * other.ty.int }, self.offset),
+        .uint => Value.new(.{ .uint = self.ty.uint * other.ty.uint }),
+        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.uint) * other.ty.float }),
+        .int => Value.new(.{ .int = @intCast(isize, self.ty.uint) * other.ty.int }),
         .string => self.mul(try other.strToNum()),
         else => error.InvalidMultiplication,
     };
@@ -423,16 +422,16 @@ fn divString(self: Value, other: Value) anyerror!Value {
 }
 
 fn divFloat(self: Value, other: Value) anyerror!Value {
-    if (other.ty == .float) return Value.new(.{ .float = self.ty.float / other.ty.float }, self.offset);
+    if (other.ty == .float) return Value.new(.{ .float = self.ty.float / other.ty.float });
     const other_float = other.asFloat() orelse return error.InvaidDivision;
-    return Value.new(.{ .float = self.ty.float / other_float.ty.float }, self.offset);
+    return Value.new(.{ .float = self.ty.float / other_float.ty.float });
 }
 
 fn divInt(self: Value, other: Value) anyerror!Value {
     return switch (other.ty) {
-        .int => Value.new(.{ .int = @divFloor(self.ty.int, other.ty.int) }, self.offset),
-        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.int) / other.ty.float }, self.offset),
-        .uint => Value.new(.{ .int = @divFloor(self.ty.int, @intCast(isize, other.ty.uint)) }, self.offset),
+        .int => Value.new(.{ .int = @divFloor(self.ty.int, other.ty.int) }),
+        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.int) / other.ty.float }),
+        .uint => Value.new(.{ .int = @divFloor(self.ty.int, @intCast(isize, other.ty.uint)) }),
         .string => self.div(try other.strToNum()),
         else => error.InvaidDivision,
     };
@@ -440,9 +439,9 @@ fn divInt(self: Value, other: Value) anyerror!Value {
 
 fn divUint(self: Value, other: Value) anyerror!Value {
     return switch (other.ty) {
-        .uint => Value.new(.{ .uint = @divFloor(self.ty.uint, other.ty.uint) }, self.offset),
-        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.uint) / other.ty.float }, self.offset),
-        .int => Value.new(.{ .int = @divFloor(@intCast(isize, self.ty.uint), other.ty.int) }, self.offset),
+        .uint => Value.new(.{ .uint = @divFloor(self.ty.uint, other.ty.uint) }),
+        .float => Value.new(.{ .float = @intToFloat(f64, self.ty.uint) / other.ty.float }),
+        .int => Value.new(.{ .int = @divFloor(@intCast(isize, self.ty.uint), other.ty.int) }),
         .string => self.div(try other.strToNum()),
         else => error.InvaidDivision,
     };
@@ -464,16 +463,16 @@ fn modString(self: Value, other: Value) anyerror!Value {
 }
 
 fn modFloat(self: Value, other: Value) anyerror!Value {
-    if (other.ty == .float) return Value.new(.{ .float = @rem(self.ty.float, other.ty.float) }, self.offset);
+    if (other.ty == .float) return Value.new(.{ .float = @rem(self.ty.float, other.ty.float) });
     const other_float = other.asFloat() orelse return error.InvalidModulo;
-    return Value.new(.{ .float = @rem(self.ty.float, other_float.ty.float) }, self.offset);
+    return Value.new(.{ .float = @rem(self.ty.float, other_float.ty.float) });
 }
 
 fn modInt(self: Value, other: Value) anyerror!Value {
     return switch (other.ty) {
-        .int => Value.new(.{ .int = @rem(self.ty.int, other.ty.int) }, self.offset),
-        .float => Value.new(.{ .float = @rem(@intToFloat(f64, self.ty.int), other.ty.float) }, self.offset),
-        .uint => Value.new(.{ .int = @rem(self.ty.int, @intCast(isize, other.ty.uint)) }, self.offset),
+        .int => Value.new(.{ .int = @rem(self.ty.int, other.ty.int) }),
+        .float => Value.new(.{ .float = @rem(@intToFloat(f64, self.ty.int), other.ty.float) }),
+        .uint => Value.new(.{ .int = @rem(self.ty.int, @intCast(isize, other.ty.uint)) }),
         .string => self.mod(try other.strToNum()),
         else => error.InvalidModulo,
     };
@@ -481,9 +480,9 @@ fn modInt(self: Value, other: Value) anyerror!Value {
 
 fn modUint(self: Value, other: Value) anyerror!Value {
     return switch (other.ty) {
-        .uint => Value.new(.{ .uint = @rem(self.ty.uint, other.ty.uint) }, self.offset),
-        .float => Value.new(.{ .float = @rem(@intToFloat(f64, self.ty.uint), other.ty.float) }, self.offset),
-        .int => Value.new(.{ .int = @rem(@intCast(isize, self.ty.uint), other.ty.int) }, self.offset),
+        .uint => Value.new(.{ .uint = @rem(self.ty.uint, other.ty.uint) }),
+        .float => Value.new(.{ .float = @rem(@intToFloat(f64, self.ty.uint), other.ty.float) }),
+        .int => Value.new(.{ .int = @rem(@intCast(isize, self.ty.uint), other.ty.int) }),
         .string => self.mod(try other.strToNum()),
         else => error.InvalidModulo,
     };

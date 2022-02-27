@@ -12,7 +12,7 @@ const ziglyph = @import("ziglyph");
 
 allocator: std.mem.Allocator,
 ctx: Context,
-last_popped: Value = Value.new(.nil, 0),
+last_popped: Value = Value.new(.nil),
 output: *std.ArrayList(u8),
 
 instructions: []const u8 = undefined,
@@ -135,70 +135,58 @@ fn execPop(self: *Vm) !void {
 }
 fn execBoolFalse(self: *Vm) !void {
     self.ip.* += 1;
-    try self.value_stack.append(Value.new(.{ .boolean = false }, self.getOffset()));
+    try self.value_stack.append(Value.new(.{ .boolean = false }));
     self.ip.* += 2;
 }
 fn execBoolTrue(self: *Vm) !void {
     self.ip.* += 1;
-    try self.value_stack.append(Value.new(.{ .boolean = true }, self.getOffset()));
+    try self.value_stack.append(Value.new(.{ .boolean = true }));
     self.ip.* += 2;
 }
 fn execNil(self: *Vm) !void {
     self.ip.* += 1;
-    try self.value_stack.append(Value.new(.nil, self.getOffset()));
+    try self.value_stack.append(Value.new(.nil));
     self.ip.* += 2;
 }
 
 fn execFloat(self: *Vm) !void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
     const f = self.getNumber(f64, self.ip.*, 8);
     self.ip.* += 8;
-    try self.value_stack.append(Value.new(.{ .float = f }, offset));
+    try self.value_stack.append(Value.new(.{ .float = f }));
 }
 fn execFloatRef(self: *Vm) !void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
     const start = self.getU16(self.ip.*);
     self.ip.* += 2;
     const f = self.getNumber(f64, start, 8);
-    try self.value_stack.append(Value.new(.{ .float = f }, offset));
+    try self.value_stack.append(Value.new(.{ .float = f }));
 }
 fn execInt(self: *Vm) !void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
     const i = self.getNumber(i64, self.ip.*, 8);
     self.ip.* += 8;
-    try self.value_stack.append(Value.new(.{ .int = i }, offset));
+    try self.value_stack.append(Value.new(.{ .int = i }));
 }
 fn execIntRef(self: *Vm) !void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
     const start = self.getU16(self.ip.*);
     self.ip.* += 2;
     const i = self.getNumber(i64, start, 8);
-    try self.value_stack.append(Value.new(.{ .int = i }, offset));
+    try self.value_stack.append(Value.new(.{ .int = i }));
 }
 fn execUint(self: *Vm) !void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
     const u = self.getNumber(u64, self.ip.*, 8);
     self.ip.* += 8;
-    try self.value_stack.append(Value.new(.{ .uint = u }, offset));
+    try self.value_stack.append(Value.new(.{ .uint = u }));
 }
 fn execUintRef(self: *Vm) !void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
     const start = self.getU16(self.ip.*);
     self.ip.* += 2;
     const u = self.getNumber(u64, start, 8);
-    try self.value_stack.append(Value.new(.{ .uint = u }, offset));
+    try self.value_stack.append(Value.new(.{ .uint = u }));
 }
 
 fn execFormat(self: *Vm) !void {
@@ -213,14 +201,11 @@ fn execFormat(self: *Vm) !void {
     var writer = buf.writer();
     try runtimePrint(
         self.allocator,
-        "change_filename",
-        "change_src",
         spec,
         value,
         writer,
-        value.offset,
     );
-    try self.value_stack.append(Value.new(.{ .string = buf.items }, value.offset));
+    try self.value_stack.append(Value.new(.{ .string = buf.items }));
 }
 fn execPlain(self: *Vm) !void {
     self.ip.* += 1;
@@ -228,7 +213,7 @@ fn execPlain(self: *Vm) !void {
     self.ip.* += 2;
     const s = self.getString(self.ip.*, len);
     self.ip.* += len;
-    try self.value_stack.append(Value.new(.{ .string = s }, 0));
+    try self.value_stack.append(Value.new(.{ .string = s }));
 }
 fn execPlainRef(self: *Vm) !void {
     self.ip.* += 1;
@@ -237,12 +222,10 @@ fn execPlainRef(self: *Vm) !void {
     const start = self.getU16(self.ip.*);
     self.ip.* += 2;
     const s = self.getString(start, len);
-    try self.value_stack.append(Value.new(.{ .string = s }, 0));
+    try self.value_stack.append(Value.new(.{ .string = s }));
 }
 fn execString(self: *Vm) !void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
     const len = self.getU16(self.ip.*);
     self.ip.* += 2;
 
@@ -250,14 +233,11 @@ fn execString(self: *Vm) !void {
     var writer = buf.writer();
     var i: usize = 0;
     while (i < len) : (i += 1) _ = try writer.print("{}", .{self.value_stack.pop()});
-    try self.value_stack.append(Value.new(.{ .string = buf.items }, offset));
+    try self.value_stack.append(Value.new(.{ .string = buf.items }));
 }
 
 fn execFunc(self: *Vm) !void {
-    // Src offset
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
 
     // Function name
     const func_name_len = self.getU16(self.ip.*);
@@ -296,7 +276,7 @@ fn execFunc(self: *Vm) !void {
         .name = func_name,
         .params = params,
         .instructions = func_instructions,
-    } }, offset));
+    } }));
 }
 
 fn execReturn(self: *Vm) void {
@@ -354,11 +334,15 @@ fn execCall(self: *Vm) anyerror!void {
         };
     }
 
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
     if (callee.ty != .func) return self.ctx.err(
         "{s} is not callable.",
         .{@tagName(callee.ty)},
         error.InvalidCall,
-        callee.offset,
+        offset,
     );
 
     // Prepare the child scope.
@@ -368,7 +352,6 @@ fn execCall(self: *Vm) anyerror!void {
     if (callee.ty.func.name.len != 0) try func_scope.map.put(callee.ty.func.name, callee);
 
     // Process args
-    self.ip.* += 3;
     const num_args = self.instructions[self.ip.*];
 
     var i: usize = 0;
@@ -535,10 +518,10 @@ fn execComparison(self: *Vm, opcode: Compiler.Opcode) !void {
     }, err, offset);
 
     const result = switch (opcode) {
-        .lt => Value.new(.{ .boolean = comparison == .lt }, offset),
-        .lte => Value.new(.{ .boolean = comparison == .lt or comparison == .eq }, offset),
-        .gt => Value.new(.{ .boolean = comparison == .gt }, offset),
-        .gte => Value.new(.{ .boolean = comparison == .gt or comparison == .eq }, offset),
+        .lt => Value.new(.{ .boolean = comparison == .lt }),
+        .lte => Value.new(.{ .boolean = comparison == .lt or comparison == .eq }),
+        .gt => Value.new(.{ .boolean = comparison == .gt }),
+        .gte => Value.new(.{ .boolean = comparison == .gt or comparison == .eq }),
 
         else => unreachable,
     };
@@ -548,13 +531,11 @@ fn execComparison(self: *Vm, opcode: Compiler.Opcode) !void {
 fn execEqNeq(self: *Vm, opcode: Compiler.Opcode) !void {
     const right = self.value_stack.pop();
     const left = self.value_stack.pop();
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
 
     var comparison = left.eql(right);
     if (opcode == .neq) comparison = !comparison;
-    try self.value_stack.append(Value.new(.{ .boolean = comparison }, offset));
+    try self.value_stack.append(Value.new(.{ .boolean = comparison }));
 }
 fn execConcat(self: *Vm) anyerror!void {
     const right = self.value_stack.pop();
@@ -573,7 +554,7 @@ fn execConcat(self: *Vm) anyerror!void {
     var buf = try self.allocator.alloc(u8, left.ty.string.len + right.ty.string.len);
     std.mem.copy(u8, buf, left.ty.string);
     std.mem.copy(u8, buf[left.ty.string.len..], right.ty.string);
-    try self.value_stack.append(Value.new(.{ .string = buf }, offset));
+    try self.value_stack.append(Value.new(.{ .string = buf }));
 }
 fn execRepeat(self: *Vm) anyerror!void {
     const right = self.value_stack.pop();
@@ -592,7 +573,7 @@ fn execRepeat(self: *Vm) anyerror!void {
     var buf = try self.allocator.alloc(u8, left.ty.string.len * right.ty.uint);
     var i: usize = 0;
     while (i < right.ty.uint) : (i += 1) std.mem.copy(u8, buf[left.ty.string.len * i ..], left.ty.string);
-    try self.value_stack.append(Value.new(.{ .string = buf }, offset));
+    try self.value_stack.append(Value.new(.{ .string = buf }));
 }
 
 fn execNot(self: *Vm) !void {
@@ -606,7 +587,7 @@ fn execNot(self: *Vm) !void {
         error.InvalidNot,
         offset,
     );
-    try self.value_stack.append(Value.new(.{ .boolean = !value.ty.boolean }, offset));
+    try self.value_stack.append(Value.new(.{ .boolean = !value.ty.boolean }));
 }
 fn execNeg(self: *Vm) !void {
     const value = self.value_stack.pop();
@@ -615,9 +596,9 @@ fn execNeg(self: *Vm) !void {
     self.ip.* += 2;
 
     switch (value.ty) {
-        .float => |f| try self.value_stack.append(Value.new(.{ .float = -f }, offset)),
-        .int => |i| try self.value_stack.append(Value.new(.{ .int = -i }, offset)),
-        .uint => |u| try self.value_stack.append(Value.new(.{ .int = -@intCast(isize, u) }, offset)),
+        .float => |f| try self.value_stack.append(Value.new(.{ .float = -f })),
+        .int => |i| try self.value_stack.append(Value.new(.{ .int = -i })),
+        .uint => |u| try self.value_stack.append(Value.new(.{ .int = -@intCast(isize, u) })),
         else => return self.ctx.err(
             "-{s} ?",
             .{@tagName(value.ty)},
@@ -628,9 +609,7 @@ fn execNeg(self: *Vm) !void {
 }
 
 fn execList(self: *Vm) !void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
     const len = self.getU16(self.ip.*);
     self.ip.* += 2;
 
@@ -639,12 +618,10 @@ fn execList(self: *Vm) !void {
     var i: usize = 0;
     while (i < len) : (i += 1) list_ptr.appendAssumeCapacity(self.value_stack.pop());
 
-    try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }));
 }
 fn execMap(self: *Vm) !void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
     const len = self.getU16(self.ip.*);
     self.ip.* += 2;
 
@@ -658,7 +635,7 @@ fn execMap(self: *Vm) !void {
         map_ptr.putAssumeCapacity(key.ty.string, value);
     }
 
-    try self.value_stack.append(Value.new(.{ .map = map_ptr }, offset));
+    try self.value_stack.append(Value.new(.{ .map = map_ptr }));
 }
 fn execSubscript(self: *Vm) !void {
     self.ip.* += 1;
@@ -709,7 +686,7 @@ fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
         for (list.ty.list.items[index.ty.range[0]..index.ty.range[1]]) |item|
             new_list_ptr.appendAssumeCapacity(item); //TODO: Copy here?
 
-        try self.value_stack.append(Value.new(.{ .list = new_list_ptr }, offset));
+        try self.value_stack.append(Value.new(.{ .list = new_list_ptr }));
     }
 }
 fn execSubscriptMap(self: *Vm, map: Value, offset: u16) !void {
@@ -720,7 +697,7 @@ fn execSubscriptMap(self: *Vm, map: Value, offset: u16) !void {
         error.InvalidSubscript,
         offset,
     );
-    const value = if (map.ty.map.get(key.ty.string)) |v| v else Value.new(.nil, offset);
+    const value = if (map.ty.map.get(key.ty.string)) |v| v else Value.new(.nil);
     try self.value_stack.append(value);
 }
 fn execSet(self: *Vm) !void {
@@ -797,7 +774,7 @@ fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
         try map.ty.map.put(key_copy, try rvalue.copy(map.ty.map.allocator)); //TODO: Deinit old value?
         try self.value_stack.append(rvalue);
     } else {
-        const old_value = map.ty.map.get(key.ty.string) orelse Value.new(.{ .uint = 0 }, offset);
+        const old_value = map.ty.map.get(key.ty.string) orelse Value.new(.{ .uint = 0 });
 
         const new_value = switch (combo) {
             .none => unreachable,
@@ -847,13 +824,11 @@ fn execRange(self: *Vm) anyerror!void {
     const from_uint = from.ty.uint;
     const to_uint = if (inclusive) to.ty.uint + 1 else to.ty.uint;
 
-    try self.value_stack.append(Value.new(.{ .range = [2]usize{ from_uint, to_uint } }, offset));
+    try self.value_stack.append(Value.new(.{ .range = [2]usize{ from_uint, to_uint } }));
 }
 
 fn execRecRange(self: *Vm) anyerror!void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
     const range_id = self.instructions[self.ip.*];
     self.ip.* += 1;
     const exclusive = self.instructions[self.ip.*] == 1;
@@ -869,7 +844,7 @@ fn execRecRange(self: *Vm) anyerror!void {
     const has_to = self.instructions[self.ip.*] == 1;
     self.ip.* += 1;
 
-    const nil_value = Value.new(.nil, offset);
+    const nil_value = Value.new(.nil);
     const from = if (has_from) self.value_stack.pop() else nil_value;
     const to = if (has_to) self.value_stack.pop() else nil_value;
 
@@ -988,7 +963,7 @@ fn atan2(self: *Vm) anyerror!void {
         "atan2 y not convertible to float.",
         .{},
         error.InvalidAtan2,
-        y_val.offset,
+        offset,
     );
 
     const x_val = self.value_stack.pop();
@@ -996,10 +971,10 @@ fn atan2(self: *Vm) anyerror!void {
         "atan2 x not convertible to float.",
         .{},
         error.InvalidAtan2,
-        x_val.offset,
+        offset,
     );
 
-    const result = Value.new(.{ .float = std.math.atan2(f64, y.ty.float, x.ty.float) }, offset);
+    const result = Value.new(.{ .float = std.math.atan2(f64, y.ty.float, x.ty.float) });
     try self.value_stack.append(result);
 }
 fn strChars(self: *Vm) anyerror!void {
@@ -1012,7 +987,7 @@ fn strChars(self: *Vm) anyerror!void {
         "{s}.chars() ?",
         .{@tagName(str.ty)},
         error.InvalidCharsCall,
-        str.offset,
+        offset,
     );
 
     var list_ptr = try self.allocator.create(std.ArrayList(Value));
@@ -1022,17 +997,15 @@ fn strChars(self: *Vm) anyerror!void {
         "Unicode error.",
         .{},
         err,
-        str.offset,
+        offset,
     );
-    while (giter.next()) |grapheme| try list_ptr.append(Value.new(.{ .string = grapheme.bytes }, offset));
+    while (giter.next()) |grapheme| try list_ptr.append(Value.new(.{ .string = grapheme.bytes }));
 
-    try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }));
     self.ip.* += 1;
 }
 fn execPrint(self: *Vm) anyerror!void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
 
     // Get args count.
     const num_args = self.instructions[self.ip.*];
@@ -1045,12 +1018,10 @@ fn execPrint(self: *Vm) anyerror!void {
         _ = try writer.print("{}", .{self.value_stack.pop()});
     }
 
-    try self.value_stack.append(Value.new(.nil, offset));
+    try self.value_stack.append(Value.new(.nil));
 }
 fn execSprint(self: *Vm) anyerror!void {
-    self.ip.* += 1;
-    const offset = self.getOffset();
-    self.ip.* += 2;
+    self.ip.* += 3;
 
     // Get args count.
     const num_args = self.instructions[self.ip.*];
@@ -1065,7 +1036,7 @@ fn execSprint(self: *Vm) anyerror!void {
         _ = try writer.print("{}", .{self.value_stack.pop()});
     }
 
-    try self.value_stack.append(Value.new(.{ .string = buf.items }, offset));
+    try self.value_stack.append(Value.new(.{ .string = buf.items }));
 }
 fn oneArgMath(self: *Vm, builtin: Value) anyerror!void {
     self.ip.* += 1;
@@ -1088,17 +1059,17 @@ fn oneArgMath(self: *Vm, builtin: Value) anyerror!void {
         "Arg not convertible to float.",
         .{},
         error.InvalidArg,
-        x_val.offset,
+        offset,
     );
 
     const result = switch (builtin.ty.builtin) {
-        .cos => Value.new(.{ .float = @cos(x.ty.float) }, builtin.offset),
-        .exp => Value.new(.{ .float = std.math.exp(x.ty.float) }, builtin.offset),
-        .int => Value.new(.{ .int = @floatToInt(isize, @trunc(x.ty.float)) }, builtin.offset),
-        .log => Value.new(.{ .float = @log(x.ty.float) }, builtin.offset),
-        .rand => Value.new(.{ .uint = std.rand.DefaultPrng.init(@intCast(usize, std.time.timestamp())).random().uintAtMost(usize, x.ty.uint) }, builtin.offset),
-        .sin => Value.new(.{ .float = @sin(x.ty.float) }, builtin.offset),
-        .sqrt => Value.new(.{ .float = @sqrt(x.ty.float) }, builtin.offset),
+        .cos => Value.new(.{ .float = @cos(x.ty.float) }),
+        .exp => Value.new(.{ .float = std.math.exp(x.ty.float) }),
+        .int => Value.new(.{ .int = @floatToInt(isize, @trunc(x.ty.float)) }),
+        .log => Value.new(.{ .float = @log(x.ty.float) }),
+        .rand => Value.new(.{ .uint = std.rand.DefaultPrng.init(@intCast(usize, std.time.timestamp())).random().uintAtMost(usize, x.ty.uint) }),
+        .sin => Value.new(.{ .float = @sin(x.ty.float) }),
+        .sqrt => Value.new(.{ .float = @sqrt(x.ty.float) }),
         else => unreachable,
     };
     try self.value_stack.append(result);
@@ -1122,13 +1093,13 @@ fn contains(self: *Vm) anyerror!void {
 
     const result = switch (haystack.ty) {
         .list => |l| for (l.items) |item| {
-            if (needle.eql(item)) break Value.new(.{ .boolean = true }, offset);
-        } else Value.new(.{ .boolean = false }, offset),
+            if (needle.eql(item)) break Value.new(.{ .boolean = true });
+        } else Value.new(.{ .boolean = false }),
         .map => |m| mp: {
             var iter = m.valueIterator();
             break :mp while (iter.next()) |value_ptr| {
-                if (needle.eql(value_ptr.*)) break Value.new(.{ .boolean = true }, offset);
-            } else Value.new(.{ .boolean = false }, offset);
+                if (needle.eql(value_ptr.*)) break Value.new(.{ .boolean = true });
+            } else Value.new(.{ .boolean = false });
         },
         .string => |s| str: {
             if (needle.ty != .string) return self.ctx.err(
@@ -1138,7 +1109,7 @@ fn contains(self: *Vm) anyerror!void {
                 offset,
             );
 
-            break :str Value.new(.{ .boolean = std.mem.containsAtLeast(u8, s, 1, needle.ty.string) }, offset);
+            break :str Value.new(.{ .boolean = std.mem.containsAtLeast(u8, s, 1, needle.ty.string) });
         },
         else => unreachable,
     };
@@ -1162,8 +1133,8 @@ fn indexOf(self: *Vm) anyerror!void {
 
     const result = switch (haystack.ty) {
         .list => |l| for (l.items) |item, i| {
-            if (needle.eql(item)) break Value.new(.{ .uint = i }, offset);
-        } else Value.new(.nil, offset),
+            if (needle.eql(item)) break Value.new(.{ .uint = i });
+        } else Value.new(.nil),
         .string => |s| str: {
             if (needle.ty != .string) return self.ctx.err(
                 "indexOf arg on strings must be a string.",
@@ -1175,8 +1146,8 @@ fn indexOf(self: *Vm) anyerror!void {
             var giter = try GraphemeIterator.init(s);
             var i: usize = 0;
             break :str while (giter.next()) |grapheme| : (i += 1) {
-                if (std.mem.eql(u8, needle.ty.string, grapheme.bytes)) break Value.new(.{ .uint = i }, offset);
-            } else Value.new(.nil, offset);
+                if (std.mem.eql(u8, needle.ty.string, grapheme.bytes)) break Value.new(.{ .uint = i });
+            } else Value.new(.nil);
         },
         else => unreachable,
     };
@@ -1203,8 +1174,8 @@ fn lastIndexOf(self: *Vm) anyerror!void {
             var i: usize = 0;
             const len = l.items.len;
             break :lst while (i <= len) : (i += 1) {
-                if (needle.eql(l.items[len - i])) break Value.new(.{ .uint = i }, offset);
-            } else Value.new(.nil, offset);
+                if (needle.eql(l.items[len - i])) break Value.new(.{ .uint = i });
+            } else Value.new(.nil);
         },
         .string => |s| str: {
             if (needle.ty != .string) return self.ctx.err(
@@ -1216,9 +1187,9 @@ fn lastIndexOf(self: *Vm) anyerror!void {
 
             var giter = try GraphemeIterator.init(s);
             var i: usize = 0;
-            var index = Value.new(.nil, offset);
+            var index = Value.new(.nil);
             while (giter.next()) |grapheme| : (i += 1) {
-                if (std.mem.eql(u8, needle.ty.string, grapheme.bytes)) index = Value.new(.{ .uint = i }, offset);
+                if (std.mem.eql(u8, needle.ty.string, grapheme.bytes)) index = Value.new(.{ .uint = i });
             }
 
             break :str index;
@@ -1246,9 +1217,9 @@ fn length(self: *Vm) anyerror!void {
         );
 
     const result = switch (value.ty) {
-        .list => |l| Value.new(.{ .uint = l.items.len }, offset),
-        .map => |m| Value.new(.{ .uint = m.count() }, offset),
-        .string => |s| Value.new(.{ .uint = s.len }, offset),
+        .list => |l| Value.new(.{ .uint = l.items.len }),
+        .map => |m| Value.new(.{ .uint = m.count() }),
+        .string => |s| Value.new(.{ .uint = s.len }),
         else => unreachable,
     };
 
@@ -1274,9 +1245,9 @@ fn mapKeys(self: *Vm) anyerror!void {
     else
         try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
     var key_iter = m.ty.map.keyIterator();
-    while (key_iter.next()) |key| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = key.* }, offset));
+    while (key_iter.next()) |key| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = key.* }));
 
-    try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
+    try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
     self.ip.* += 1;
 }
 
@@ -1304,7 +1275,7 @@ fn mapKeysByValueAsc(self: *Vm) anyerror!void {
 
     if (m.ty.map.count() == 0) {
         keys_ptr.* = std.ArrayList(Value).init(self.allocator);
-        try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
+        try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
         self.ip.* += 1;
         return;
     }
@@ -1319,9 +1290,9 @@ fn mapKeysByValueAsc(self: *Vm) anyerror!void {
 
     std.sort.sort(std.StringHashMap(Value).Entry, entries.items, {}, entryAsc);
 
-    for (entries.items) |entry| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr.* }, offset));
+    for (entries.items) |entry| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr.* }));
 
-    try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
+    try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
     self.ip.* += 1; // num_args
 }
 fn mapKeysByValueDesc(self: *Vm) anyerror!void {
@@ -1341,7 +1312,7 @@ fn mapKeysByValueDesc(self: *Vm) anyerror!void {
 
     if (m.ty.map.count() == 0) {
         keys_ptr.* = std.ArrayList(Value).init(self.allocator);
-        try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
+        try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
         self.ip.* += 1;
         return;
     }
@@ -1356,9 +1327,9 @@ fn mapKeysByValueDesc(self: *Vm) anyerror!void {
 
     std.sort.sort(std.StringHashMap(Value).Entry, entries.items, {}, entryDesc);
 
-    for (entries.items) |entry| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr.* }, offset));
+    for (entries.items) |entry| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr.* }));
 
-    try self.value_stack.append(Value.new(.{ .list = keys_ptr }, offset));
+    try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
     self.ip.* += 1; // num_args
 }
 
@@ -1383,7 +1354,7 @@ fn mapValues(self: *Vm) anyerror!void {
     var value_iter = m.ty.map.valueIterator();
     while (value_iter.next()) |value| values_ptr.appendAssumeCapacity(value.*);
 
-    try self.value_stack.append(Value.new(.{ .list = values_ptr }, offset));
+    try self.value_stack.append(Value.new(.{ .list = values_ptr }));
     self.ip.* += 1;
 }
 fn listMeanHelper(list: std.ArrayList(Value)) f64 {
@@ -1412,12 +1383,12 @@ fn listMean(self: *Vm) anyerror!void {
     );
 
     if (l.ty.list.items.len == 0) {
-        try self.value_stack.append(Value.new(.{ .float = 0 }, offset));
+        try self.value_stack.append(Value.new(.{ .float = 0 }));
         self.ip.* += 1;
         return;
     }
 
-    try self.value_stack.append(Value.new(.{ .float = listMeanHelper(l.ty.list.*) }, offset));
+    try self.value_stack.append(Value.new(.{ .float = listMeanHelper(l.ty.list.*) }));
     self.ip.* += 1;
 }
 fn listMedian(self: *Vm) anyerror!void {
@@ -1434,7 +1405,7 @@ fn listMedian(self: *Vm) anyerror!void {
     );
 
     if (l.ty.list.items.len == 0) {
-        try self.value_stack.append(Value.new(.{ .float = 0 }, offset));
+        try self.value_stack.append(Value.new(.{ .float = 0 }));
         self.ip.* += 1;
         return;
     }
@@ -1452,7 +1423,7 @@ fn listMedian(self: *Vm) anyerror!void {
         median = (list_copy.items[mid] + list_copy.items[mid + 1]) / 2;
     }
 
-    try self.value_stack.append(Value.new(.{ .float = median }, offset));
+    try self.value_stack.append(Value.new(.{ .float = median }));
     self.ip.* += 1;
 }
 fn listMode(self: *Vm) anyerror!void {
@@ -1469,7 +1440,7 @@ fn listMode(self: *Vm) anyerror!void {
     );
 
     if (l.ty.list.items.len == 0) {
-        try self.value_stack.append(Value.new(.nil, offset));
+        try self.value_stack.append(Value.new(.nil));
         self.ip.* += 1;
         return;
     }
@@ -1495,11 +1466,11 @@ fn listMode(self: *Vm) anyerror!void {
     var mode_ptr = try self.allocator.create(std.ArrayList(Value));
     mode_ptr.* = std.ArrayList(Value).init(self.allocator);
     while (iter.next()) |entry| {
-        if (entry.value_ptr.* == highest) try mode_ptr.append(Value.new(.{ .float = std.fmt.parseFloat(f64, entry.key_ptr.*) catch unreachable }, offset));
+        if (entry.value_ptr.* == highest) try mode_ptr.append(Value.new(.{ .float = std.fmt.parseFloat(f64, entry.key_ptr.*) catch unreachable }));
     }
     std.sort.sort(Value, mode_ptr.items, {}, Value.lessThan);
 
-    const result = if (mode_ptr.items.len == counts.count()) Value.new(.nil, offset) else Value.new(.{ .list = mode_ptr }, offset);
+    const result = if (mode_ptr.items.len == counts.count()) Value.new(.nil) else Value.new(.{ .list = mode_ptr });
     try self.value_stack.append(result);
     self.ip.* += 1;
 }
@@ -1517,7 +1488,7 @@ fn listStdev(self: *Vm) anyerror!void {
     );
 
     if (l.ty.list.items.len == 0) {
-        try self.value_stack.append(Value.new(.{ .float = 0 }, offset));
+        try self.value_stack.append(Value.new(.{ .float = 0 }));
         self.ip.* += 1;
         return;
     }
@@ -1537,7 +1508,7 @@ fn listStdev(self: *Vm) anyerror!void {
 
     const sos_by_count = sum_of_squares / count;
 
-    try self.value_stack.append(Value.new(.{ .float = @sqrt(sos_by_count) }, offset));
+    try self.value_stack.append(Value.new(.{ .float = @sqrt(sos_by_count) }));
     self.ip.* += 1;
 }
 fn listMin(self: *Vm) anyerror!void {
@@ -1554,7 +1525,7 @@ fn listMin(self: *Vm) anyerror!void {
     );
 
     if (l.ty.list.items.len == 0) {
-        try self.value_stack.append(Value.new(.nil, offset));
+        try self.value_stack.append(Value.new(.nil));
         self.ip.* += 1;
         return;
     }
@@ -1582,7 +1553,7 @@ fn listMax(self: *Vm) anyerror!void {
     );
 
     if (l.ty.list.items.len == 0) {
-        try self.value_stack.append(Value.new(.nil, offset));
+        try self.value_stack.append(Value.new(.nil));
         self.ip.* += 1;
         return;
     }
@@ -1689,9 +1660,9 @@ fn strSplit(self: *Vm) anyerror!void {
     var list_ptr = try self.allocator.create(std.ArrayList(Value));
     list_ptr.* = std.ArrayList(Value).init(self.allocator);
     var iter = std.mem.split(u8, str.ty.string, delim.ty.string);
-    while (iter.next()) |sub| try list_ptr.append(Value.new(.{ .string = sub }, 0));
+    while (iter.next()) |sub| try list_ptr.append(Value.new(.{ .string = sub }));
 
-    try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }));
     self.ip.* += 1;
 }
 fn listJoin(self: *Vm) anyerror!void {
@@ -1723,7 +1694,7 @@ fn listJoin(self: *Vm) anyerror!void {
         _ = try writer.print("{}", .{item});
     }
 
-    try self.value_stack.append(Value.new(.{ .string = buf.items }, offset));
+    try self.value_stack.append(Value.new(.{ .string = buf.items }));
     self.ip.* += 1;
 }
 fn strEndsWith(self: *Vm) anyerror!void {
@@ -1740,7 +1711,7 @@ fn strEndsWith(self: *Vm) anyerror!void {
         offset,
     );
 
-    const result = Value.new(.{ .boolean = std.mem.endsWith(u8, str.ty.string, ending.ty.string) }, offset);
+    const result = Value.new(.{ .boolean = std.mem.endsWith(u8, str.ty.string, ending.ty.string) });
 
     try self.value_stack.append(result);
     self.ip.* += 1;
@@ -1759,7 +1730,7 @@ fn strStartsWith(self: *Vm) anyerror!void {
         offset,
     );
 
-    const result = Value.new(.{ .boolean = std.mem.startsWith(u8, str.ty.string, start.ty.string) }, offset);
+    const result = Value.new(.{ .boolean = std.mem.startsWith(u8, str.ty.string, start.ty.string) });
     try self.value_stack.append(result);
 
     self.ip.* += 1;
@@ -1793,7 +1764,7 @@ fn listMap(self: *Vm) anyerror!void {
         list_ptr.appendAssumeCapacity(v);
     }
 
-    try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }));
     self.ip.* += 1;
 }
 fn listFilter(self: *Vm) anyerror!void {
@@ -1825,7 +1796,7 @@ fn listFilter(self: *Vm) anyerror!void {
         if (isTruthy(v)) try list_ptr.append(item);
     }
 
-    try self.value_stack.append(Value.new(.{ .list = list_ptr }, offset));
+    try self.value_stack.append(Value.new(.{ .list = list_ptr }));
     self.ip.* += 1;
 }
 fn each(self: *Vm) anyerror!void {
@@ -1895,7 +1866,7 @@ fn listReduce(self: *Vm) anyerror!void {
     );
 
     if (l.ty.list.items.len == 0) {
-        try self.value_stack.append(Value.new(.nil, offset));
+        try self.value_stack.append(Value.new(.nil));
         self.ip.* += 1;
         return;
     }
@@ -1915,7 +1886,7 @@ fn listReduce(self: *Vm) anyerror!void {
         try func_scope.map.put("@0", item);
         if (f.ty.func.params.len > 0) try func_scope.map.put(f.ty.func.params[0], acc);
         if (f.ty.func.params.len > 1) try func_scope.map.put(f.ty.func.params[1], item);
-        try func_scope.map.put("index", Value.new(.{ .uint = i }, 0));
+        try func_scope.map.put("index", Value.new(.{ .uint = i }));
 
         _ = try self.pushScope(func_scope);
 
@@ -1959,7 +1930,7 @@ fn rand(self: *Vm) anyerror!void {
         offset,
     );
 
-    const result = Value.new(.{ .uint = std.rand.DefaultPrng.init(@intCast(usize, std.time.timestamp())).random().uintAtMost(usize, x_val.ty.uint) }, offset);
+    const result = Value.new(.{ .uint = std.rand.DefaultPrng.init(@intCast(usize, std.time.timestamp())).random().uintAtMost(usize, x_val.ty.uint) });
     try self.value_stack.append(result);
 }
 fn listPush(self: *Vm) anyerror!void {
@@ -2002,7 +1973,7 @@ fn execListPredicate(self: *Vm, func: Value, item: Value, index: usize) anyerror
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function);
 
-    const index_val = Value.new(.{ .uint = index }, 0);
+    const index_val = Value.new(.{ .uint = index });
 
     try func_scope.map.put("it", item);
     try func_scope.map.put("index", index_val);
@@ -2017,12 +1988,12 @@ fn execMapPredicate(self: *Vm, func: Value, key: []const u8, item: Value, index:
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function);
 
-    const key_val = Value.new(.{ .string = key }, 0);
-    const index_val = Value.new(.{ .uint = index }, 0);
+    const key_val = Value.new(.{ .string = key });
+    const index_val = Value.new(.{ .uint = index });
 
     try func_scope.map.put("key", key_val);
     try func_scope.map.put("value", item);
-    try func_scope.map.put("index", Value.new(.{ .uint = index }, 0));
+    try func_scope.map.put("index", Value.new(.{ .uint = index }));
 
     if (func.ty.func.params.len > 0) try func_scope.map.put(func.ty.func.params[0], key_val);
     if (func.ty.func.params.len > 1) try func_scope.map.put(func.ty.func.params[1], item);
@@ -2108,7 +2079,7 @@ fn strToLower(self: *Vm) !void {
         return;
     }
 
-    const lower_s = Value.new(.{ .string = try ziglyph.toLowerStr(self.allocator, s.ty.string) }, offset);
+    const lower_s = Value.new(.{ .string = try ziglyph.toLowerStr(self.allocator, s.ty.string) });
 
     try self.value_stack.append(lower_s);
     self.ip.* += 1; // num_args
@@ -2132,7 +2103,7 @@ fn strToUpper(self: *Vm) !void {
         return;
     }
 
-    const lower_s = Value.new(.{ .string = try ziglyph.toUpperStr(self.allocator, s.ty.string) }, offset);
+    const lower_s = Value.new(.{ .string = try ziglyph.toUpperStr(self.allocator, s.ty.string) });
 
     try self.value_stack.append(lower_s);
     self.ip.* += 1; // num_args
@@ -2243,46 +2214,37 @@ test "Compiler predefined constant values" {
     var got = try testVmValue(allocator, "true");
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(true, got.ty.boolean);
-    try std.testing.expectEqual(@as(u16, 0), got.offset);
 
     got = try testVmValue(allocator, "false");
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(false, got.ty.boolean);
-    try std.testing.expectEqual(@as(u16, 0), got.offset);
 
     got = try testVmValue(allocator, "nil");
     try std.testing.expectEqual(Value.Tag.nil, got.ty);
-    try std.testing.expectEqual(@as(u16, 0), got.offset);
 
     got = try testVmValue(allocator, "3.1415");
     try std.testing.expectEqual(Value.Tag.float, got.ty);
     try std.testing.expectEqual(@as(f64, 3.1415), got.ty.float);
-    try std.testing.expectEqual(@as(u16, 0), got.offset);
 
     got = try testVmValue(allocator, "3.1415 3.1415");
     try std.testing.expectEqual(Value.Tag.float, got.ty);
     try std.testing.expectEqual(@as(f64, 3.1415), got.ty.float);
-    try std.testing.expectEqual(@as(u16, 7), got.offset);
 
     got = try testVmValue(allocator, "-3");
     try std.testing.expectEqual(Value.Tag.int, got.ty);
     try std.testing.expectEqual(@as(i64, -3), got.ty.int);
-    try std.testing.expectEqual(@as(u16, 0), got.offset);
 
     got = try testVmValue(allocator, "-3 -3");
     try std.testing.expectEqual(Value.Tag.int, got.ty);
     try std.testing.expectEqual(@as(i64, -3), got.ty.int);
-    try std.testing.expectEqual(@as(u16, 3), got.offset);
 
     got = try testVmValue(allocator, "9");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 9), got.ty.uint);
-    try std.testing.expectEqual(@as(u16, 0), got.offset);
 
     got = try testVmValue(allocator, "9 9");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 9), got.ty.uint);
-    try std.testing.expectEqual(@as(u16, 2), got.offset);
 }
 
 test "Vm strings" {
@@ -2293,19 +2255,16 @@ test "Vm strings" {
     var got = try testVmValue(allocator, "\"foobar\"");
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("foobar", got.ty.string);
-    try std.testing.expectEqual(@as(u16, 0), got.offset);
 
     got = try testVmValue(allocator, "\"foobar\" \"foobar\"");
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("foobar", got.ty.string);
-    try std.testing.expectEqual(@as(u16, 9), got.offset);
 
     got = try testVmValue(allocator,
         \\"foo {#d:0>3# 2} bar"
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("foo 002 bar", got.ty.string);
-    try std.testing.expectEqual(@as(u16, 0), got.offset);
 }
 
 test "Vm function literal" {
@@ -2322,7 +2281,6 @@ test "Vm function literal" {
     try std.testing.expectEqualStrings("bar", got.ty.func.params[1]);
     try std.testing.expectEqual(@as(usize, 12), got.ty.func.instructions.len);
     try std.testing.expectEqual(Compiler.Opcode.uint, @intToEnum(Compiler.Opcode, got.ty.func.instructions[0]));
-    try std.testing.expectEqual(@as(u16, 0), got.offset);
 }
 
 test "Vm function call / define, store, load" {
@@ -2433,7 +2391,6 @@ test "Vm subscripts" {
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 4), got.ty.uint);
-    try std.testing.expectEqual(@as(u16, 14), got.offset);
 }
 
 test "Vm subscript assign" {
@@ -2451,7 +2408,6 @@ test "Vm subscript assign" {
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 7), got.ty.uint);
-    try std.testing.expectEqual(@as(u16, 41), got.offset);
 }
 
 test "Vm conditionals" {
@@ -2615,7 +2571,7 @@ test "Vm math builtins" {
     got = try testVmValue(allocator, "log(3.14)");
     try std.testing.expectEqual(Value.Tag.float, got.ty);
     try std.testing.expectEqual(@as(f64, 1.144222799920162e+00), got.ty.float);
-    //try testLastValue("rand(10)", Value.new(.{ .uint = 10 }, 0));
+    //try testLastValue("rand(10)", Value.new(.{ .uint = 10 }));
     got = try testVmValue(allocator, "sin(3.14)");
     try std.testing.expectEqual(Value.Tag.float, got.ty);
     try std.testing.expectEqual(@as(f64, 1.5926529164868282e-03), got.ty.float);
@@ -2743,7 +2699,7 @@ test "Vm method builtins" {
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
     //try testLastValue(
-    //, Value.new(.{ .string = "bar" }, 0));
+    //, Value.new(.{ .string = "bar" }));
     got = try testVmValue(allocator,
         \\"foo,bar,baz".split(",")[1]
     );
@@ -2779,15 +2735,15 @@ test "Vm method builtins" {
     try std.testing.expectEqual(@as(u64, 6), got.ty.uint);
     //try testLastValueWithOutput(
     //    \\print("foo", 1, 2, 3.14)
-    //, Value.new(.nil, 0), "foo,1,2,3.14");
+    //, Value.new(.nil), "foo,1,2,3.14");
     //try testLastValueWithOutput(
     //    \\print("foo", 1, 2, 3.14, "foo {1}")
-    //, Value.new(.nil, 0), "foo,1,2,3.14,foo 1");
+    //, Value.new(.nil), "foo,1,2,3.14,foo 1");
     //try testLastValueWithOutput(
     //    \\print("foo", 1, 2, 3.14, "{#d:0>3# 1}")
-    //, Value.new(.nil, 0), "foo,1,2,3.14,001");
+    //, Value.new(.nil), "foo,1,2,3.14,001");
     //try testLastValue(
-    //, Value.new(.{ .string = "\u{65}\u{301}" }, 0));
+    //, Value.new(.{ .string = "\u{65}\u{301}" }));
     got = try testVmValue(allocator,
         \\"H\u65\u301llo".chars()[1]
     );

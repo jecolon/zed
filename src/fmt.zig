@@ -1,7 +1,6 @@
 const std = @import("std");
 const FormatOptions = std.fmt.FormatOptions;
 
-const Location = @import("Location.zig");
 const Value = @import("Value.zig");
 
 const Lexer = struct {
@@ -136,25 +135,15 @@ pub fn parseFormat(fmt: []const u8) anyerror!FormatSpec {
 
 pub fn runtimePrint(
     allocator: std.mem.Allocator,
-    filename: []const u8,
-    src: []const u8,
     fmt: []const u8,
     value: Value,
     writer: anytype,
-    offset: u16,
 ) anyerror!void {
     const format = try parseFormat(fmt);
 
     switch (format.spec) {
         'd' => {
-            if (value.ty != .float and
-                value.ty != .int and
-                value.ty != .uint)
-            {
-                const location = Location.getLocation(filename, src, offset);
-                std.log.err("`d` format specifier on non-numeric value; {}", .{location});
-                return error.InvalidFormat;
-            }
+            if (value.ty != .float and value.ty != .int and value.ty != .uint) return error.InvalidFormat;
 
             switch (value.ty) {
                 .float => {
@@ -195,11 +184,7 @@ pub fn runtimePrint(
             }
         },
         'e' => {
-            if (value.ty != .float) {
-                const location = Location.getLocation(filename, src, offset);
-                std.log.err("`e` format specifier on non-float number; {}", .{location});
-                return error.InvalidFormat;
-            }
+            if (value.ty != .float) return error.InvalidFormat;
 
             var buf = std.ArrayList(u8).init(allocator);
             defer buf.deinit();
@@ -216,11 +201,7 @@ pub fn runtimePrint(
             );
         },
         's' => {
-            if (value.ty != .string) {
-                const location = Location.getLocation(filename, src, offset);
-                std.log.err("`s` format specifier on non-string; {}", .{location});
-                return error.InvalidFormat;
-            }
+            if (value.ty != .string) return error.InvalidFormat;
 
             try std.fmt.formatBuf(
                 value.ty.string,
