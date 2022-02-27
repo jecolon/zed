@@ -155,7 +155,7 @@ pub fn main() anyerror!void {
 
             // Loop over fields
             var field_iter = std.mem.split(u8, scope_stack.record, scope_stack.ifs);
-            while (field_iter.next()) |field| try scope_stack.columns.append(Value.new(.{ .string = field }, 0));
+            while (field_iter.next()) |field| try scope_stack.columns.append(Value.new(.{ .string = field }));
 
             // For each record, exec the rules.
             var rules_vm = try Vm.init(
