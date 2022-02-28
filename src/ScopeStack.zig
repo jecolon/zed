@@ -27,45 +27,45 @@ ofs: []const u8 = ",",
 ors: []const u8 = "\n",
 
 const builtins = std.ComptimeStringMap(Value, .{
-    .{ "atan2", Value.new(.{ .builtin = .atan2 }) },
-    .{ "chars", Value.new(.{ .builtin = .chars }) },
-    .{ "contains", Value.new(.{ .builtin = .contains }) },
-    .{ "cos", Value.new(.{ .builtin = .cos }) },
-    .{ "each", Value.new(.{ .builtin = .each }) },
-    .{ "endsWith", Value.new(.{ .builtin = .endsWith }) },
-    .{ "exp", Value.new(.{ .builtin = .exp }) },
-    .{ "filter", Value.new(.{ .builtin = .filter }) },
-    .{ "int", Value.new(.{ .builtin = .int }) },
-    .{ "indexOf", Value.new(.{ .builtin = .indexOf }) },
-    .{ "join", Value.new(.{ .builtin = .join }) },
-    .{ "keys", Value.new(.{ .builtin = .keys }) },
-    .{ "keysByValueAsc", Value.new(.{ .builtin = .keysByValueAsc }) },
-    .{ "keysByValueDesc", Value.new(.{ .builtin = .keysByValueDesc }) },
-    .{ "lastIndexOf", Value.new(.{ .builtin = .lastIndexOf }) },
-    .{ "len", Value.new(.{ .builtin = .len }) },
-    .{ "log", Value.new(.{ .builtin = .log }) },
-    .{ "map", Value.new(.{ .builtin = .map }) },
-    .{ "max", Value.new(.{ .builtin = .max }) },
-    .{ "mean", Value.new(.{ .builtin = .mean }) },
-    .{ "median", Value.new(.{ .builtin = .median }) },
-    .{ "min", Value.new(.{ .builtin = .min }) },
-    .{ "mode", Value.new(.{ .builtin = .mode }) },
-    .{ "print", Value.new(.{ .builtin = .print }) },
-    .{ "pop", Value.new(.{ .builtin = .pop }) },
-    .{ "push", Value.new(.{ .builtin = .push }) },
-    .{ "rand", Value.new(.{ .builtin = .rand }) },
-    .{ "reduce", Value.new(.{ .builtin = .reduce }) },
-    .{ "reverse", Value.new(.{ .builtin = .reverse }) },
-    .{ "sin", Value.new(.{ .builtin = .sin }) },
-    .{ "sortAsc", Value.new(.{ .builtin = .sortAsc }) },
-    .{ "sortDesc", Value.new(.{ .builtin = .sortDesc }) },
-    .{ "split", Value.new(.{ .builtin = .split }) },
-    .{ "sqrt", Value.new(.{ .builtin = .sqrt }) },
-    .{ "startsWith", Value.new(.{ .builtin = .startsWith }) },
-    .{ "stdev", Value.new(.{ .builtin = .stdev }) },
-    .{ "toLower", Value.new(.{ .builtin = .toLower }) },
-    .{ "toUpper", Value.new(.{ .builtin = .toUpper }) },
-    .{ "values", Value.new(.{ .builtin = .values }) },
+    .{ "atan2", Value{ .ty = .{ .builtin = .atan2 } } },
+    .{ "chars", Value{ .ty = .{ .builtin = .chars } } },
+    .{ "contains", Value{ .ty = .{ .builtin = .contains } } },
+    .{ "cos", Value{ .ty = .{ .builtin = .cos } } },
+    .{ "each", Value{ .ty = .{ .builtin = .each } } },
+    .{ "endsWith", Value{ .ty = .{ .builtin = .endsWith } } },
+    .{ "exp", Value{ .ty = .{ .builtin = .exp } } },
+    .{ "filter", Value{ .ty = .{ .builtin = .filter } } },
+    .{ "int", Value{ .ty = .{ .builtin = .int } } },
+    .{ "indexOf", Value{ .ty = .{ .builtin = .indexOf } } },
+    .{ "join", Value{ .ty = .{ .builtin = .join } } },
+    .{ "keys", Value{ .ty = .{ .builtin = .keys } } },
+    .{ "keysByValueAsc", Value{ .ty = .{ .builtin = .keysByValueAsc } } },
+    .{ "keysByValueDesc", Value{ .ty = .{ .builtin = .keysByValueDesc } } },
+    .{ "lastIndexOf", Value{ .ty = .{ .builtin = .lastIndexOf } } },
+    .{ "len", Value{ .ty = .{ .builtin = .len } } },
+    .{ "log", Value{ .ty = .{ .builtin = .log } } },
+    .{ "map", Value{ .ty = .{ .builtin = .map } } },
+    .{ "max", Value{ .ty = .{ .builtin = .max } } },
+    .{ "mean", Value{ .ty = .{ .builtin = .mean } } },
+    .{ "median", Value{ .ty = .{ .builtin = .median } } },
+    .{ "min", Value{ .ty = .{ .builtin = .min } } },
+    .{ "mode", Value{ .ty = .{ .builtin = .mode } } },
+    .{ "print", Value{ .ty = .{ .builtin = .print } } },
+    .{ "pop", Value{ .ty = .{ .builtin = .pop } } },
+    .{ "push", Value{ .ty = .{ .builtin = .push } } },
+    .{ "rand", Value{ .ty = .{ .builtin = .rand } } },
+    .{ "reduce", Value{ .ty = .{ .builtin = .reduce } } },
+    .{ "reverse", Value{ .ty = .{ .builtin = .reverse } } },
+    .{ "sin", Value{ .ty = .{ .builtin = .sin } } },
+    .{ "sortAsc", Value{ .ty = .{ .builtin = .sortAsc } } },
+    .{ "sortDesc", Value{ .ty = .{ .builtin = .sortDesc } } },
+    .{ "split", Value{ .ty = .{ .builtin = .split } } },
+    .{ "sqrt", Value{ .ty = .{ .builtin = .sqrt } } },
+    .{ "startsWith", Value{ .ty = .{ .builtin = .startsWith } } },
+    .{ "stdev", Value{ .ty = .{ .builtin = .stdev } } },
+    .{ "toLower", Value{ .ty = .{ .builtin = .toLower } } },
+    .{ "toUpper", Value{ .ty = .{ .builtin = .toUpper } } },
+    .{ "values", Value{ .ty = .{ .builtin = .values } } },
 });
 
 const globals = std.ComptimeStringMap(void, .{
@@ -126,15 +126,15 @@ pub fn isDefined(self: ScopeStack, key: []const u8) bool {
 pub fn load(self: ScopeStack, key: []const u8) ?Value {
     if (builtins.get(key)) |v| return v;
 
-    if (std.mem.eql(u8, key, "@cols")) return Value.new(.{ .list = self.columns });
-    if (std.mem.eql(u8, key, "@file")) return Value.new(.{ .string = self.file });
-    if (std.mem.eql(u8, key, "@frnum")) return Value.new(.{ .uint = @intCast(u64, self.frnum) });
-    if (std.mem.eql(u8, key, "@ifs")) return Value.new(.{ .string = self.ifs });
-    if (std.mem.eql(u8, key, "@irs")) return Value.new(.{ .string = self.irs });
-    if (std.mem.eql(u8, key, "@ofs")) return Value.new(.{ .string = self.ofs });
-    if (std.mem.eql(u8, key, "@ors")) return Value.new(.{ .string = self.ors });
-    if (std.mem.eql(u8, key, "@rec")) return Value.new(.{ .string = self.record });
-    if (std.mem.eql(u8, key, "@rnum")) return Value.new(.{ .uint = @intCast(u64, self.frnum) });
+    if (std.mem.eql(u8, key, "@cols")) return Value{ .ty = .{ .list = self.columns } };
+    if (std.mem.eql(u8, key, "@file")) return Value{ .ty = .{ .string = self.file } };
+    if (std.mem.eql(u8, key, "@frnum")) return Value{ .ty = .{ .uint = @intCast(u64, self.frnum) } };
+    if (std.mem.eql(u8, key, "@ifs")) return Value{ .ty = .{ .string = self.ifs } };
+    if (std.mem.eql(u8, key, "@irs")) return Value{ .ty = .{ .string = self.irs } };
+    if (std.mem.eql(u8, key, "@ofs")) return Value{ .ty = .{ .string = self.ofs } };
+    if (std.mem.eql(u8, key, "@ors")) return Value{ .ty = .{ .string = self.ors } };
+    if (std.mem.eql(u8, key, "@rec")) return Value{ .ty = .{ .string = self.record } };
+    if (std.mem.eql(u8, key, "@rnum")) return Value{ .ty = .{ .uint = @intCast(u64, self.frnum) } };
 
     const len = self.stack.items.len;
     var i: usize = 1;

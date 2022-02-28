@@ -12,7 +12,7 @@ const ziglyph = @import("ziglyph");
 
 allocator: std.mem.Allocator,
 ctx: Context,
-last_popped: Value = Value.new(.nil),
+last_popped: Value = Value{ .ty = .nil },
 output: *std.ArrayList(u8),
 
 instructions: []const u8 = undefined,
