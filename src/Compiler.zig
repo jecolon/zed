@@ -13,15 +13,11 @@ pub const Opcode = enum {
     nil,
     // Numbers
     float,
-    float_ref,
     int,
-    int_ref,
     uint,
-    uint_ref,
     // Strings
     format,
     plain,
-    plain_ref,
     string,
     // Scopes
     scope_in,
@@ -33,7 +29,6 @@ pub const Opcode = enum {
     // Variables
     define,
     ident,
-    ident_ref,
     load,
     set,
     store,
@@ -187,43 +182,22 @@ fn compileNil(self: *Compiler, node: Node) !void {
 }
 
 fn compileFloat(self: *Compiler, node: Node) !void {
-    var instruction = Opcode.float;
     var slice: []const u8 = std.mem.sliceAsBytes(&[1]f64{node.ty.float});
-
-    if (std.mem.indexOf(u8, self.instructions.items, slice)) |index| {
-        instruction = Opcode.float_ref;
-        slice = std.mem.sliceAsBytes(&[1]u16{@intCast(u16, index)});
-    }
-
-    try self.pushInstruction(instruction);
+    try self.pushInstruction(.float);
     try self.pushOffset(node.offset);
     try self.pushSlice(slice);
 }
 
 fn compileInt(self: *Compiler, node: Node) !void {
-    var instruction = Opcode.int;
     var slice: []const u8 = std.mem.sliceAsBytes(&[1]i64{node.ty.int});
-
-    if (std.mem.indexOf(u8, self.instructions.items, slice)) |index| {
-        instruction = Opcode.int_ref;
-        slice = std.mem.sliceAsBytes(&[1]u16{@intCast(u16, index)});
-    }
-
-    try self.pushInstruction(instruction);
+    try self.pushInstruction(.int);
     try self.pushOffset(node.offset);
     try self.pushSlice(slice);
 }
 
 fn compileUint(self: *Compiler, node: Node) !void {
-    var instruction = Opcode.uint;
     var slice: []const u8 = std.mem.sliceAsBytes(&[1]u64{node.ty.uint});
-
-    if (std.mem.indexOf(u8, self.instructions.items, slice)) |index| {
-        instruction = Opcode.uint_ref;
-        slice = std.mem.sliceAsBytes(&[1]u16{@intCast(u16, index)});
-    }
-
-    try self.pushInstruction(instruction);
+    try self.pushInstruction(.uint);
     try self.pushOffset(node.offset);
     try self.pushSlice(slice);
 }
@@ -236,17 +210,9 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
 
         switch (segment) {
             .plain => |plain| {
-                var instruction = Opcode.plain;
-                var slice = plain;
-
-                if (std.mem.indexOf(u8, self.instructions.items, slice)) |index| {
-                    instruction = Opcode.plain_ref;
-                    slice = std.mem.sliceAsBytes(&[_]u16{@intCast(u16, index)});
-                }
-
-                try self.pushInstruction(instruction);
+                try self.pushInstruction(.plain);
                 try self.pushLen(plain.len);
-                try self.pushSlice(slice);
+                try self.pushSlice(plain);
             },
             .ipol => |ipol| {
                 try self.pushInstruction(.scope_in);
@@ -313,31 +279,17 @@ fn compileDefine(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.define.rvalue.*);
     try self.pushInstruction(.define);
     try self.pushOffset(node.offset);
-
-    if (std.mem.indexOf(u8, self.instructions.items, node.ty.define.lvalue.ty.ident)) |index| {
-        try self.pushInstruction(.ident_ref);
-        try self.pushLen(index); // pushIndex?
-        try self.pushLen(node.ty.define.lvalue.ty.ident.len);
-    } else {
-        try self.pushInstruction(.ident);
-        try self.pushLen(node.ty.define.lvalue.ty.ident.len);
-        try self.pushSlice(node.ty.define.lvalue.ty.ident);
-    }
+    try self.pushInstruction(.ident);
+    try self.pushLen(node.ty.define.lvalue.ty.ident.len);
+    try self.pushSlice(node.ty.define.lvalue.ty.ident);
 }
 
 fn compileLoad(self: *Compiler, node: Node) anyerror!void {
     try self.pushInstruction(.load);
     try self.pushOffset(node.offset);
-
-    if (std.mem.indexOf(u8, self.instructions.items, node.ty.ident)) |index| {
-        try self.pushInstruction(.ident_ref);
-        try self.pushLen(index); // pushIndex?
-        try self.pushLen(node.ty.ident.len);
-    } else {
-        try self.pushInstruction(.ident);
-        try self.pushLen(node.ty.ident.len);
-        try self.pushSlice(node.ty.ident);
-    }
+    try self.pushInstruction(.ident);
+    try self.pushLen(node.ty.ident.len);
+    try self.pushSlice(node.ty.ident);
 }
 
 fn compileStore(self: *Compiler, node: Node) anyerror!void {
@@ -347,16 +299,9 @@ fn compileStore(self: *Compiler, node: Node) anyerror!void {
         try self.pushInstruction(.store);
         try self.pushOffset(node.offset);
         try self.pushEnum(node.ty.assign.combo);
-
-        if (std.mem.indexOf(u8, self.instructions.items, node.ty.assign.lvalue.ty.ident)) |index| {
-            try self.pushInstruction(.ident_ref);
-            try self.pushLen(index); // pushIndex?
-            try self.pushLen(node.ty.assign.lvalue.ty.ident.len);
-        } else {
-            try self.pushInstruction(.ident);
-            try self.pushLen(node.ty.assign.lvalue.ty.ident.len);
-            try self.pushSlice(node.ty.assign.lvalue.ty.ident);
-        }
+        try self.pushInstruction(.ident);
+        try self.pushLen(node.ty.assign.lvalue.ty.ident.len);
+        try self.pushSlice(node.ty.assign.lvalue.ty.ident);
     } else {
         try self.compile(node.ty.assign.lvalue.ty.subscript.index.*);
         try self.compile(node.ty.assign.lvalue.ty.subscript.container.*);

@@ -62,15 +62,11 @@ pub fn run(self: *Vm) !void {
             .nil => try self.execNil(),
             // Numbers
             .float => try self.execFloat(),
-            .float_ref => try self.execFloatRef(),
             .int => try self.execInt(),
-            .int_ref => try self.execIntRef(),
             .uint => try self.execUint(),
-            .uint_ref => try self.execUintRef(),
             // Strings
             .format => try self.execFormat(),
             .plain => try self.execPlain(),
-            .plain_ref => try self.execPlainRef(),
             .string => try self.execString(),
             // functions
             .call => try self.execCall(),
@@ -155,37 +151,16 @@ fn execFloat(self: *Vm) !void {
     self.ip.* += 8;
     try self.value_stack.append(Value.new(.{ .float = f }));
 }
-fn execFloatRef(self: *Vm) !void {
-    self.ip.* += 3;
-    const start = self.getU16(self.ip.*);
-    self.ip.* += 2;
-    const f = self.getNumber(f64, start, 8);
-    try self.value_stack.append(Value.new(.{ .float = f }));
-}
 fn execInt(self: *Vm) !void {
     self.ip.* += 3;
     const i = self.getNumber(i64, self.ip.*, 8);
     self.ip.* += 8;
     try self.value_stack.append(Value.new(.{ .int = i }));
 }
-fn execIntRef(self: *Vm) !void {
-    self.ip.* += 3;
-    const start = self.getU16(self.ip.*);
-    self.ip.* += 2;
-    const i = self.getNumber(i64, start, 8);
-    try self.value_stack.append(Value.new(.{ .int = i }));
-}
 fn execUint(self: *Vm) !void {
     self.ip.* += 3;
     const u = self.getNumber(u64, self.ip.*, 8);
     self.ip.* += 8;
-    try self.value_stack.append(Value.new(.{ .uint = u }));
-}
-fn execUintRef(self: *Vm) !void {
-    self.ip.* += 3;
-    const start = self.getU16(self.ip.*);
-    self.ip.* += 2;
-    const u = self.getNumber(u64, start, 8);
     try self.value_stack.append(Value.new(.{ .uint = u }));
 }
 
@@ -213,15 +188,6 @@ fn execPlain(self: *Vm) !void {
     self.ip.* += 2;
     const s = self.getString(self.ip.*, len);
     self.ip.* += len;
-    try self.value_stack.append(Value.new(.{ .string = s }));
-}
-fn execPlainRef(self: *Vm) !void {
-    self.ip.* += 1;
-    const len = self.getU16(self.ip.*);
-    self.ip.* += 2;
-    const start = self.getU16(self.ip.*);
-    self.ip.* += 2;
-    const s = self.getString(start, len);
     try self.value_stack.append(Value.new(.{ .string = s }));
 }
 fn execString(self: *Vm) !void {
