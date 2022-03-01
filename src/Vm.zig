@@ -238,11 +238,13 @@ fn execFunc(self: *Vm) !void {
     const func_instructions: []const u8 = if (instructions_len == 0) "" else self.getString(self.ip.*, instructions_len);
     self.ip.* += instructions_len;
 
-    try self.value_stack.append(Value.new(.{ .func = .{
+    const func_ptr = try self.allocator.create(Value.Function);
+    func_ptr.* = .{
         .name = func_name,
         .params = params,
         .instructions = func_instructions,
-    } }));
+    };
+    try self.value_stack.append(Value.new(.{ .func = func_ptr }));
 }
 
 fn execReturn(self: *Vm) void {

@@ -62,7 +62,7 @@ pub const Type = union(Tag) {
     boolean: bool,
     builtin: Builtin,
     float: f64,
-    func: Function,
+    func: *Function,
     int: i64,
     list: *std.ArrayList(Value),
     map: *std.StringHashMap(Value),
@@ -74,12 +74,12 @@ pub const Type = union(Tag) {
 
 ty: Type,
 
-//pub const S = struct {
-//    pub var i: usize = 0;
-//};
+pub const S = struct {
+    pub var i: usize = 0;
+};
 
 pub fn new(ty: Type) Value {
-    //S.i += 1;
+    S.i += 1;
     return .{ .ty = ty };
 }
 
@@ -103,11 +103,13 @@ fn copyFunc(self: Value, allocator: std.mem.Allocator) anyerror!Value {
     const name_copy = try allocator.dupe(u8, self.ty.func.name);
     var params_copy = try allocator.alloc([]const u8, self.ty.func.params.len);
     for (self.ty.func.params) |param, i| params_copy[i] = try allocator.dupe(u8, param);
-    return Value.new(.{ .func = .{
+    const copy_ptr = try allocator.create(Function);
+    copy_ptr.* = .{
         .instructions = instructions_copy,
         .name = name_copy,
         .params = params_copy,
-    } });
+    };
+    return Value.new(.{ .func = copy_ptr });
 }
 fn copyList(self: Value, allocator: std.mem.Allocator) anyerror!Value {
     var copy_ptr = try allocator.create(std.ArrayList(Value));
@@ -148,6 +150,7 @@ fn deinitFunc(self: Value, allocator: std.mem.Allocator) void {
     allocator.free(self.ty.func.name);
     for (self.ty.func.params) |param| allocator.free(param);
     allocator.free(self.ty.func.params);
+    allocator.destroy(self.ty.func);
 }
 fn deinitList(self: Value, allocator: std.mem.Allocator) void {
     for (self.ty.list.items) |*item| item.deinit(allocator);
