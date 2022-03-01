@@ -1237,9 +1237,8 @@ fn mapKeys(self: *Vm) anyerror!void {
         try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
     var key_iter = m.ty.map.keyIterator();
     while (key_iter.next()) |key| {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = key.*;
-        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = str_ptr }));
+        //TODO: Make sure this is OK
+        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = key }));
     }
 
     try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
@@ -1286,9 +1285,8 @@ fn mapKeysByValueAsc(self: *Vm) anyerror!void {
     std.sort.sort(std.StringHashMap(Value).Entry, entries.items, {}, entryAsc);
 
     for (entries.items) |entry| {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = entry.key_ptr.*;
-        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = str_ptr }));
+        //TODO: Make sure this is OK
+        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr }));
     }
 
     try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
@@ -1327,9 +1325,8 @@ fn mapKeysByValueDesc(self: *Vm) anyerror!void {
     std.sort.sort(std.StringHashMap(Value).Entry, entries.items, {}, entryDesc);
 
     for (entries.items) |entry| {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = entry.key_ptr.*;
-        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = str_ptr }));
+        //TODO: Make sure this is OK
+        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr }));
     }
 
     try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
