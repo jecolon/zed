@@ -180,7 +180,10 @@ fn execFormat(self: *Vm) !void {
         value,
         writer,
     );
-    try self.value_stack.append(Value.new(.{ .string = buf.items }));
+
+    const str_ptr = try self.allocator.create([]const u8);
+    str_ptr.* = buf.items;
+    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
 }
 fn execPlain(self: *Vm) !void {
     self.ip.* += 1;
@@ -188,7 +191,10 @@ fn execPlain(self: *Vm) !void {
     self.ip.* += 2;
     const s = self.getString(self.ip.*, len);
     self.ip.* += len;
-    try self.value_stack.append(Value.new(.{ .string = s }));
+
+    const str_ptr = try self.allocator.create([]const u8);
+    str_ptr.* = s;
+    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
 }
 fn execString(self: *Vm) !void {
     self.ip.* += 3;
@@ -199,7 +205,10 @@ fn execString(self: *Vm) !void {
     var writer = buf.writer();
     var i: usize = 0;
     while (i < len) : (i += 1) _ = try writer.print("{}", .{self.value_stack.pop()});
-    try self.value_stack.append(Value.new(.{ .string = buf.items }));
+
+    const str_ptr = try self.allocator.create([]const u8);
+    str_ptr.* = buf.items;
+    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
 }
 
 fn execFunc(self: *Vm) !void {
@@ -374,7 +383,7 @@ fn execLoad(self: *Vm) !void {
         offset,
     );
     // Load
-    try self.value_stack.append(self.scope_stack.load(name).?);
+    try self.value_stack.append((try self.scope_stack.load(name)).?);
 }
 fn execStore(self: *Vm) !void {
     // Offset
@@ -400,7 +409,7 @@ fn execStore(self: *Vm) !void {
         try self.scope_stack.update(name, rvalue);
         try self.value_stack.append(rvalue);
     } else {
-        const old_value = self.scope_stack.load(name).?;
+        const old_value = (try self.scope_stack.load(name)).?;
 
         const new_value = switch (combo) {
             .none => unreachable,
@@ -520,9 +529,12 @@ fn execConcat(self: *Vm) anyerror!void {
     );
 
     var buf = try self.allocator.alloc(u8, left.ty.string.len + right.ty.string.len);
-    std.mem.copy(u8, buf, left.ty.string);
-    std.mem.copy(u8, buf[left.ty.string.len..], right.ty.string);
-    try self.value_stack.append(Value.new(.{ .string = buf }));
+    std.mem.copy(u8, buf, left.ty.string.*);
+    std.mem.copy(u8, buf[left.ty.string.len..], right.ty.string.*);
+
+    const str_ptr = try self.allocator.create([]const u8);
+    str_ptr.* = buf;
+    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
 }
 fn execRepeat(self: *Vm) anyerror!void {
     const right = self.value_stack.pop();
@@ -540,8 +552,11 @@ fn execRepeat(self: *Vm) anyerror!void {
 
     var buf = try self.allocator.alloc(u8, left.ty.string.len * right.ty.uint);
     var i: usize = 0;
-    while (i < right.ty.uint) : (i += 1) std.mem.copy(u8, buf[left.ty.string.len * i ..], left.ty.string);
-    try self.value_stack.append(Value.new(.{ .string = buf }));
+    while (i < right.ty.uint) : (i += 1) std.mem.copy(u8, buf[left.ty.string.len * i ..], left.ty.string.*);
+
+    const str_ptr = try self.allocator.create([]const u8);
+    str_ptr.* = buf;
+    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
 }
 
 fn execNot(self: *Vm) !void {
@@ -600,7 +615,7 @@ fn execMap(self: *Vm) !void {
     while (i < len) : (i += 1) {
         const value = self.value_stack.pop();
         const key = self.value_stack.pop();
-        map_ptr.putAssumeCapacity(key.ty.string, value);
+        map_ptr.putAssumeCapacity(key.ty.string.*, value);
     }
 
     try self.value_stack.append(Value.new(.{ .map = map_ptr }));
@@ -642,7 +657,7 @@ fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
         );
         try self.value_stack.append(list.ty.list.items[index.ty.uint]);
     } else {
-        if (index.ty.range[1] > list.ty.list.items.len) return self.ctx.err(
+        if (index.ty.range.*[1] > list.ty.list.items.len) return self.ctx.err(
             "Index out of bounds.",
             .{},
             error.InvalidSubscript,
@@ -651,7 +666,7 @@ fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
 
         var new_list_ptr = try self.allocator.create(std.ArrayList(Value));
         new_list_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, index.ty.range[1] - index.ty.range[0]);
-        for (list.ty.list.items[index.ty.range[0]..index.ty.range[1]]) |item|
+        for (list.ty.list.items[index.ty.range.*[0]..index.ty.range.*[1]]) |item|
             new_list_ptr.appendAssumeCapacity(item); //TODO: Copy here?
 
         try self.value_stack.append(Value.new(.{ .list = new_list_ptr }));
@@ -665,7 +680,7 @@ fn execSubscriptMap(self: *Vm, map: Value, offset: u16) !void {
         error.InvalidSubscript,
         offset,
     );
-    const value = if (map.ty.map.get(key.ty.string)) |v| v else Value.new(.nil);
+    const value = if (map.ty.map.get(key.ty.string.*)) |v| v else Value.new(.nil);
     try self.value_stack.append(value);
 }
 fn execSet(self: *Vm) !void {
@@ -735,14 +750,14 @@ fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
         offset,
     );
     const rvalue = self.value_stack.pop();
-    const key_copy = try map.ty.map.allocator.dupe(u8, key.ty.string);
+    const key_copy = try map.ty.map.allocator.dupe(u8, key.ty.string.*);
 
     // Store
     if (combo == .none) {
         try map.ty.map.put(key_copy, try rvalue.copy(map.ty.map.allocator)); //TODO: Deinit old value?
         try self.value_stack.append(rvalue);
     } else {
-        const old_value = map.ty.map.get(key.ty.string) orelse Value.new(.{ .uint = 0 });
+        const old_value = map.ty.map.get(key.ty.string.*) orelse Value.new(.{ .uint = 0 });
 
         const new_value = switch (combo) {
             .none => unreachable,
@@ -792,7 +807,9 @@ fn execRange(self: *Vm) anyerror!void {
     const from_uint = from.ty.uint;
     const to_uint = if (inclusive) to.ty.uint + 1 else to.ty.uint;
 
-    try self.value_stack.append(Value.new(.{ .range = [2]usize{ from_uint, to_uint } }));
+    const r_ptr = try self.allocator.create([2]usize);
+    r_ptr.* = [2]usize{ from_uint, to_uint };
+    try self.value_stack.append(Value.new(.{ .range = r_ptr }));
 }
 
 fn execRecRange(self: *Vm) anyerror!void {
@@ -961,13 +978,17 @@ fn strChars(self: *Vm) anyerror!void {
     var list_ptr = try self.allocator.create(std.ArrayList(Value));
     list_ptr.* = std.ArrayList(Value).init(self.allocator);
 
-    var giter = GraphemeIterator.init(str.ty.string) catch |err| return self.ctx.err(
+    var giter = GraphemeIterator.init(str.ty.string.*) catch |err| return self.ctx.err(
         "Unicode error.",
         .{},
         err,
         offset,
     );
-    while (giter.next()) |grapheme| try list_ptr.append(Value.new(.{ .string = grapheme.bytes }));
+    while (giter.next()) |grapheme| {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = grapheme.bytes;
+        try list_ptr.append(Value.new(.{ .string = str_ptr }));
+    }
 
     try self.value_stack.append(Value.new(.{ .list = list_ptr }));
     self.ip.* += 1;
@@ -1004,7 +1025,9 @@ fn execSprint(self: *Vm) anyerror!void {
         _ = try writer.print("{}", .{self.value_stack.pop()});
     }
 
-    try self.value_stack.append(Value.new(.{ .string = buf.items }));
+    const str_ptr = try self.allocator.create([]const u8);
+    str_ptr.* = buf.items;
+    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
 }
 fn oneArgMath(self: *Vm, builtin: Value) anyerror!void {
     self.ip.* += 1;
@@ -1077,7 +1100,7 @@ fn contains(self: *Vm) anyerror!void {
                 offset,
             );
 
-            break :str Value.new(.{ .boolean = std.mem.containsAtLeast(u8, s, 1, needle.ty.string) });
+            break :str Value.new(.{ .boolean = std.mem.containsAtLeast(u8, s.*, 1, needle.ty.string.*) });
         },
         else => unreachable,
     };
@@ -1111,10 +1134,10 @@ fn indexOf(self: *Vm) anyerror!void {
                 offset,
             );
 
-            var giter = try GraphemeIterator.init(s);
+            var giter = try GraphemeIterator.init(s.*);
             var i: usize = 0;
             break :str while (giter.next()) |grapheme| : (i += 1) {
-                if (std.mem.eql(u8, needle.ty.string, grapheme.bytes)) break Value.new(.{ .uint = i });
+                if (std.mem.eql(u8, needle.ty.string.*, grapheme.bytes)) break Value.new(.{ .uint = i });
             } else Value.new(.nil);
         },
         else => unreachable,
@@ -1153,11 +1176,11 @@ fn lastIndexOf(self: *Vm) anyerror!void {
                 offset,
             );
 
-            var giter = try GraphemeIterator.init(s);
+            var giter = try GraphemeIterator.init(s.*);
             var i: usize = 0;
             var index = Value.new(.nil);
             while (giter.next()) |grapheme| : (i += 1) {
-                if (std.mem.eql(u8, needle.ty.string, grapheme.bytes)) index = Value.new(.{ .uint = i });
+                if (std.mem.eql(u8, needle.ty.string.*, grapheme.bytes)) index = Value.new(.{ .uint = i });
             }
 
             break :str index;
@@ -1213,7 +1236,11 @@ fn mapKeys(self: *Vm) anyerror!void {
     else
         try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
     var key_iter = m.ty.map.keyIterator();
-    while (key_iter.next()) |key| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = key.* }));
+    while (key_iter.next()) |key| {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = key.*;
+        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = str_ptr }));
+    }
 
     try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
     self.ip.* += 1;
@@ -1258,7 +1285,11 @@ fn mapKeysByValueAsc(self: *Vm) anyerror!void {
 
     std.sort.sort(std.StringHashMap(Value).Entry, entries.items, {}, entryAsc);
 
-    for (entries.items) |entry| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr.* }));
+    for (entries.items) |entry| {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = entry.key_ptr.*;
+        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = str_ptr }));
+    }
 
     try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
     self.ip.* += 1; // num_args
@@ -1295,7 +1326,11 @@ fn mapKeysByValueDesc(self: *Vm) anyerror!void {
 
     std.sort.sort(std.StringHashMap(Value).Entry, entries.items, {}, entryDesc);
 
-    for (entries.items) |entry| keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr.* }));
+    for (entries.items) |entry| {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = entry.key_ptr.*;
+        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = str_ptr }));
+    }
 
     try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
     self.ip.* += 1; // num_args
@@ -1627,8 +1662,12 @@ fn strSplit(self: *Vm) anyerror!void {
 
     var list_ptr = try self.allocator.create(std.ArrayList(Value));
     list_ptr.* = std.ArrayList(Value).init(self.allocator);
-    var iter = std.mem.split(u8, str.ty.string, delim.ty.string);
-    while (iter.next()) |sub| try list_ptr.append(Value.new(.{ .string = sub }));
+    var iter = std.mem.split(u8, str.ty.string.*, delim.ty.string.*);
+    while (iter.next()) |sub| {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = sub;
+        try list_ptr.append(Value.new(.{ .string = str_ptr }));
+    }
 
     try self.value_stack.append(Value.new(.{ .list = list_ptr }));
     self.ip.* += 1;
@@ -1658,11 +1697,13 @@ fn listJoin(self: *Vm) anyerror!void {
     var writer = buf.writer();
 
     for (l.ty.list.items) |item, i| {
-        if (i != 0 and delim.ty.string.len > 0) try buf.appendSlice(delim.ty.string);
+        if (i != 0 and delim.ty.string.len > 0) try buf.appendSlice(delim.ty.string.*);
         _ = try writer.print("{}", .{item});
     }
 
-    try self.value_stack.append(Value.new(.{ .string = buf.items }));
+    const str_ptr = try self.allocator.create([]const u8);
+    str_ptr.* = buf.items;
+    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
     self.ip.* += 1;
 }
 fn strEndsWith(self: *Vm) anyerror!void {
@@ -1679,7 +1720,7 @@ fn strEndsWith(self: *Vm) anyerror!void {
         offset,
     );
 
-    const result = Value.new(.{ .boolean = std.mem.endsWith(u8, str.ty.string, ending.ty.string) });
+    const result = Value.new(.{ .boolean = std.mem.endsWith(u8, str.ty.string.*, ending.ty.string.*) });
 
     try self.value_stack.append(result);
     self.ip.* += 1;
@@ -1698,7 +1739,7 @@ fn strStartsWith(self: *Vm) anyerror!void {
         offset,
     );
 
-    const result = Value.new(.{ .boolean = std.mem.startsWith(u8, str.ty.string, start.ty.string) });
+    const result = Value.new(.{ .boolean = std.mem.startsWith(u8, str.ty.string.*, start.ty.string.*) });
     try self.value_stack.append(result);
 
     self.ip.* += 1;
@@ -1956,7 +1997,9 @@ fn execMapPredicate(self: *Vm, func: Value, key: []const u8, item: Value, index:
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function);
 
-    const key_val = Value.new(.{ .string = key });
+    const str_ptr = try self.allocator.create([]const u8);
+    str_ptr.* = key;
+    const key_val = Value.new(.{ .string = str_ptr });
     const index_val = Value.new(.{ .uint = index });
 
     try func_scope.map.put("key", key_val);
@@ -2012,7 +2055,7 @@ fn execRedir(self: *Vm) !void {
     // Open file
     var create_flags: std.fs.File.CreateFlags = .{};
     if (!clobber) create_flags.truncate = false;
-    var file = try std.fs.cwd().createFile(filename.ty.string, create_flags);
+    var file = try std.fs.cwd().createFile(filename.ty.string.*, create_flags);
     defer file.close();
     if (!clobber) try file.seekFromEnd(0);
 
@@ -2047,7 +2090,9 @@ fn strToLower(self: *Vm) !void {
         return;
     }
 
-    const lower_s = Value.new(.{ .string = try ziglyph.toLowerStr(self.allocator, s.ty.string) });
+    const str_ptr = try self.allocator.create([]const u8);
+    str_ptr.* = try ziglyph.toLowerStr(self.allocator, s.ty.string.*);
+    const lower_s = Value.new(.{ .string = str_ptr });
 
     try self.value_stack.append(lower_s);
     self.ip.* += 1; // num_args
@@ -2071,9 +2116,11 @@ fn strToUpper(self: *Vm) !void {
         return;
     }
 
-    const lower_s = Value.new(.{ .string = try ziglyph.toUpperStr(self.allocator, s.ty.string) });
+    const str_ptr = try self.allocator.create([]const u8);
+    str_ptr.* = try ziglyph.toUpperStr(self.allocator, s.ty.string.*);
+    const upper_s = Value.new(.{ .string = str_ptr });
 
-    try self.value_stack.append(lower_s);
+    try self.value_stack.append(upper_s);
     self.ip.* += 1; // num_args
 }
 
@@ -2222,17 +2269,17 @@ test "Vm strings" {
 
     var got = try testVmValue(allocator, "\"foobar\"");
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foobar", got.ty.string);
+    try std.testing.expectEqualStrings("foobar", got.ty.string.*);
 
     got = try testVmValue(allocator, "\"foobar\" \"foobar\"");
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foobar", got.ty.string);
+    try std.testing.expectEqualStrings("foobar", got.ty.string.*);
 
     got = try testVmValue(allocator,
         \\"foo {#d:0>3# 2} bar"
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foo 002 bar", got.ty.string);
+    try std.testing.expectEqualStrings("foo 002 bar", got.ty.string.*);
 }
 
 test "Vm function literal" {
@@ -2300,13 +2347,13 @@ test "Vm infix" {
         \\"foo" ++ "bar"
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foobar", got.ty.string);
+    try std.testing.expectEqualStrings("foobar", got.ty.string.*);
 
     got = try testVmValue(allocator,
         \\"-" ** 3
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("---", got.ty.string);
+    try std.testing.expectEqualStrings("---", got.ty.string.*);
 
     got = try testVmValue(allocator, "true and false");
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
@@ -2604,13 +2651,13 @@ test "Vm method builtins" {
         \\["a": 3, "b": 2, "c": 1].keysByValueAsc()[0]
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("c", got.ty.string);
+    try std.testing.expectEqualStrings("c", got.ty.string.*);
 
     got = try testVmValue(allocator,
         \\["a": 3, "b": 2, "c": 1].keysByValueDesc()[0]
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("a", got.ty.string);
+    try std.testing.expectEqualStrings("a", got.ty.string.*);
 
     got = try testVmValue(allocator,
         \\["a": 1, "b": 2, "c": 3].values().len()
@@ -2646,7 +2693,7 @@ test "Vm method builtins" {
         \\["a", "z", "B"].min()
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("B", got.ty.string);
+    try std.testing.expectEqualStrings("B", got.ty.string.*);
 
     got = try testVmValue(allocator, "[2, 3, 1].sortAsc()[0]");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
@@ -2703,13 +2750,13 @@ test "Vm method builtins" {
         \\"foo,bar,baz".split(",")[1]
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("bar", got.ty.string);
+    try std.testing.expectEqualStrings("bar", got.ty.string.*);
 
     got = try testVmValue(allocator,
         \\["foo", 1, 2.3, nil].join(",")
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foo,1,2.3,", got.ty.string);
+    try std.testing.expectEqualStrings("foo,1,2.3,", got.ty.string.*);
 
     got = try testVmValue(allocator,
         \\f := { a => a * 2 + index }
@@ -2754,7 +2801,7 @@ test "Vm method builtins" {
         \\"H\u65\u301llo".chars()[1]
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("\u{65}\u{301}", got.ty.string);
+    try std.testing.expectEqualStrings("\u{65}\u{301}", got.ty.string.*);
 
     got = try testVmValue(allocator,
         \\"Hello".startsWith("Hell")
@@ -2787,11 +2834,11 @@ test "Vm method builtins" {
         \\"FOO".toLower()
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foo", got.ty.string);
+    try std.testing.expectEqualStrings("foo", got.ty.string.*);
 
     got = try testVmValue(allocator,
         \\"foo".toUpper()
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("FOO", got.ty.string);
+    try std.testing.expectEqualStrings("FOO", got.ty.string.*);
 }

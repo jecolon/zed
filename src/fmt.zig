@@ -204,7 +204,7 @@ pub fn runtimePrint(
             if (value.ty != .string) return error.InvalidFormat;
 
             try std.fmt.formatBuf(
-                value.ty.string,
+                value.ty.string.*,
                 format.options,
                 writer,
             );

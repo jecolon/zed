@@ -123,17 +123,41 @@ pub fn isDefined(self: ScopeStack, key: []const u8) bool {
     return self.global_scope.contains(key);
 }
 
-pub fn load(self: ScopeStack, key: []const u8) ?Value {
+pub fn load(self: ScopeStack, key: []const u8) !?Value {
     if (builtins.get(key)) |v| return v;
 
     if (std.mem.eql(u8, key, "@cols")) return Value{ .ty = .{ .list = self.columns } };
-    if (std.mem.eql(u8, key, "@file")) return Value{ .ty = .{ .string = self.file } };
+    if (std.mem.eql(u8, key, "@file")) {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = self.file;
+        return Value{ .ty = .{ .string = str_ptr } };
+    }
     if (std.mem.eql(u8, key, "@frnum")) return Value{ .ty = .{ .uint = @intCast(u64, self.frnum) } };
-    if (std.mem.eql(u8, key, "@ifs")) return Value{ .ty = .{ .string = self.ifs } };
-    if (std.mem.eql(u8, key, "@irs")) return Value{ .ty = .{ .string = self.irs } };
-    if (std.mem.eql(u8, key, "@ofs")) return Value{ .ty = .{ .string = self.ofs } };
-    if (std.mem.eql(u8, key, "@ors")) return Value{ .ty = .{ .string = self.ors } };
-    if (std.mem.eql(u8, key, "@rec")) return Value{ .ty = .{ .string = self.record } };
+    if (std.mem.eql(u8, key, "@ifs")) {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = self.ifs;
+        return Value{ .ty = .{ .string = str_ptr } };
+    }
+    if (std.mem.eql(u8, key, "@irs")) {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = self.irs;
+        return Value{ .ty = .{ .string = str_ptr } };
+    }
+    if (std.mem.eql(u8, key, "@ofs")) {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = self.ofs;
+        return Value{ .ty = .{ .string = str_ptr } };
+    }
+    if (std.mem.eql(u8, key, "@ors")) {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = self.ors;
+        return Value{ .ty = .{ .string = str_ptr } };
+    }
+    if (std.mem.eql(u8, key, "@rec")) {
+        const str_ptr = try self.allocator.create([]const u8);
+        str_ptr.* = self.record;
+        return Value{ .ty = .{ .string = str_ptr } };
+    }
     if (std.mem.eql(u8, key, "@rnum")) return Value{ .ty = .{ .uint = @intCast(u64, self.frnum) } };
 
     const len = self.stack.items.len;
@@ -159,27 +183,27 @@ pub fn store(self: *ScopeStack, key: []const u8, value: Value) !void {
 fn updateGlobals(self: *ScopeStack, key: []const u8, value: Value) !bool {
     if (std.mem.eql(u8, key, "@ifs")) {
         if (value.ty != .string) return error.InvalidAtIfs;
-        self.ifs = try self.allocator.dupe(u8, value.ty.string);
+        self.ifs = try self.allocator.dupe(u8, value.ty.string.*);
         return true;
     }
     if (std.mem.eql(u8, key, "@irs")) {
         if (value.ty != .string) return error.InvalidAtIrs;
-        self.irs = try self.allocator.dupe(u8, value.ty.string);
+        self.irs = try self.allocator.dupe(u8, value.ty.string.*);
         return true;
     }
     if (std.mem.eql(u8, key, "@ofs")) {
         if (value.ty != .string) return error.InvalidAtOfs;
-        self.ofs = try self.allocator.dupe(u8, value.ty.string);
+        self.ofs = try self.allocator.dupe(u8, value.ty.string.*);
         return true;
     }
     if (std.mem.eql(u8, key, "@ors")) {
         if (value.ty != .string) return error.InvalidAtOrs;
-        self.ors = try self.allocator.dupe(u8, value.ty.string);
+        self.ors = try self.allocator.dupe(u8, value.ty.string.*);
         return true;
     }
     if (std.mem.eql(u8, key, "@rec")) {
         if (value.ty != .string) return error.InvalidAtRec;
-        self.record = try self.allocator.dupe(u8, value.ty.string);
+        self.record = try self.allocator.dupe(u8, value.ty.string.*);
         return true;
     }
     if (std.mem.eql(u8, key, "@cols")) {

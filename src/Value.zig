@@ -67,8 +67,8 @@ pub const Type = union(Tag) {
     list: *std.ArrayList(Value),
     map: *std.StringHashMap(Value),
     nil,
-    range: [2]usize,
-    string: []const u8,
+    range: *[2]usize,
+    string: *[]const u8,
     uint: u64,
 };
 
@@ -93,7 +93,11 @@ pub fn copy(self: Value, allocator: std.mem.Allocator) anyerror!Value {
         .list => try self.copyList(allocator),
         .map => try self.copyMap(allocator),
         .nil => self,
-        .range => self,
+        .range => |r| rng: {
+            const r_ptr = try allocator.create([2]usize);
+            r_ptr.* = r.*;
+            break :rng Value.new(.{ .range = r_ptr });
+        },
         .string => try self.copyString(allocator),
         .uint => self,
     };
@@ -131,8 +135,9 @@ fn copyMap(self: Value, allocator: std.mem.Allocator) anyerror!Value {
     return Value.new(.{ .map = copy_ptr });
 }
 fn copyString(self: Value, allocator: std.mem.Allocator) anyerror!Value {
-    const str_copy = try allocator.dupe(u8, self.ty.string);
-    return Value.new(.{ .string = str_copy });
+    const copy_ptr = try allocator.create([]const u8);
+    copy_ptr.* = try allocator.dupe(u8, self.ty.string.*);
+    return Value.new(.{ .string = copy_ptr });
 }
 
 pub fn deinit(self: Value, allocator: std.mem.Allocator) void {
@@ -167,7 +172,8 @@ fn deinitMap(self: Value, allocator: std.mem.Allocator) void {
     allocator.destroy(self.ty.map);
 }
 fn deinitString(self: Value, allocator: std.mem.Allocator) void {
-    allocator.free(self.ty.string);
+    allocator.free(self.ty.string.*);
+    allocator.destroy(self.ty.string);
 }
 
 pub fn format(self: Value, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -180,7 +186,7 @@ pub fn format(self: Value, comptime fmt: []const u8, options: std.fmt.FormatOpti
         .int => |i| _ = try writer.print("{}", .{i}),
         .list => |l| try printList(l, writer),
         .map => |m| try printMap(m, writer),
-        .string => |s| _ = try writer.print("{s}", .{s}),
+        .string => |s| _ = try writer.print("{s}", .{s.*}),
         .uint => |u| _ = try writer.print("{}", .{u}),
 
         else => {},
@@ -246,8 +252,8 @@ pub fn eql(self: Value, other: Value) bool {
                 }
             } else true;
         },
-        .range => |r| r[0] == other.ty.range[0] and r[1] == other.ty.range[1],
-        .string => |s| std.mem.eql(u8, s, other.ty.string),
+        .range => |r| r.*[0] == other.ty.range.*[0] and r.*[1] == other.ty.range.*[1],
+        .string => |s| std.mem.eql(u8, s.*, other.ty.string.*),
         .nil => other.ty == .nil,
         else => unreachable,
     };
@@ -273,7 +279,7 @@ pub fn asFloat(self: Value) ?Value {
     return switch (self.ty) {
         .float => self,
         .int => |i| Value.new(.{ .float = @intToFloat(f64, i) }),
-        .string => |s| if (std.fmt.parseFloat(f64, s)) |f| Value.new(.{ .float = f }) else |_| null,
+        .string => |s| if (std.fmt.parseFloat(f64, s.*)) |f| Value.new(.{ .float = f }) else |_| null,
         .uint => |u| Value.new(.{ .float = @intToFloat(f64, u) }),
 
         else => null,
@@ -291,12 +297,12 @@ fn isFloatStr(src: []const u8) bool {
 }
 
 fn strToNum(self: Value) anyerror!Value {
-    return if (isFloatStr(self.ty.string))
-        Value.new(.{ .float = try std.fmt.parseFloat(f64, self.ty.string) })
-    else if ('-' == self.ty.string[0] or '+' == self.ty.string[0])
-        Value.new(.{ .int = try std.fmt.parseInt(isize, self.ty.string, 0) })
+    return if (isFloatStr(self.ty.string.*))
+        Value.new(.{ .float = try std.fmt.parseFloat(f64, self.ty.string.*) })
+    else if ('-' == self.ty.string.*[0] or '+' == self.ty.string.*[0])
+        Value.new(.{ .int = try std.fmt.parseInt(isize, self.ty.string.*, 0) })
     else
-        Value.new(.{ .uint = try std.fmt.parseUnsigned(usize, self.ty.string, 0) });
+        Value.new(.{ .uint = try std.fmt.parseUnsigned(usize, self.ty.string.*, 0) });
 }
 
 fn addString(self: Value, other: Value) anyerror!Value {
@@ -511,7 +517,7 @@ fn cmpString(self: Value, other: Value) anyerror!std.math.Order {
         var max_len = std.math.max(self.ty.string.len, other.ty.string.len);
         var i: usize = 0;
         return while (i < max_len) : (i += 1) {
-            const order = std.math.order(self.ty.string[i], other.ty.string[i]);
+            const order = std.math.order(self.ty.string.*[i], other.ty.string.*[i]);
             if (order != .eq) break order;
         } else .eq;
     }
