@@ -2305,6 +2305,14 @@ test "Vm infix" {
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("---", got.ty.string);
+
+    got = try testVmValue(allocator, "true and false");
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(false, got.ty.boolean);
+
+    got = try testVmValue(allocator, "false or true");
+    try std.testing.expectEqual(Value.Tag.boolean, got.ty);
+    try std.testing.expectEqual(true, got.ty.boolean);
 }
 
 test "Vm prefix" {
@@ -2571,122 +2579,149 @@ test "Vm method builtins" {
     var got = try testVmValue(allocator, "[1, 2, 3].len()");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\["a": 1, "b": 2, "c": 3].len()
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\"foo".len()
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\["a": 1, "b": 2, "c": 3].keys().len()
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\["a": 3, "b": 2, "c": 1].keysByValueAsc()[0]
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("c", got.ty.string);
+
     got = try testVmValue(allocator,
         \\["a": 3, "b": 2, "c": 1].keysByValueDesc()[0]
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("a", got.ty.string);
+
     got = try testVmValue(allocator,
         \\["a": 1, "b": 2, "c": 3].values().len()
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+
     got = try testVmValue(allocator, mean_input);
     try std.testing.expectEqual(Value.Tag.float, got.ty);
     try std.testing.expectEqual(@as(f64, 2), got.ty.float);
+
     got = try testVmValue(allocator, median_input);
     try std.testing.expectEqual(Value.Tag.float, got.ty);
     try std.testing.expectEqual(@as(f64, 2.5), got.ty.float);
+
     got = try testVmValue(allocator, mode_input);
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 2), got.ty.uint);
+
     got = try testVmValue(allocator, stdev_input);
     try std.testing.expectEqual(Value.Tag.float, got.ty);
     try std.testing.expectEqual(@as(f64, 1.0671873729054748), got.ty.float);
+
     got = try testVmValue(allocator, "[1, 2, 3].min()");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 1), got.ty.uint);
+
     got = try testVmValue(allocator, "[1, 2, 3].max()");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\["a", "z", "B"].min()
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("B", got.ty.string);
+
     got = try testVmValue(allocator, "[2, 3, 1].sortAsc()[0]");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 1), got.ty.uint);
+
     got = try testVmValue(allocator, "[2, 3, 1].sortDesc()[0]");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+
     got = try testVmValue(allocator, "[2, 3, 1].reverse()[0]");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 1), got.ty.uint);
+
     got = try testVmValue(allocator, "[2, 3, 1].contains(3)");
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(true, got.ty.boolean);
+
     got = try testVmValue(allocator, "[2, 3, 1].contains(4)");
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(false, got.ty.boolean);
+
     got = try testVmValue(allocator,
         \\"foo".contains("oo")
     );
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(true, got.ty.boolean);
+
     got = try testVmValue(allocator,
         \\["a": 2, "b": 3].contains(3)
     );
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(true, got.ty.boolean);
+
     got = try testVmValue(allocator, "[2, 3, 1].indexOf(1)");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 2), got.ty.uint);
+
     got = try testVmValue(allocator, "[2, 3, 1].indexOf(4)");
     try std.testing.expectEqual(Value.Tag.nil, got.ty);
+
     got = try testVmValue(allocator,
         \\"H\u65\u301llo".indexOf("l")
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 2), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\"H\u65\u301llo".lastIndexOf("l")
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
-    //try testLastValue(
-    //, Value.new(.{ .string = "bar" }));
+
     got = try testVmValue(allocator,
         \\"foo,bar,baz".split(",")[1]
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("bar", got.ty.string);
+
     got = try testVmValue(allocator,
         \\["foo", 1, 2.3, nil].join(",")
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("foo,1,2.3,", got.ty.string);
+
     got = try testVmValue(allocator,
         \\f := { a => a * 2 + index }
         \\[1, 2, 3].map(f)[1]
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 5), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\[1, 2, 3].filter() { it > 1 }[1]
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 3), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\total := 0
         \\[1, 2, 3].each() { total = total + it }
@@ -2694,11 +2729,13 @@ test "Vm method builtins" {
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 6), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\[1, 2, 3].reduce(1) { acc * it }
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 6), got.ty.uint);
+
     //try testLastValueWithOutput(
     //    \\print("foo", 1, 2, 3.14)
     //, Value.new(.nil), "foo,1,2,3.14");
@@ -2710,21 +2747,25 @@ test "Vm method builtins" {
     //, Value.new(.nil), "foo,1,2,3.14,001");
     //try testLastValue(
     //, Value.new(.{ .string = "\u{65}\u{301}" }));
+    //
     got = try testVmValue(allocator,
         \\"H\u65\u301llo".chars()[1]
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("\u{65}\u{301}", got.ty.string);
+
     got = try testVmValue(allocator,
         \\"Hello".startsWith("Hell")
     );
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(true, got.ty.boolean);
+
     got = try testVmValue(allocator,
         \\"Hello".endsWith("llo")
     );
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
     try std.testing.expectEqual(true, got.ty.boolean);
+
     got = try testVmValue(allocator,
         \\l := [1]
         \\l.push(2)
@@ -2732,17 +2773,20 @@ test "Vm method builtins" {
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 2), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\l := [1]
         \\l.pop()
     );
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
     try std.testing.expectEqual(@as(u64, 1), got.ty.uint);
+
     got = try testVmValue(allocator,
         \\"FOO".toLower()
     );
     try std.testing.expectEqual(Value.Tag.string, got.ty);
     try std.testing.expectEqualStrings("foo", got.ty.string);
+
     got = try testVmValue(allocator,
         \\"foo".toUpper()
     );
