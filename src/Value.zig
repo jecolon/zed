@@ -74,12 +74,12 @@ pub const Type = union(Tag) {
 
 ty: Type,
 
-pub const S = struct {
-    pub var i: usize = 0;
-};
+//pub const S = struct {
+//    pub var i: usize = 0;
+//};
 
 pub fn new(ty: Type) Value {
-    S.i += 1;
+    //S.i += 1;
     return .{ .ty = ty };
 }
 

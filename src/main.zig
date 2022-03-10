@@ -200,7 +200,7 @@ pub fn main() anyerror!void {
     // Print hte output.
     _ = try std.io.getStdOut().writer().print("{s}", .{output.items});
 
-    std.debug.print("\n***{} * {} = {}***\n", .{ Value.S.i, @sizeOf(Value), Value.S.i * @sizeOf(Value) });
+    //std.debug.print("\n***{} * {} = {}***\n", .{ Value.S.i, @sizeOf(Value), Value.S.i * @sizeOf(Value) });
 }
 
 test {
