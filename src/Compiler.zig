@@ -211,8 +211,8 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
         switch (segment) {
             .plain => |plain| {
                 try self.pushInstruction(.plain);
-                try self.pushLen(plain.len);
                 try self.pushSlice(plain);
+                try self.pushByte(0);
             },
             .ipol => |ipol| {
                 try self.pushInstruction(.scope_in);
@@ -223,8 +223,8 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
 
                 if (ipol.format) |spec| {
                     try self.pushInstruction(.format);
-                    try self.pushLen(spec.len);
                     try self.pushSlice(spec);
+                    try self.pushByte(0);
                 }
             },
         }
@@ -243,16 +243,15 @@ fn compileFunc(self: *Compiler, node: Node) anyerror!void {
 
     // Serialize function to bytes.
     try self.pushInstruction(.func);
-    try self.pushOffset(node.offset);
     // Function name
-    try self.pushLen(node.ty.func.name.len);
     if (node.ty.func.name.len != 0) try self.pushSlice(node.ty.func.name);
+    try self.pushByte(0);
     // Function params
     try self.pushLen(node.ty.func.params.len);
     if (node.ty.func.params.len != 0) {
         for (node.ty.func.params) |param| {
-            try self.pushLen(param.len);
             try self.pushSlice(param);
+            try self.pushByte(0);
         }
     }
     // Function instructions
@@ -279,17 +278,15 @@ fn compileDefine(self: *Compiler, node: Node) anyerror!void {
     try self.compile(node.ty.define.rvalue.*);
     try self.pushInstruction(.define);
     try self.pushOffset(node.offset);
-    try self.pushInstruction(.ident);
-    try self.pushLen(node.ty.define.lvalue.ty.ident.len);
     try self.pushSlice(node.ty.define.lvalue.ty.ident);
+    try self.pushByte(0);
 }
 
 fn compileLoad(self: *Compiler, node: Node) anyerror!void {
     try self.pushInstruction(.load);
     try self.pushOffset(node.offset);
-    try self.pushInstruction(.ident);
-    try self.pushLen(node.ty.ident.len);
     try self.pushSlice(node.ty.ident);
+    try self.pushByte(0);
 }
 
 fn compileStore(self: *Compiler, node: Node) anyerror!void {
@@ -299,9 +296,8 @@ fn compileStore(self: *Compiler, node: Node) anyerror!void {
         try self.pushInstruction(.store);
         try self.pushOffset(node.offset);
         try self.pushEnum(node.ty.assign.combo);
-        try self.pushInstruction(.ident);
-        try self.pushLen(node.ty.assign.lvalue.ty.ident.len);
         try self.pushSlice(node.ty.assign.lvalue.ty.ident);
+        try self.pushByte(0);
     } else {
         try self.compile(node.ty.assign.lvalue.ty.subscript.index.*);
         try self.compile(node.ty.assign.lvalue.ty.subscript.container.*);

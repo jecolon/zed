@@ -166,10 +166,8 @@ fn execUint(self: *Vm) !void {
 
 fn execFormat(self: *Vm) !void {
     self.ip.* += 1;
-    const len = self.getU16(self.ip.*);
-    self.ip.* += 2;
-    const spec = self.getString(self.ip.*, len);
-    self.ip.* += len;
+    const spec = std.mem.sliceTo(self.instructions[self.ip.*..], 0);
+    self.ip.* += @intCast(u16, spec.len) + 1;
 
     const value = self.value_stack.pop();
     var buf = std.ArrayList(u8).init(self.allocator);
@@ -187,10 +185,8 @@ fn execFormat(self: *Vm) !void {
 }
 fn execPlain(self: *Vm) !void {
     self.ip.* += 1;
-    const len = self.getU16(self.ip.*);
-    self.ip.* += 2;
-    const s = self.getString(self.ip.*, len);
-    self.ip.* += len;
+    const s = std.mem.sliceTo(self.instructions[self.ip.*..], 0);
+    self.ip.* += @intCast(u16, s.len) + 1;
 
     const str_ptr = try self.allocator.create([]const u8);
     str_ptr.* = s;
@@ -212,14 +208,11 @@ fn execString(self: *Vm) !void {
 }
 
 fn execFunc(self: *Vm) !void {
-    self.ip.* += 3;
+    self.ip.* += 1;
 
     // Function name
-    const func_name_len = self.getU16(self.ip.*);
-    self.ip.* += 2;
-
-    const func_name: []const u8 = if (func_name_len == 0) "" else self.getString(self.ip.*, func_name_len);
-    self.ip.* += func_name_len;
+    const func_name = std.mem.sliceTo(self.instructions[self.ip.*..], 0);
+    self.ip.* += @intCast(u16, func_name.len) + 1;
 
     // function params
     const params_len = self.getU16(self.ip.*);
@@ -231,11 +224,9 @@ fn execFunc(self: *Vm) !void {
         var param_index: usize = 0;
 
         while (param_index < params_len) : (param_index += 1) {
-            const param_name_len = self.getU16(self.ip.*);
-            self.ip.* += 2;
-
-            try params_list.append(self.getString(self.ip.*, param_name_len));
-            self.ip.* += param_name_len;
+            const param = std.mem.sliceTo(self.instructions[self.ip.*..], 0);
+            try params_list.append(param);
+            self.ip.* += @intCast(u16, param.len) + 1;
         }
 
         params = params_list.items;
@@ -244,7 +235,7 @@ fn execFunc(self: *Vm) !void {
     // Function instructions
     const instructions_len = self.getU16(self.ip.*);
     self.ip.* += 2;
-    const func_instructions: []const u8 = if (instructions_len == 0) "" else self.getString(self.ip.*, instructions_len);
+    const func_instructions: []const u8 = if (instructions_len == 0) "" else self.instructions[self.ip.* .. self.ip.* + instructions_len];
     self.ip.* += instructions_len;
 
     const func_ptr = try self.allocator.create(Value.Function);
@@ -354,7 +345,8 @@ fn execDefine(self: *Vm) !void {
     const offset = self.getOffset();
     self.ip.* += 2;
     // Name
-    const name = self.getName();
+    const name = std.mem.sliceTo(self.instructions[self.ip.*..], 0);
+    self.ip.* += @intCast(u16, name.len) + 1;
     // Is it already defined?
     if (self.scope_stack.isDefined(name)) return self.ctx.err(
         "{s} already defined.",
@@ -374,7 +366,8 @@ fn execLoad(self: *Vm) !void {
     const offset = self.getOffset();
     self.ip.* += 2;
     // Name
-    const name = self.getName();
+    const name = std.mem.sliceTo(self.instructions[self.ip.*..], 0);
+    self.ip.* += @intCast(u16, name.len) + 1;
     // Is the name defined?
     if (!self.scope_stack.isDefined(name)) return self.ctx.err(
         "{s} is undefined.",
@@ -394,7 +387,8 @@ fn execStore(self: *Vm) !void {
     const combo = @intToEnum(Node.Combo, self.instructions[self.ip.*]);
     self.ip.* += 1;
     // Name
-    const name = self.getName();
+    const name = std.mem.sliceTo(self.instructions[self.ip.*..], 0);
+    self.ip.* += @intCast(u16, name.len) + 1;
     // Is the name defined?
     if (!self.scope_stack.isDefined(name)) return self.ctx.err(
         "{s} is undefined.",
@@ -2145,36 +2139,12 @@ fn isTruthy(value: Value) bool {
     };
 }
 
-fn getName(self: Vm) []const u8 {
-    var name: []const u8 = undefined;
-    if (@intToEnum(Compiler.Opcode, self.instructions[self.ip.*]) == .ident) {
-        self.ip.* += 1;
-        const name_len = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        name = self.getString(self.ip.*, name_len);
-        self.ip.* += name_len;
-    } else {
-        self.ip.* += 1;
-        const start = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        const name_len = self.getU16(self.ip.*);
-        self.ip.* += 2;
-        name = self.getString(start, name_len);
-    }
-
-    return name;
-}
-
 fn getNumber(self: Vm, comptime T: type, start: usize, n: usize) T {
     return std.mem.bytesAsSlice(T, self.instructions[start .. start + n])[0];
 }
 
 fn getOffset(self: Vm) u16 {
     return self.getU16(self.ip.*);
-}
-
-fn getString(self: Vm, start: usize, len: usize) []const u8 {
-    return self.instructions[start .. start + len];
 }
 
 fn getU16(self: Vm, start: usize) u16 {
