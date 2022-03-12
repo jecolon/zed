@@ -2,6 +2,7 @@ const Token = @import("Token.zig");
 
 pub const Type = union(enum) {
     boolean: bool,
+    builtin: Token.Tag,
     float: f64,
     func_return: *Node,
     ident: []const u8,

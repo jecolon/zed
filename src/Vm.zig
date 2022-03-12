@@ -6,6 +6,7 @@ const GraphemeIterator = @import("ziglyph").GraphemeIterator;
 const Node = @import("Node.zig");
 const Scope = @import("Scope.zig");
 const ScopeStack = @import("ScopeStack.zig");
+const Token = @import("Token.zig");
 const Value = @import("Value.zig");
 const runtimePrint = @import("fmt.zig").runtimePrint;
 const ziglyph = @import("ziglyph");
@@ -69,6 +70,7 @@ pub fn run(self: *Vm) !void {
             .plain => try self.execPlain(),
             .string => try self.execString(),
             // functions
+            .builtin => try self.execBuiltin(),
             .call => try self.execCall(),
             .func => try self.execFunc(),
             .func_return => {
@@ -254,58 +256,62 @@ fn execReturn(self: *Vm) void {
     self.ip.* += 1;
 }
 
+fn execBuiltin(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const builtin = @intToEnum(Token.Tag, self.instructions[self.ip.*]);
+
+    return switch (builtin) {
+        .pd_atan2 => try self.atan2(),
+        .pd_chars => try self.strChars(),
+        .pd_contains => try self.contains(),
+        .pd_cos => try self.oneArgMath(builtin),
+        .pd_each => try self.each(),
+        .pd_endsWith => try self.strEndsWith(),
+        .pd_exp => try self.oneArgMath(builtin),
+        .pd_filter => try self.listFilter(),
+        .pd_join => try self.listJoin(),
+        .pd_indexOf => try self.indexOf(),
+        .pd_int => try self.oneArgMath(builtin),
+        .pd_keys => try self.mapKeys(),
+        .pd_keysByValueAsc => try self.mapKeysByValueAsc(),
+        .pd_keysByValueDesc => try self.mapKeysByValueDesc(),
+        .pd_lastIndexOf => try self.lastIndexOf(),
+        .pd_len => try self.length(),
+        .pd_log => try self.oneArgMath(builtin),
+        .pd_map => try self.listMap(),
+        .pd_max => try self.listMax(),
+        .pd_mean => try self.listMean(),
+        .pd_median => try self.listMedian(),
+        .pd_min => try self.listMin(),
+        .pd_mode => try self.listMode(),
+        .pd_print => try self.execPrint(),
+        .pd_pop => try self.listPop(),
+        .pd_push => try self.listPush(),
+        .pd_rand => try self.rand(),
+        .pd_reduce => try self.listReduce(),
+        .pd_reverse => try self.listReverse(),
+        .pd_sin => try self.oneArgMath(builtin),
+        .pd_sortAsc => try self.listSortAsc(),
+        .pd_sortDesc => try self.listSortDesc(),
+        .pd_split => try self.strSplit(),
+        .pd_sqrt => try self.oneArgMath(builtin),
+        .pd_startsWith => try self.strStartsWith(),
+        .pd_stdev => try self.listStdev(),
+        .pd_toLower => try self.strToLower(),
+        .pd_toUpper => try self.strToUpper(),
+        .pd_values => try self.mapValues(),
+        else => unreachable,
+    };
+}
+
 fn execCall(self: *Vm) anyerror!void {
-    // Get the function.
-    const callee = self.value_stack.pop();
-
-    if (callee.ty == .builtin) {
-        return switch (callee.ty.builtin) {
-            .atan2 => try self.atan2(),
-            .chars => try self.strChars(),
-            .contains => try self.contains(),
-            .cos => try self.oneArgMath(callee),
-            .each => try self.each(),
-            .endsWith => try self.strEndsWith(),
-            .exp => try self.oneArgMath(callee),
-            .filter => try self.listFilter(),
-            .join => try self.listJoin(),
-            .indexOf => try self.indexOf(),
-            .int => try self.oneArgMath(callee),
-            .keys => try self.mapKeys(),
-            .keysByValueAsc => try self.mapKeysByValueAsc(),
-            .keysByValueDesc => try self.mapKeysByValueDesc(),
-            .lastIndexOf => try self.lastIndexOf(),
-            .len => try self.length(),
-            .log => try self.oneArgMath(callee),
-            .map => try self.listMap(),
-            .max => try self.listMax(),
-            .mean => try self.listMean(),
-            .median => try self.listMedian(),
-            .min => try self.listMin(),
-            .mode => try self.listMode(),
-            .print => try self.execPrint(),
-            .pop => try self.listPop(),
-            .push => try self.listPush(),
-            .rand => try self.rand(),
-            .reduce => try self.listReduce(),
-            .reverse => try self.listReverse(),
-            .sin => try self.oneArgMath(callee),
-            .sortAsc => try self.listSortAsc(),
-            .sortDesc => try self.listSortDesc(),
-            .split => try self.strSplit(),
-            .sqrt => try self.oneArgMath(callee),
-            .startsWith => try self.strStartsWith(),
-            .stdev => try self.listStdev(),
-            .toLower => try self.strToLower(),
-            .toUpper => try self.strToUpper(),
-            .values => try self.mapValues(),
-        };
-    }
-
+    // Get the offset.
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
 
+    // Get the function.
+    const callee = self.value_stack.pop();
     if (callee.ty != .func) return self.ctx.err(
         "{s} is not callable.",
         .{@tagName(callee.ty)},
@@ -1023,7 +1029,7 @@ fn execSprint(self: *Vm) anyerror!void {
     str_ptr.* = buf.items;
     try self.value_stack.append(Value.new(.{ .string = str_ptr }));
 }
-fn oneArgMath(self: *Vm, builtin: Value) anyerror!void {
+fn oneArgMath(self: *Vm, builtin: Token.Tag) anyerror!void {
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
@@ -1047,14 +1053,14 @@ fn oneArgMath(self: *Vm, builtin: Value) anyerror!void {
         offset,
     );
 
-    const result = switch (builtin.ty.builtin) {
-        .cos => Value.new(.{ .float = @cos(x.ty.float) }),
-        .exp => Value.new(.{ .float = std.math.exp(x.ty.float) }),
-        .int => Value.new(.{ .int = @floatToInt(isize, @trunc(x.ty.float)) }),
-        .log => Value.new(.{ .float = @log(x.ty.float) }),
-        .rand => Value.new(.{ .uint = std.rand.DefaultPrng.init(@intCast(usize, std.time.timestamp())).random().uintAtMost(usize, x.ty.uint) }),
-        .sin => Value.new(.{ .float = @sin(x.ty.float) }),
-        .sqrt => Value.new(.{ .float = @sqrt(x.ty.float) }),
+    const result = switch (builtin) {
+        .pd_cos => Value.new(.{ .float = @cos(x.ty.float) }),
+        .pd_exp => Value.new(.{ .float = std.math.exp(x.ty.float) }),
+        .pd_int => Value.new(.{ .int = @floatToInt(isize, @trunc(x.ty.float)) }),
+        .pd_log => Value.new(.{ .float = @log(x.ty.float) }),
+        .pd_rand => Value.new(.{ .uint = std.rand.DefaultPrng.init(@intCast(usize, std.time.timestamp())).random().uintAtMost(usize, x.ty.uint) }),
+        .pd_sin => Value.new(.{ .float = @sin(x.ty.float) }),
+        .pd_sqrt => Value.new(.{ .float = @sqrt(x.ty.float) }),
         else => unreachable,
     };
     try self.value_stack.append(result);

@@ -194,6 +194,47 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .pd_false, .pd_true => Parser.parseBoolean,
         .pd_nil => Parser.parseNil,
 
+        .pd_atan2,
+        .pd_chars,
+        .pd_contains,
+        .pd_cos,
+        .pd_each,
+        .pd_endsWith,
+        .pd_exp,
+        .pd_filter,
+        .pd_int,
+        .pd_indexOf,
+        .pd_join,
+        .pd_keys,
+        .pd_keysByValueAsc,
+        .pd_keysByValueDesc,
+        .pd_lastIndexOf,
+        .pd_len,
+        .pd_log,
+        .pd_map,
+        .pd_max,
+        .pd_mean,
+        .pd_median,
+        .pd_min,
+        .pd_mode,
+        .pd_print,
+        .pd_pop,
+        .pd_push,
+        .pd_rand,
+        .pd_reduce,
+        .pd_reverse,
+        .pd_sin,
+        .pd_sortAsc,
+        .pd_sortDesc,
+        .pd_split,
+        .pd_sqrt,
+        .pd_startsWith,
+        .pd_stdev,
+        .pd_toLower,
+        .pd_toUpper,
+        .pd_values,
+        => Parser.parseBuiltin,
+
         .pd_onInit,
         .pd_onFile,
         .pd_onRec,
@@ -241,7 +282,7 @@ fn infixFn(self: Parser) InfixFn {
         .op_range_ex, .op_range_in => Parser.parseRange,
         .op_redir_append, .op_redir_clobber => Parser.parseRedir,
 
-        .punct_dot => Parser.parseBuiltin,
+        .punct_dot => Parser.parseBuiltinMethod,
         .punct_lbracket => Parser.parseSubscript,
         .punct_lparen => Parser.parseCall,
         .punct_question => Parser.parseTernary,
@@ -319,165 +360,64 @@ fn parseBreak(self: *Parser) anyerror!Node {
     return Node.new(.loop_break, self.currentOffset());
 }
 
-fn parseBuiltin(self: *Parser, object: Node) anyerror!Node {
-    try self.expectNext();
-
-    return switch (self.currentTag()) {
-        .pd_chars => return self.parseNoArgBuiltin(object),
-        .pd_contains => self.parseOneArgBuiltin(object),
-        .pd_each => self.parseOneArgBuiltin(object),
-        .pd_endsWith => self.parseOneArgBuiltin(object),
-        .pd_filter => self.parseOneArgBuiltin(object),
-        .pd_indexOf => self.parseOneArgBuiltin(object),
-        .pd_join => self.parseOneArgBuiltin(object),
-        .pd_keys => return self.parseNoArgBuiltin(object),
-        .pd_keysByValueAsc => return self.parseNoArgBuiltin(object),
-        .pd_keysByValueDesc => return self.parseNoArgBuiltin(object),
-        .pd_lastIndexOf => self.parseOneArgBuiltin(object),
-        .pd_len => self.parseNoArgBuiltin(object),
-        .pd_map => self.parseOneArgBuiltin(object),
-        .pd_max => self.parseNoArgBuiltin(object),
-        .pd_mean => self.parseNoArgBuiltin(object),
-        .pd_median => self.parseNoArgBuiltin(object),
-        .pd_min => self.parseNoArgBuiltin(object),
-        .pd_mode => self.parseNoArgBuiltin(object),
-        .pd_pop => self.parseNoArgBuiltin(object),
-        .pd_push => self.parseOneArgBuiltin(object),
-        .pd_reduce => self.parseTwoArgBuiltin(object),
-        .pd_reverse => self.parseNoArgBuiltin(object),
-        .pd_sortAsc => self.parseNoArgBuiltin(object),
-        .pd_sortDesc => self.parseNoArgBuiltin(object),
-        .pd_split => self.parseOneArgBuiltin(object),
-        .pd_startsWith => self.parseOneArgBuiltin(object),
-        .pd_stdev => self.parseNoArgBuiltin(object),
-        .pd_toLower => self.parseNoArgBuiltin(object),
-        .pd_toUpper => self.parseNoArgBuiltin(object),
-        .pd_values => self.parseNoArgBuiltin(object),
-
-        else => self.ctx.err(
-            "Undefined builtin.",
-            .{},
-            error.InvalidBuiltin,
-            self.currentOffset(),
-        ),
-    };
-}
-fn parseNoArgBuiltin(self: *Parser, object: Node) anyerror!Node {
-    const tag = self.currentTag();
-    const offset = self.currentOffset();
-
-    try self.expectTag(.punct_lparen);
-    try self.expectTag(.punct_rparen);
-
-    const func_ptr = try self.allocator.create(Node);
-    const bi_name = switch (tag) {
-        .pd_chars => "chars",
-        .pd_len => "len",
-        .pd_keys => "keys",
-        .pd_keysByValueAsc => "keysByValueAsc",
-        .pd_keysByValueDesc => "keysByValueDesc",
-        .pd_max => "max",
-        .pd_mean => "mean",
-        .pd_median => "median",
-        .pd_min => "min",
-        .pd_mode => "mode",
-        .pd_pop => "pop",
-        .pd_reverse => "reverse",
-        .pd_sortAsc => "sortAsc",
-        .pd_sortDesc => "sortDesc",
-        .pd_stdev => "stdev",
-        .pd_toLower => "toLower",
-        .pd_toUpper => "toUpper",
-        .pd_values => "values",
-        else => unreachable,
-    };
-
-    func_ptr.* = Node.new(.{ .ident = bi_name }, offset);
-    const args = try self.allocator.alloc(Node, 1);
-    args[0] = object;
-
-    return Node.new(.{ .call = .{ .callee = func_ptr, .args = args } }, offset);
+fn parseBuiltin(self: *Parser) anyerror!Node {
+    return Node.new(.{ .builtin = self.currentTag() }, self.currentOffset());
 }
 
-fn parseOneArgBuiltin(self: *Parser, object: Node) anyerror!Node {
-    const tag = self.currentTag();
-    const offset = self.currentOffset();
+fn isBuiltinMethod(tag: Token.Tag) bool {
+    return switch (tag) {
+        .pd_chars,
+        .pd_contains,
+        .pd_each,
+        .pd_endsWith,
+        .pd_filter,
+        .pd_indexOf,
+        .pd_join,
+        .pd_keys,
+        .pd_keysByValueAsc,
+        .pd_keysByValueDesc,
+        .pd_lastIndexOf,
+        .pd_len,
+        .pd_map,
+        .pd_max,
+        .pd_mean,
+        .pd_median,
+        .pd_min,
+        .pd_mode,
+        .pd_pop,
+        .pd_push,
+        .pd_reduce,
+        .pd_reverse,
+        .pd_sortAsc,
+        .pd_sortDesc,
+        .pd_split,
+        .pd_startsWith,
+        .pd_stdev,
+        .pd_toLower,
+        .pd_toUpper,
+        .pd_values,
+        => true,
 
-    try self.expectTag(.punct_lparen);
-    try self.expectNext();
-    var arg: Node = undefined;
-
-    if (self.currentIs(.punct_rparen)) {
-        try self.expectTag(.punct_lbrace);
-        arg = try self.parseExpression(.call);
-    } else {
-        arg = try self.parseExpression(.lowest);
-        try self.expectTag(.punct_rparen);
-    }
-
-    const bi_ptr = try self.allocator.create(Node);
-    const bi_name = switch (tag) {
-        .pd_contains => "contains",
-        .pd_each => "each",
-        .pd_endsWith => "endsWith",
-        .pd_filter => "filter",
-        .pd_indexOf => "indexOf",
-        .pd_join => "join",
-        .pd_lastIndexOf => "lastIndexOf",
-        .pd_map => "map",
-        .pd_push => "push",
-        .pd_split => "split",
-        .pd_startsWith => "startsWith",
-        else => unreachable,
+        else => false,
     };
-    bi_ptr.* = Node.new(.{ .ident = bi_name }, offset);
-
-    const args = try self.allocator.alloc(Node, 2);
-    args[0] = object;
-    args[1] = arg;
-
-    return Node.new(.{ .call = .{ .callee = bi_ptr, .args = args } }, offset);
 }
 
-fn parseTwoArgBuiltin(self: *Parser, object: Node) anyerror!Node {
-    const tag = self.currentTag();
-    const offset = self.currentOffset();
-
+fn parseBuiltinMethod(self: *Parser, object: Node) anyerror!Node {
+    try self.expectNext();
+    if (!isBuiltinMethod(self.currentTag())) return self.ctx.err(
+        "{s} is not a builtin method.",
+        .{@tagName(self.currentTag())},
+        error.InvalidBuiltinMethod,
+        self.currentOffset(),
+    );
+    const builtin = try self.parseBuiltin();
     try self.expectTag(.punct_lparen);
-    try self.expectNext();
-    const arg_1 = try self.parseExpression(.lowest);
-    try self.expectNext();
-    var arg_2: Node = undefined;
-
-    if (self.currentIs(.punct_comma)) {
-        try self.expectNext();
-        arg_2 = try self.parseExpression(.lowest);
-        try self.expectTag(.punct_rparen);
-    } else if (self.currentIs(.punct_rparen)) {
-        try self.expectTag(.punct_lbrace);
-        arg_2 = try self.parseExpression(.call);
-    } else {
-        return self.ctx.err(
-            "Expected comma or right paren.",
-            .{},
-            error.InvalidBuiltin,
-            offset,
-        );
-    }
-
-    const bi_ptr = try self.allocator.create(Node);
-    const bi_name = switch (tag) {
-        .pd_reduce => "reduce",
-        else => unreachable,
-    };
-    bi_ptr.* = Node.new(.{ .ident = bi_name }, offset);
-
-    const args = try self.allocator.alloc(Node, 3);
-    args[0] = object;
-    args[1] = arg_1;
-    args[2] = arg_2;
-
-    return Node.new(.{ .call = .{ .callee = bi_ptr, .args = args } }, offset);
+    var call = try self.parseCall(builtin);
+    var new_args = try self.allocator.alloc(Node, call.ty.call.args.len + 1);
+    new_args[0] = object;
+    std.mem.copy(Node, new_args[1..], call.ty.call.args);
+    call.ty.call.args = new_args;
+    return call;
 }
 
 fn parseCall(self: *Parser, callee: Node) anyerror!Node {
@@ -485,17 +425,23 @@ fn parseCall(self: *Parser, callee: Node) anyerror!Node {
         .{ .call = .{ .args = &[_]Node{}, .callee = try self.allocator.create(Node) } },
         self.currentOffset(),
     );
+
     node.ty.call.callee.* = callee;
-
-    if (self.skipTag(.punct_rparen)) return node;
-
     var args_list = std.ArrayList(Node).init(self.allocator);
+
     while (!self.skipTag(.punct_rparen)) {
         try self.expectNext();
         const arg_node = try self.parseExpression(.lowest);
         try args_list.append(arg_node);
         _ = self.skipTag(.punct_comma);
     }
+
+    // Check for predicate.
+    if (self.skipTag(.punct_lbrace)) {
+        const pred_node = try self.parseFunc();
+        try args_list.append(pred_node);
+    }
+
     node.ty.call.args = args_list.items;
 
     return node;

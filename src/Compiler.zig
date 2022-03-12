@@ -23,6 +23,7 @@ pub const Opcode = enum {
     scope_in,
     scope_out,
     // Functions
+    builtin,
     call,
     func,
     func_return,
@@ -265,11 +266,23 @@ fn compileReturn(self: *Compiler, node: Node) anyerror!void {
 }
 
 fn compileCall(self: *Compiler, node: Node) anyerror!void {
+    if (node.ty.call.callee.ty == .builtin) return self.compileBuiltin(node);
+
     var i: usize = 1;
     const num_args = node.ty.call.args.len;
     while (i <= num_args) : (i += 1) try self.compile(node.ty.call.args[num_args - i]);
     try self.compile(node.ty.call.callee.*);
     try self.pushInstruction(.call);
+    try self.pushOffset(node.offset);
+    try self.pushByte(num_args);
+}
+
+fn compileBuiltin(self: *Compiler, node: Node) anyerror!void {
+    var i: usize = 1;
+    const num_args = node.ty.call.args.len;
+    while (i <= num_args) : (i += 1) try self.compile(node.ty.call.args[num_args - i]);
+    try self.pushInstruction(.builtin);
+    try self.pushEnum(node.ty.call.callee.ty.builtin);
     try self.pushOffset(node.offset);
     try self.pushByte(num_args);
 }
