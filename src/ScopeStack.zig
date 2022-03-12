@@ -6,25 +6,25 @@ const Value = @import("Value.zig");
 const ScopeStack = @This();
 
 allocator: std.mem.Allocator,
-columns: *std.ArrayList(Value) = undefined,
+columns: std.ArrayList(Value) = undefined,
 global_scope: std.StringHashMap(Value),
 stack: std.ArrayList(Scope),
 
 // Current data filename
-file: []const u8 = "",
+file: [*:0]const u8 = "",
 // Record numbering
 frnum: usize = 1,
 rnum: usize = 1,
 // Current record
 rec_buf: [1024 * 64]u8 = undefined,
-record: []const u8 = undefined,
+record: [*:0]const u8 = undefined,
 // Record ranges
 rec_ranges: std.AutoHashMap(u8, void) = undefined,
 // Delimiters
-ifs: []const u8 = ",",
-irs: []const u8 = "\n",
-ofs: []const u8 = ",",
-ors: []const u8 = "\n",
+ifs: [*:0]const u8 = ",",
+irs: [*:0]const u8 = "\n",
+ofs: [*:0]const u8 = ",",
+ors: [*:0]const u8 = "\n",
 
 const builtins = std.ComptimeStringMap(void, .{
     .{ "atan2", {} },
@@ -124,38 +124,14 @@ pub fn isDefined(self: ScopeStack, key: []const u8) bool {
 }
 
 pub fn load(self: ScopeStack, key: []const u8) !?Value {
-    if (std.mem.eql(u8, key, "@cols")) return Value{ .ty = .{ .list = self.columns } };
-    if (std.mem.eql(u8, key, "@file")) {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = self.file;
-        return Value{ .ty = .{ .string = str_ptr } };
-    }
+    if (std.mem.eql(u8, key, "@cols")) return try Value.newList(self.allocator, self.columns);
+    if (std.mem.eql(u8, key, "@file")) return try Value.newStringP(self.allocator, self.file);
     if (std.mem.eql(u8, key, "@frnum")) return Value{ .ty = .{ .uint = @intCast(u64, self.frnum) } };
-    if (std.mem.eql(u8, key, "@ifs")) {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = self.ifs;
-        return Value{ .ty = .{ .string = str_ptr } };
-    }
-    if (std.mem.eql(u8, key, "@irs")) {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = self.irs;
-        return Value{ .ty = .{ .string = str_ptr } };
-    }
-    if (std.mem.eql(u8, key, "@ofs")) {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = self.ofs;
-        return Value{ .ty = .{ .string = str_ptr } };
-    }
-    if (std.mem.eql(u8, key, "@ors")) {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = self.ors;
-        return Value{ .ty = .{ .string = str_ptr } };
-    }
-    if (std.mem.eql(u8, key, "@rec")) {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = self.record;
-        return Value{ .ty = .{ .string = str_ptr } };
-    }
+    if (std.mem.eql(u8, key, "@ifs")) return try Value.newStringP(self.allocator, self.ifs);
+    if (std.mem.eql(u8, key, "@irs")) return try Value.newStringP(self.allocator, self.irs);
+    if (std.mem.eql(u8, key, "@ofs")) return try Value.newStringP(self.allocator, self.ofs);
+    if (std.mem.eql(u8, key, "@ors")) return try Value.newStringP(self.allocator, self.ors);
+    if (std.mem.eql(u8, key, "@rec")) return try Value.newStringP(self.allocator, self.record);
     if (std.mem.eql(u8, key, "@rnum")) return Value{ .ty = .{ .uint = @intCast(u64, self.frnum) } };
 
     const len = self.stack.items.len;
@@ -180,33 +156,33 @@ pub fn store(self: *ScopeStack, key: []const u8, value: Value) !void {
 
 fn updateGlobals(self: *ScopeStack, key: []const u8, value: Value) !bool {
     if (std.mem.eql(u8, key, "@ifs")) {
-        if (value.ty != .string) return error.InvalidAtIfs;
-        self.ifs = try self.allocator.dupe(u8, value.ty.string.*);
+        if (value.ty != .obj or value.ty.obj.* != .string) return error.InvalidAtIfs;
+        self.ifs = try self.allocator.dupeZ(u8, std.mem.sliceTo(value.ty.obj.string, 0));
         return true;
     }
     if (std.mem.eql(u8, key, "@irs")) {
-        if (value.ty != .string) return error.InvalidAtIrs;
-        self.irs = try self.allocator.dupe(u8, value.ty.string.*);
+        if (value.ty != .obj or value.ty.obj.* != .string) return error.InvalidAtIrs;
+        self.irs = try self.allocator.dupeZ(u8, std.mem.sliceTo(value.ty.obj.string, 0));
         return true;
     }
     if (std.mem.eql(u8, key, "@ofs")) {
-        if (value.ty != .string) return error.InvalidAtOfs;
-        self.ofs = try self.allocator.dupe(u8, value.ty.string.*);
+        if (value.ty != .obj or value.ty.obj.* != .string) return error.InvalidAtOfs;
+        self.ofs = try self.allocator.dupeZ(u8, std.mem.sliceTo(value.ty.obj.string, 0));
         return true;
     }
     if (std.mem.eql(u8, key, "@ors")) {
-        if (value.ty != .string) return error.InvalidAtOrs;
-        self.ors = try self.allocator.dupe(u8, value.ty.string.*);
+        if (value.ty != .obj or value.ty.obj.* != .string) return error.InvalidAtOrs;
+        self.ors = try self.allocator.dupeZ(u8, std.mem.sliceTo(value.ty.obj.string, 0));
         return true;
     }
     if (std.mem.eql(u8, key, "@rec")) {
-        if (value.ty != .string) return error.InvalidAtRec;
-        self.record = try self.allocator.dupe(u8, value.ty.string.*);
+        if (value.ty != .obj or value.ty.obj.* != .string) return error.InvalidAtRec;
+        self.record = try self.allocator.dupeZ(u8, std.mem.sliceTo(value.ty.obj.string, 0));
         return true;
     }
     if (std.mem.eql(u8, key, "@cols")) {
-        if (value.ty != .list) return error.InvalidAtCols;
-        self.columns = (try value.copy(self.allocator)).ty.list;
+        if (value.ty != .obj or value.ty.obj.* != .list) return error.InvalidAtCols;
+        self.columns = (try value.copy(self.allocator)).ty.obj.list;
         return true;
     }
 

@@ -11,6 +11,8 @@ const Value = @import("Value.zig");
 const runtimePrint = @import("fmt.zig").runtimePrint;
 const ziglyph = @import("ziglyph");
 
+const ObjectTag = std.meta.Tag(Value.Object);
+
 allocator: std.mem.Allocator,
 ctx: Context,
 last_popped: Value = Value{ .ty = .nil },
@@ -180,19 +182,16 @@ fn execFormat(self: *Vm) !void {
         value,
         writer,
     );
+    try buf.append(0);
 
-    const str_ptr = try self.allocator.create([]const u8);
-    str_ptr.* = buf.items;
-    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
+    try self.value_stack.append(try Value.newStringZ(self.allocator, buf.items));
 }
 fn execPlain(self: *Vm) !void {
     self.ip.* += 1;
     const s = std.mem.sliceTo(self.instructions[self.ip.*..], 0);
     self.ip.* += @intCast(u16, s.len) + 1;
 
-    const str_ptr = try self.allocator.create([]const u8);
-    str_ptr.* = s;
-    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
+    try self.value_stack.append(try Value.newStringZ(self.allocator, s));
 }
 fn execString(self: *Vm) !void {
     self.ip.* += 3;
@@ -203,10 +202,9 @@ fn execString(self: *Vm) !void {
     var writer = buf.writer();
     var i: usize = 0;
     while (i < len) : (i += 1) _ = try writer.print("{}", .{self.value_stack.pop()});
+    try buf.append(0);
 
-    const str_ptr = try self.allocator.create([]const u8);
-    str_ptr.* = buf.items;
-    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
+    try self.value_stack.append(try Value.newStringZ(self.allocator, buf.items));
 }
 
 fn execFunc(self: *Vm) !void {
@@ -240,13 +238,12 @@ fn execFunc(self: *Vm) !void {
     const func_instructions: []const u8 = if (instructions_len == 0) "" else self.instructions[self.ip.* .. self.ip.* + instructions_len];
     self.ip.* += instructions_len;
 
-    const func_ptr = try self.allocator.create(Value.Function);
-    func_ptr.* = .{
+    const func = Value.Function{
         .name = func_name,
         .params = params,
         .instructions = func_instructions,
     };
-    try self.value_stack.append(Value.new(.{ .func = func_ptr }));
+    try self.value_stack.append(try Value.newFunc(self.allocator, func));
 }
 
 fn execReturn(self: *Vm) void {
@@ -312,7 +309,7 @@ fn execCall(self: *Vm) anyerror!void {
 
     // Get the function.
     const callee = self.value_stack.pop();
-    if (callee.ty != .func) return self.ctx.err(
+    if (!inObjectTypes(callee, &[_]ObjectTag{.func})) return self.ctx.err(
         "{s} is not callable.",
         .{@tagName(callee.ty)},
         error.InvalidCall,
@@ -323,7 +320,7 @@ fn execCall(self: *Vm) anyerror!void {
     var func_scope = Scope.init(self.allocator, .function);
 
     // Self-references
-    if (callee.ty.func.name.len != 0) try func_scope.map.put(callee.ty.func.name, callee);
+    if (callee.ty.obj.func.name.len != 0) try func_scope.map.put(callee.ty.obj.func.name, callee);
 
     // Process args
     const num_args = self.instructions[self.ip.*];
@@ -335,12 +332,12 @@ fn execCall(self: *Vm) anyerror!void {
         var buf: [4]u8 = undefined;
         const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{i});
         try func_scope.map.put(try self.allocator.dupe(u8, auto_arg_name), arg); // @0, @1, ...
-        if (i < callee.ty.func.params.len) try func_scope.map.put(callee.ty.func.params[i], arg);
+        if (i < callee.ty.obj.func.params.len) try func_scope.map.put(callee.ty.obj.func.params[i], arg);
     }
 
     // Push the function's frame.
     try self.pushScope(func_scope);
-    try self.pushFrame(callee.ty.func.instructions);
+    try self.pushFrame(callee.ty.obj.func.instructions);
 
     // NOTE: Final self.ip.* += 1 is done on return.
 }
@@ -521,20 +518,23 @@ fn execConcat(self: *Vm) anyerror!void {
     const offset = self.getOffset();
     self.ip.* += 2;
 
-    if (left.ty != .string or right.ty != .string) return self.ctx.err(
-        "{s} ++ {s} ?",
-        .{ @tagName(left.ty), @tagName(right.ty) },
+    if (!inObjectTypes(left, &[_]ObjectTag{.string}) or
+        !inObjectTypes(right, &[_]ObjectTag{.string})) return self.ctx.err(
+        "Invlid concatenation.",
+        .{},
         error.InvalidConcat,
         offset,
     );
 
-    var buf = try self.allocator.alloc(u8, left.ty.string.len + right.ty.string.len);
-    std.mem.copy(u8, buf, left.ty.string.*);
-    std.mem.copy(u8, buf[left.ty.string.len..], right.ty.string.*);
+    const str_left = std.mem.sliceTo(left.ty.obj.string, 0);
+    const str_right = std.mem.sliceTo(right.ty.obj.string, 0);
 
-    const str_ptr = try self.allocator.create([]const u8);
-    str_ptr.* = buf;
-    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
+    var buf = try self.allocator.alloc(u8, str_left.len + str_right.len + 1);
+    std.mem.copy(u8, buf, str_left);
+    std.mem.copy(u8, buf[str_left.len..], str_right);
+    buf[buf.len - 1] = 0;
+
+    try self.value_stack.append(try Value.newStringZ(self.allocator, buf));
 }
 fn execRepeat(self: *Vm) anyerror!void {
     const right = self.value_stack.pop();
@@ -543,20 +543,21 @@ fn execRepeat(self: *Vm) anyerror!void {
     const offset = self.getOffset();
     self.ip.* += 2;
 
-    if (left.ty != .string or right.ty != .uint) return self.ctx.err(
-        "{s} ** {s} ?",
-        .{ @tagName(left.ty), @tagName(right.ty) },
+    if (!inObjectTypes(left, &[_]ObjectTag{.string}) or right.ty != .uint) return self.ctx.err(
+        "Invalid string repeat.",
+        .{},
         error.InvalidRepeat,
         offset,
     );
 
-    var buf = try self.allocator.alloc(u8, left.ty.string.len * right.ty.uint);
-    var i: usize = 0;
-    while (i < right.ty.uint) : (i += 1) std.mem.copy(u8, buf[left.ty.string.len * i ..], left.ty.string.*);
+    const str_left = std.mem.sliceTo(left.ty.obj.string, 0);
 
-    const str_ptr = try self.allocator.create([]const u8);
-    str_ptr.* = buf;
-    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
+    var buf = try self.allocator.alloc(u8, str_left.len * right.ty.uint + 1);
+    var i: usize = 0;
+    while (i < right.ty.uint) : (i += 1) std.mem.copy(u8, buf[str_left.len * i ..], str_left);
+    buf[buf.len - 1] = 0;
+
+    try self.value_stack.append(try Value.newStringZ(self.allocator, buf));
 }
 
 fn execNot(self: *Vm) !void {
@@ -596,37 +597,36 @@ fn execList(self: *Vm) !void {
     const len = self.getU16(self.ip.*);
     self.ip.* += 2;
 
-    const list_ptr = try self.allocator.create(std.ArrayList(Value));
-    list_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, len);
+    var list = try std.ArrayList(Value).initCapacity(self.allocator, len);
     var i: usize = 0;
-    while (i < len) : (i += 1) list_ptr.appendAssumeCapacity(self.value_stack.pop());
+    while (i < len) : (i += 1) list.appendAssumeCapacity(self.value_stack.pop());
 
-    try self.value_stack.append(Value.new(.{ .list = list_ptr }));
+    try self.value_stack.append(try Value.newList(self.allocator, list));
 }
 fn execMap(self: *Vm) !void {
     self.ip.* += 3;
     const len = self.getU16(self.ip.*);
     self.ip.* += 2;
 
-    const map_ptr = try self.allocator.create(std.StringHashMap(Value));
-    map_ptr.* = std.StringHashMap(Value).init(self.allocator);
-    try map_ptr.ensureTotalCapacity(len);
+    var map = std.StringHashMap(Value).init(self.allocator);
+    try map.ensureTotalCapacity(len);
     var i: usize = 0;
     while (i < len) : (i += 1) {
         const value = self.value_stack.pop();
         const key = self.value_stack.pop();
-        map_ptr.putAssumeCapacity(key.ty.string.*, value);
+        map.putAssumeCapacity(std.mem.sliceTo(key.ty.obj.string, 0), value);
     }
 
-    try self.value_stack.append(Value.new(.{ .map = map_ptr }));
+    try self.value_stack.append(try Value.newMap(self.allocator, map));
 }
+
 fn execSubscript(self: *Vm) !void {
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
     const container = self.value_stack.pop();
 
-    if (container.ty != .list and container.ty != .map)
+    if (!inObjectTypes(container, &[_]ObjectTag{ .list, .map }))
         return self.ctx.err(
             "{s}[] ?",
             .{@tagName(container.ty)},
@@ -634,14 +634,14 @@ fn execSubscript(self: *Vm) !void {
             offset,
         );
 
-    return if (container.ty == .list)
+    return if (container.ty.obj.* == .list)
         try self.execSubscriptList(container, offset)
     else
         try self.execSubscriptMap(container, offset);
 }
 fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
     const index = self.value_stack.pop();
-    if (index.ty != .uint and index.ty != .range) return self.ctx.err(
+    if (index.ty != .uint and !inObjectTypes(index, &[_]ObjectTag{.range})) return self.ctx.err(
         "list[{s}] ?",
         .{@tagName(index.ty)},
         error.InvalidSubscript,
@@ -649,38 +649,37 @@ fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
     );
 
     if (index.ty == .uint) {
-        if (index.ty.uint >= list.ty.list.items.len) return self.ctx.err(
+        if (index.ty.uint >= list.ty.obj.list.items.len) return self.ctx.err(
             "Index out of bounds.",
             .{},
             error.InvalidSubscript,
             offset,
         );
-        try self.value_stack.append(list.ty.list.items[index.ty.uint]);
+        try self.value_stack.append(list.ty.obj.list.items[index.ty.uint]);
     } else {
-        if (index.ty.range.*[1] > list.ty.list.items.len) return self.ctx.err(
+        if (index.ty.obj.range[1] > list.ty.obj.list.items.len) return self.ctx.err(
             "Index out of bounds.",
             .{},
             error.InvalidSubscript,
             offset,
         );
 
-        var new_list_ptr = try self.allocator.create(std.ArrayList(Value));
-        new_list_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, index.ty.range[1] - index.ty.range[0]);
-        for (list.ty.list.items[index.ty.range.*[0]..index.ty.range.*[1]]) |item|
-            new_list_ptr.appendAssumeCapacity(item); //TODO: Copy here?
+        var new_list = try std.ArrayList(Value).initCapacity(self.allocator, index.ty.obj.range[1] - index.ty.obj.range[0]);
+        for (list.ty.obj.list.items[index.ty.obj.range[0]..index.ty.obj.range[1]]) |item|
+            new_list.appendAssumeCapacity(item); //TODO: Copy here?
 
-        try self.value_stack.append(Value.new(.{ .list = new_list_ptr }));
+        try self.value_stack.append(try Value.newList(self.allocator, new_list));
     }
 }
 fn execSubscriptMap(self: *Vm, map: Value, offset: u16) !void {
     const key = self.value_stack.pop();
-    if (key.ty != .string) return self.ctx.err(
+    if (!inObjectTypes(key, &[_]ObjectTag{.string})) return self.ctx.err(
         "map[{s}] ?",
         .{@tagName(key.ty)},
         error.InvalidSubscript,
         offset,
     );
-    const value = if (map.ty.map.get(key.ty.string.*)) |v| v else Value.new(.nil);
+    const value = if (map.ty.obj.map.get(std.mem.sliceTo(key.ty.obj.string, 0))) |v| v else Value.new(.nil);
     try self.value_stack.append(value);
 }
 fn execSet(self: *Vm) !void {
@@ -692,15 +691,14 @@ fn execSet(self: *Vm) !void {
     const combo = @intToEnum(Node.Combo, self.instructions[self.ip.*]);
     self.ip.* += 1;
 
-    if (container.ty != .list and container.ty != .map)
-        return self.ctx.err(
-            "{s}[]= ?",
-            .{@tagName(container.ty)},
-            error.InvalidSubscript,
-            offset,
-        );
+    if (!inObjectTypes(container, &[_]ObjectTag{ .list, .map })) return self.ctx.err(
+        "{s}[]= ?",
+        .{@tagName(container.ty)},
+        error.InvalidSubscript,
+        offset,
+    );
 
-    return if (container.ty == .list)
+    return if (container.ty.obj.* == .list)
         try self.execSetList(container, offset, combo)
     else
         try self.execSetMap(container, offset, combo);
@@ -713,7 +711,7 @@ fn execSetList(self: *Vm, list: Value, offset: u16, combo: Node.Combo) !void {
         error.InvalidSubscript,
         offset,
     );
-    if (index.ty.uint >= list.ty.list.items.len) return self.ctx.err(
+    if (index.ty.uint >= list.ty.obj.list.items.len) return self.ctx.err(
         "Index out of bounds.",
         .{},
         error.InvalidSubscript,
@@ -723,10 +721,10 @@ fn execSetList(self: *Vm, list: Value, offset: u16, combo: Node.Combo) !void {
 
     // Store
     if (combo == .none) {
-        list.ty.list.items[index.ty.uint] = rvalue; //TODO: Deinit old value?
+        list.ty.obj.list.items[index.ty.uint] = rvalue; //TODO: Deinit old value?
         try self.value_stack.append(rvalue);
     } else {
-        const old_value = list.ty.list.items[index.ty.uint];
+        const old_value = list.ty.obj.list.items[index.ty.uint];
 
         const new_value = switch (combo) {
             .none => unreachable,
@@ -737,27 +735,27 @@ fn execSetList(self: *Vm, list: Value, offset: u16, combo: Node.Combo) !void {
             .mod => try old_value.mod(rvalue),
         };
 
-        list.ty.list.items[index.ty.uint] = new_value;
+        list.ty.obj.list.items[index.ty.uint] = new_value;
         try self.value_stack.append(new_value);
     }
 }
 fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
     const key = self.value_stack.pop();
-    if (key.ty != .string) return self.ctx.err(
+    if (!inObjectTypes(key, &[_]ObjectTag{.string})) return self.ctx.err(
         "map[{s}]= ?",
         .{@tagName(key.ty)},
         error.InvalidSubscript,
         offset,
     );
     const rvalue = self.value_stack.pop();
-    const key_copy = try map.ty.map.allocator.dupe(u8, key.ty.string.*);
+    const key_copy = try map.ty.obj.map.allocator.dupe(u8, std.mem.sliceTo(key.ty.obj.string, 0));
 
     // Store
     if (combo == .none) {
-        try map.ty.map.put(key_copy, try rvalue.copy(map.ty.map.allocator)); //TODO: Deinit old value?
+        try map.ty.obj.map.put(key_copy, try rvalue.copy(map.ty.obj.map.allocator)); //TODO: Deinit old value?
         try self.value_stack.append(rvalue);
     } else {
-        const old_value = map.ty.map.get(key.ty.string.*) orelse Value.new(.{ .uint = 0 });
+        const old_value = map.ty.obj.map.get(std.mem.sliceTo(key.ty.obj.string, 0)) orelse Value.new(.{ .uint = 0 });
 
         const new_value = switch (combo) {
             .none => unreachable,
@@ -768,7 +766,7 @@ fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
             .mod => try old_value.mod(rvalue),
         };
 
-        try map.ty.map.put(key_copy, try new_value.copy(map.ty.map.allocator));
+        try map.ty.obj.map.put(key_copy, try new_value.copy(map.ty.obj.map.allocator));
         try self.value_stack.append(new_value);
     }
 }
@@ -807,9 +805,8 @@ fn execRange(self: *Vm) anyerror!void {
     const from_uint = from.ty.uint;
     const to_uint = if (inclusive) to.ty.uint + 1 else to.ty.uint;
 
-    const r_ptr = try self.allocator.create([2]usize);
-    r_ptr.* = [2]usize{ from_uint, to_uint };
-    try self.value_stack.append(Value.new(.{ .range = r_ptr }));
+    const range = try Value.newRange(self.allocator, [2]usize{ from_uint, to_uint });
+    try self.value_stack.append(range);
 }
 
 fn execRecRange(self: *Vm) anyerror!void {
@@ -968,29 +965,26 @@ fn strChars(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const str = self.value_stack.pop();
-    if (str.ty != .string) return self.ctx.err(
+    if (str.ty != .obj or str.ty.obj.* != .string) return self.ctx.err(
         "{s}.chars() ?",
         .{@tagName(str.ty)},
         error.InvalidCharsCall,
         offset,
     );
 
-    var list_ptr = try self.allocator.create(std.ArrayList(Value));
-    list_ptr.* = std.ArrayList(Value).init(self.allocator);
+    var list = std.ArrayList(Value).init(self.allocator);
 
-    var giter = GraphemeIterator.init(str.ty.string.*) catch |err| return self.ctx.err(
+    var giter = GraphemeIterator.init(std.mem.sliceTo(str.ty.obj.string, 0)) catch |err| return self.ctx.err(
         "Unicode error.",
         .{},
         err,
         offset,
     );
     while (giter.next()) |grapheme| {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = grapheme.bytes;
-        try list_ptr.append(Value.new(.{ .string = str_ptr }));
+        try list.append(try Value.newString(self.allocator, grapheme.bytes));
     }
 
-    try self.value_stack.append(Value.new(.{ .list = list_ptr }));
+    try self.value_stack.append(try Value.newList(self.allocator, list));
     self.ip.* += 1;
 }
 fn execPrint(self: *Vm) anyerror!void {
@@ -1003,7 +997,7 @@ fn execPrint(self: *Vm) anyerror!void {
     var writer = self.output.writer();
     var i: usize = 0;
     while (i < num_args) : (i += 1) {
-        if (i != 0) try writer.writeAll(self.scope_stack.ofs);
+        if (i != 0) try writer.writeAll(std.mem.sliceTo(self.scope_stack.ofs, 0));
         _ = try writer.print("{}", .{self.value_stack.pop()});
     }
 
@@ -1021,13 +1015,12 @@ fn execSprint(self: *Vm) anyerror!void {
 
     var i: usize = 0;
     while (i < num_args) : (i += 1) {
-        if (i != 0) try writer.writeAll(self.scope_stack.ofs);
+        if (i != 0) try writer.writeAll(std.mem.sliceTo(self.scope_stack.ofs, 0));
         _ = try writer.print("{}", .{self.value_stack.pop()});
     }
+    try buf.append(0);
 
-    const str_ptr = try self.allocator.create([]const u8);
-    str_ptr.* = buf.items;
-    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
+    try self.value_stack.append(try Value.newStringZ(self.allocator, buf.items));
 }
 fn oneArgMath(self: *Vm, builtin: Token.Tag) anyerror!void {
     self.ip.* += 1;
@@ -1072,9 +1065,10 @@ fn contains(self: *Vm) anyerror!void {
 
     const haystack = self.value_stack.pop();
     const needle = self.value_stack.pop();
-    if (haystack.ty != .list and
-        haystack.ty != .map and
-        haystack.ty != .string)
+    if (haystack.ty != .obj or
+        (haystack.ty.obj.* != .list and
+        haystack.ty.obj.* != .map and
+        haystack.ty.obj.* != .string))
         return self.ctx.err(
             "contains not allowed on {s}.",
             .{@tagName(haystack.ty)},
@@ -1082,7 +1076,7 @@ fn contains(self: *Vm) anyerror!void {
             offset,
         );
 
-    const result = switch (haystack.ty) {
+    const result = switch (haystack.ty.obj.*) {
         .list => |l| for (l.items) |item| {
             if (needle.eql(item)) break Value.new(.{ .boolean = true });
         } else Value.new(.{ .boolean = false }),
@@ -1093,14 +1087,14 @@ fn contains(self: *Vm) anyerror!void {
             } else Value.new(.{ .boolean = false });
         },
         .string => |s| str: {
-            if (needle.ty != .string) return self.ctx.err(
+            if (needle.ty != .obj or needle.ty.obj.* != .string) return self.ctx.err(
                 "contains arg on strings must be a string.",
                 .{},
                 error.InvalidContains,
                 offset,
             );
 
-            break :str Value.new(.{ .boolean = std.mem.containsAtLeast(u8, s.*, 1, needle.ty.string.*) });
+            break :str Value.new(.{ .boolean = std.mem.containsAtLeast(u8, std.mem.sliceTo(s, 0), 1, std.mem.sliceTo(needle.ty.obj.string, 0)) });
         },
         else => unreachable,
     };
@@ -1115,29 +1109,31 @@ fn indexOf(self: *Vm) anyerror!void {
 
     const haystack = self.value_stack.pop();
     const needle = self.value_stack.pop();
-    if (haystack.ty != .list and haystack.ty != .string) return self.ctx.err(
+    if (haystack.ty != .obj or
+        (haystack.ty.obj.* != .list and
+        haystack.ty.obj.* != .string)) return self.ctx.err(
         "indexOf not allowed on {s}.",
         .{@tagName(haystack.ty)},
         error.InvalidIndexOf,
         offset,
     );
 
-    const result = switch (haystack.ty) {
+    const result = switch (haystack.ty.obj.*) {
         .list => |l| for (l.items) |item, i| {
             if (needle.eql(item)) break Value.new(.{ .uint = i });
         } else Value.new(.nil),
         .string => |s| str: {
-            if (needle.ty != .string) return self.ctx.err(
+            if (needle.ty != .obj or needle.ty.obj.* != .string) return self.ctx.err(
                 "indexOf arg on strings must be a string.",
                 .{},
                 error.InvalidIndexOf,
                 offset,
             );
 
-            var giter = try GraphemeIterator.init(s.*);
+            var giter = try GraphemeIterator.init(std.mem.sliceTo(s, 0));
             var i: usize = 0;
             break :str while (giter.next()) |grapheme| : (i += 1) {
-                if (std.mem.eql(u8, needle.ty.string.*, grapheme.bytes)) break Value.new(.{ .uint = i });
+                if (std.mem.eql(u8, std.mem.sliceTo(needle.ty.obj.string, 0), grapheme.bytes)) break Value.new(.{ .uint = i });
             } else Value.new(.nil);
         },
         else => unreachable,
@@ -1153,14 +1149,14 @@ fn lastIndexOf(self: *Vm) anyerror!void {
 
     const haystack = self.value_stack.pop();
     const needle = self.value_stack.pop();
-    if (haystack.ty != .list and haystack.ty != .string) return self.ctx.err(
+    if (!inObjectTypes(haystack, &[_]ObjectTag{ .list, .string })) return self.ctx.err(
         "lastIndexOf not allowed on {s}.",
         .{@tagName(haystack.ty)},
         error.InvalidLastIndexOf,
         offset,
     );
 
-    const result = switch (haystack.ty) {
+    const result = switch (haystack.ty.obj.*) {
         .list => |l| lst: {
             var i: usize = 0;
             const len = l.items.len;
@@ -1169,18 +1165,18 @@ fn lastIndexOf(self: *Vm) anyerror!void {
             } else Value.new(.nil);
         },
         .string => |s| str: {
-            if (needle.ty != .string) return self.ctx.err(
+            if (needle.ty != .obj or needle.ty.obj.* != .string) return self.ctx.err(
                 "lastIndexOf arg on strings must be a string.",
                 .{},
                 error.InvalidLastIndexOf,
                 offset,
             );
 
-            var giter = try GraphemeIterator.init(s.*);
+            var giter = try GraphemeIterator.init(std.mem.sliceTo(s, 0));
             var i: usize = 0;
             var index = Value.new(.nil);
             while (giter.next()) |grapheme| : (i += 1) {
-                if (std.mem.eql(u8, needle.ty.string.*, grapheme.bytes)) index = Value.new(.{ .uint = i });
+                if (std.mem.eql(u8, std.mem.sliceTo(needle.ty.obj.string, 0), grapheme.bytes)) index = Value.new(.{ .uint = i });
             }
 
             break :str index;
@@ -1197,9 +1193,10 @@ fn length(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const value = self.value_stack.pop();
-    if (value.ty != .list and
-        value.ty != .map and
-        value.ty != .string)
+    if (value.ty != .obj or
+        (value.ty.obj.* != .list and
+        value.ty.obj.* != .map and
+        value.ty.obj.* != .string))
         return self.ctx.err(
             "len not allowed on {s}.",
             .{@tagName(value.ty)},
@@ -1207,10 +1204,10 @@ fn length(self: *Vm) anyerror!void {
             offset,
         );
 
-    const result = switch (value.ty) {
+    const result = switch (value.ty.obj.*) {
         .list => |l| Value.new(.{ .uint = l.items.len }),
         .map => |m| Value.new(.{ .uint = m.count() }),
-        .string => |s| Value.new(.{ .uint = s.len }),
+        .string => |s| Value.new(.{ .uint = std.mem.sliceTo(s, 0).len }),
         else => unreachable,
     };
 
@@ -1223,25 +1220,24 @@ fn mapKeys(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const m = self.value_stack.pop();
-    if (m.ty != .map) return self.ctx.err(
+    if (m.ty != .obj or m.ty.obj.* != .map) return self.ctx.err(
         "keys not allowed on {s}.",
         .{@tagName(m.ty)},
         error.InvalidKeys,
         offset,
     );
 
-    const keys_ptr = try self.allocator.create(std.ArrayList(Value));
-    keys_ptr.* = if (m.ty.map.count() == 0)
+    var list = if (m.ty.obj.map.count() == 0)
         std.ArrayList(Value).init(self.allocator)
     else
-        try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
-    var key_iter = m.ty.map.keyIterator();
+        try std.ArrayList(Value).initCapacity(self.allocator, m.ty.obj.map.count());
+
+    var key_iter = m.ty.obj.map.keyIterator();
     while (key_iter.next()) |key| {
-        //TODO: Make sure this is OK
-        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = key }));
+        list.appendAssumeCapacity(try Value.newString(self.allocator, key.*));
     }
 
-    try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
+    try self.value_stack.append(try Value.newList(self.allocator, list));
     self.ip.* += 1;
 }
 
@@ -1258,38 +1254,35 @@ fn mapKeysByValueAsc(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const m = self.value_stack.pop();
-    if (m.ty != .map) return self.ctx.err(
+    if (m.ty != .obj or m.ty.obj.* != .map) return self.ctx.err(
         "keysByValueAsc not allowed on {s}.",
         .{@tagName(m.ty)},
         error.InvalidKeysByValueAsc,
         offset,
     );
 
-    const keys_ptr = try self.allocator.create(std.ArrayList(Value));
-
-    if (m.ty.map.count() == 0) {
-        keys_ptr.* = std.ArrayList(Value).init(self.allocator);
-        try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
+    if (m.ty.obj.map.count() == 0) {
+        var list = std.ArrayList(Value).init(self.allocator);
+        try self.value_stack.append(try Value.newList(self.allocator, list));
         self.ip.* += 1;
         return;
     }
 
-    keys_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
+    var list = try std.ArrayList(Value).initCapacity(self.allocator, m.ty.obj.map.count());
 
-    var entries = try std.ArrayList(std.StringHashMap(Value).Entry).initCapacity(self.allocator, m.ty.map.count());
+    var entries = try std.ArrayList(std.StringHashMap(Value).Entry).initCapacity(self.allocator, m.ty.obj.map.count());
     defer entries.deinit();
 
-    var iter = m.ty.map.iterator();
+    var iter = m.ty.obj.map.iterator();
     while (iter.next()) |entry| entries.appendAssumeCapacity(entry);
 
     std.sort.sort(std.StringHashMap(Value).Entry, entries.items, {}, entryAsc);
 
     for (entries.items) |entry| {
-        //TODO: Make sure this is OK
-        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr }));
+        list.appendAssumeCapacity(try Value.newString(self.allocator, entry.key_ptr.*));
     }
 
-    try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
+    try self.value_stack.append(try Value.newList(self.allocator, list));
     self.ip.* += 1; // num_args
 }
 fn mapKeysByValueDesc(self: *Vm) anyerror!void {
@@ -1298,38 +1291,35 @@ fn mapKeysByValueDesc(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const m = self.value_stack.pop();
-    if (m.ty != .map) return self.ctx.err(
+    if (m.ty != .obj or m.ty.obj.* != .map) return self.ctx.err(
         "keysByValueDesc not allowed on {s}.",
         .{@tagName(m.ty)},
         error.InvalidKeysByValueDesc,
         offset,
     );
 
-    const keys_ptr = try self.allocator.create(std.ArrayList(Value));
-
-    if (m.ty.map.count() == 0) {
-        keys_ptr.* = std.ArrayList(Value).init(self.allocator);
-        try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
+    if (m.ty.obj.map.count() == 0) {
+        var list = std.ArrayList(Value).init(self.allocator);
+        try self.value_stack.append(try Value.newList(self.allocator, list));
         self.ip.* += 1;
         return;
     }
 
-    keys_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
+    var list = try std.ArrayList(Value).initCapacity(self.allocator, m.ty.obj.map.count());
 
-    var entries = try std.ArrayList(std.StringHashMap(Value).Entry).initCapacity(self.allocator, m.ty.map.count());
+    var entries = try std.ArrayList(std.StringHashMap(Value).Entry).initCapacity(self.allocator, m.ty.obj.map.count());
     defer entries.deinit();
 
-    var iter = m.ty.map.iterator();
+    var iter = m.ty.obj.map.iterator();
     while (iter.next()) |entry| entries.appendAssumeCapacity(entry);
 
     std.sort.sort(std.StringHashMap(Value).Entry, entries.items, {}, entryDesc);
 
     for (entries.items) |entry| {
-        //TODO: Make sure this is OK
-        keys_ptr.appendAssumeCapacity(Value.new(.{ .string = entry.key_ptr }));
+        list.appendAssumeCapacity(try Value.newString(self.allocator, entry.key_ptr.*));
     }
 
-    try self.value_stack.append(Value.new(.{ .list = keys_ptr }));
+    try self.value_stack.append(try Value.newList(self.allocator, list));
     self.ip.* += 1; // num_args
 }
 
@@ -1339,22 +1329,22 @@ fn mapValues(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const m = self.value_stack.pop();
-    if (m.ty != .map) return self.ctx.err(
+    if (m.ty != .obj or m.ty.obj.* != .map) return self.ctx.err(
         "values not allowed on {s}.",
         .{@tagName(m.ty)},
         error.InvalidValues,
         offset,
     );
 
-    const values_ptr = try self.allocator.create(std.ArrayList(Value));
-    values_ptr.* = if (m.ty.map.count() == 0)
+    var list = if (m.ty.obj.map.count() == 0)
         std.ArrayList(Value).init(self.allocator)
     else
-        try std.ArrayList(Value).initCapacity(self.allocator, m.ty.map.count());
-    var value_iter = m.ty.map.valueIterator();
-    while (value_iter.next()) |value| values_ptr.appendAssumeCapacity(value.*);
+        try std.ArrayList(Value).initCapacity(self.allocator, m.ty.obj.map.count());
 
-    try self.value_stack.append(Value.new(.{ .list = values_ptr }));
+    var value_iter = m.ty.obj.map.valueIterator();
+    while (value_iter.next()) |value| list.appendAssumeCapacity(value.*);
+
+    try self.value_stack.append(try Value.newList(self.allocator, list));
     self.ip.* += 1;
 }
 fn listMeanHelper(list: std.ArrayList(Value)) f64 {
@@ -1375,20 +1365,20 @@ fn listMean(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "mean not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidMean,
         offset,
     );
 
-    if (l.ty.list.items.len == 0) {
+    if (l.ty.obj.list.items.len == 0) {
         try self.value_stack.append(Value.new(.{ .float = 0 }));
         self.ip.* += 1;
         return;
     }
 
-    try self.value_stack.append(Value.new(.{ .float = listMeanHelper(l.ty.list.*) }));
+    try self.value_stack.append(Value.new(.{ .float = listMeanHelper(l.ty.obj.list) }));
     self.ip.* += 1;
 }
 fn listMedian(self: *Vm) anyerror!void {
@@ -1397,22 +1387,22 @@ fn listMedian(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "median not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidMedian,
         offset,
     );
 
-    if (l.ty.list.items.len == 0) {
+    if (l.ty.obj.list.items.len == 0) {
         try self.value_stack.append(Value.new(.{ .float = 0 }));
         self.ip.* += 1;
         return;
     }
 
-    var list_copy = try std.ArrayList(f64).initCapacity(self.allocator, l.ty.list.items.len);
+    var list_copy = try std.ArrayList(f64).initCapacity(self.allocator, l.ty.obj.list.items.len);
 
-    for (l.ty.list.items) |item| {
+    for (l.ty.obj.list.items) |item| {
         if (item.asFloat()) |f| list_copy.appendAssumeCapacity(f.ty.float);
     }
     std.sort.sort(f64, list_copy.items, {}, comptime std.sort.asc(f64));
@@ -1432,14 +1422,14 @@ fn listMode(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "mode not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidMode,
         offset,
     );
 
-    if (l.ty.list.items.len == 0) {
+    if (l.ty.obj.list.items.len == 0) {
         try self.value_stack.append(Value.new(.nil));
         self.ip.* += 1;
         return;
@@ -1448,7 +1438,7 @@ fn listMode(self: *Vm) anyerror!void {
     var counts = std.StringHashMap(usize).init(self.allocator);
     var key_buf: [4096]u8 = undefined;
 
-    for (l.ty.list.items) |item| {
+    for (l.ty.obj.list.items) |item| {
         if (item.asFloat()) |f| {
             const key_str = try std.fmt.bufPrint(&key_buf, "{}", .{f});
             var entry = try counts.getOrPut(try self.allocator.dupe(u8, key_str));
@@ -1463,14 +1453,13 @@ fn listMode(self: *Vm) anyerror!void {
     }
 
     iter = counts.iterator();
-    var mode_ptr = try self.allocator.create(std.ArrayList(Value));
-    mode_ptr.* = std.ArrayList(Value).init(self.allocator);
+    var list = std.ArrayList(Value).init(self.allocator);
     while (iter.next()) |entry| {
-        if (entry.value_ptr.* == highest) try mode_ptr.append(Value.new(.{ .float = std.fmt.parseFloat(f64, entry.key_ptr.*) catch unreachable }));
+        if (entry.value_ptr.* == highest) try list.append(Value.new(.{ .float = std.fmt.parseFloat(f64, entry.key_ptr.*) catch unreachable }));
     }
-    std.sort.sort(Value, mode_ptr.items, {}, Value.lessThan);
+    std.sort.sort(Value, list.items, {}, Value.lessThan);
 
-    const result = if (mode_ptr.items.len == counts.count()) Value.new(.nil) else Value.new(.{ .list = mode_ptr });
+    const result = if (list.items.len == counts.count()) Value.new(.nil) else try Value.newList(self.allocator, list);
     try self.value_stack.append(result);
     self.ip.* += 1;
 }
@@ -1480,24 +1469,24 @@ fn listStdev(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "stdev not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidStdev,
         offset,
     );
 
-    if (l.ty.list.items.len == 0) {
+    if (l.ty.obj.list.items.len == 0) {
         try self.value_stack.append(Value.new(.{ .float = 0 }));
         self.ip.* += 1;
         return;
     }
 
-    const mean = listMeanHelper(l.ty.list.*);
+    const mean = listMeanHelper(l.ty.obj.list);
 
     var sum_of_squares: f64 = 0;
     var count: f64 = 0;
-    for (l.ty.list.items) |item| {
+    for (l.ty.obj.list.items) |item| {
         if (item.asFloat()) |f| {
             const diff = f.ty.float - mean;
             const square = diff * diff;
@@ -1517,21 +1506,21 @@ fn listMin(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (!inObjectTypes(l, &[_]ObjectTag{.list})) return self.ctx.err(
         "min not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidMin,
         offset,
     );
 
-    if (l.ty.list.items.len == 0) {
+    if (l.ty.obj.list.items.len == 0) {
         try self.value_stack.append(Value.new(.nil));
         self.ip.* += 1;
         return;
     }
 
-    var min = l.ty.list.items[0];
-    for (l.ty.list.items) |item| {
+    var min = l.ty.obj.list.items[0];
+    for (l.ty.obj.list.items) |item| {
         const comparison = try min.cmp(item);
         if (comparison == .gt) min = item;
     }
@@ -1545,21 +1534,21 @@ fn listMax(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "max not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidMax,
         offset,
     );
 
-    if (l.ty.list.items.len == 0) {
+    if (l.ty.obj.list.items.len == 0) {
         try self.value_stack.append(Value.new(.nil));
         self.ip.* += 1;
         return;
     }
 
-    var max = l.ty.list.items[0];
-    for (l.ty.list.items) |item| {
+    var max = l.ty.obj.list.items[0];
+    for (l.ty.obj.list.items) |item| {
         const comparison = try max.cmp(item);
         if (comparison == .lt) max = item;
     }
@@ -1573,20 +1562,20 @@ fn listSortAsc(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "sortAsc not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidSortAsc,
         offset,
     );
 
-    if (l.ty.list.items.len == 0) {
+    if (l.ty.obj.list.items.len == 0) {
         try self.value_stack.append(l);
         self.ip.* += 1;
         return;
     }
 
-    std.sort.sort(Value, l.ty.list.items, {}, Value.lessThan);
+    std.sort.sort(Value, l.ty.obj.list.items, {}, Value.lessThan);
     try self.value_stack.append(l);
     self.ip.* += 1;
 }
@@ -1596,20 +1585,20 @@ fn listSortDesc(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "sortDesc not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidSortDesc,
         offset,
     );
 
-    if (l.ty.list.items.len == 0) {
+    if (l.ty.obj.list.items.len == 0) {
         try self.value_stack.append(l);
         self.ip.* += 1;
         return;
     }
 
-    std.sort.sort(Value, l.ty.list.items, {}, Value.greaterThan);
+    std.sort.sort(Value, l.ty.obj.list.items, {}, Value.greaterThan);
     try self.value_stack.append(l);
     self.ip.* += 1;
 }
@@ -1619,20 +1608,20 @@ fn listReverse(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "reverse not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidReverse,
         offset,
     );
 
-    if (l.ty.list.items.len == 0) {
+    if (l.ty.obj.list.items.len == 0) {
         try self.value_stack.append(l);
         self.ip.* += 1;
         return;
     }
 
-    std.mem.reverse(Value, l.ty.list.items);
+    std.mem.reverse(Value, l.ty.obj.list.items);
     try self.value_stack.append(l);
     self.ip.* += 1;
 }
@@ -1642,7 +1631,7 @@ fn strSplit(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const str = self.value_stack.pop();
-    if (str.ty != .string) return self.ctx.err(
+    if (str.ty != .obj or str.ty.obj.* != .string) return self.ctx.err(
         "split not allowed on {s}.",
         .{@tagName(str.ty)},
         error.InvalidSplit,
@@ -1650,23 +1639,23 @@ fn strSplit(self: *Vm) anyerror!void {
     );
 
     const delim = self.value_stack.pop();
-    if (delim.ty != .string) return self.ctx.err(
+    if (delim.ty != .obj or delim.ty.obj.* != .string) return self.ctx.err(
         "split delimiter must be a string",
         .{},
         error.InvalidSplit,
         offset,
     );
 
-    var list_ptr = try self.allocator.create(std.ArrayList(Value));
-    list_ptr.* = std.ArrayList(Value).init(self.allocator);
-    var iter = std.mem.split(u8, str.ty.string.*, delim.ty.string.*);
+    const str_str = std.mem.sliceTo(str.ty.obj.string, 0);
+    const delim_str = std.mem.sliceTo(delim.ty.obj.string, 0);
+
+    var list = std.ArrayList(Value).init(self.allocator);
+    var iter = std.mem.split(u8, str_str, delim_str);
     while (iter.next()) |sub| {
-        const str_ptr = try self.allocator.create([]const u8);
-        str_ptr.* = sub;
-        try list_ptr.append(Value.new(.{ .string = str_ptr }));
+        try list.append(try Value.newString(self.allocator, sub));
     }
 
-    try self.value_stack.append(Value.new(.{ .list = list_ptr }));
+    try self.value_stack.append(try Value.newList(self.allocator, list));
     self.ip.* += 1;
 }
 fn listJoin(self: *Vm) anyerror!void {
@@ -1675,7 +1664,7 @@ fn listJoin(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "join not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidJoin,
@@ -1683,7 +1672,7 @@ fn listJoin(self: *Vm) anyerror!void {
     );
 
     const delim = self.value_stack.pop();
-    if (delim.ty != .string) return self.ctx.err(
+    if (delim.ty != .obj or delim.ty.obj.* != .string) return self.ctx.err(
         "join delimiter must be a string",
         .{},
         error.InvalidJoin,
@@ -1692,15 +1681,15 @@ fn listJoin(self: *Vm) anyerror!void {
 
     var buf = std.ArrayList(u8).init(self.allocator);
     var writer = buf.writer();
+    const str_delim = std.mem.sliceTo(delim.ty.obj.string, 0);
 
-    for (l.ty.list.items) |item, i| {
-        if (i != 0 and delim.ty.string.len > 0) try buf.appendSlice(delim.ty.string.*);
+    for (l.ty.obj.list.items) |item, i| {
+        if (i != 0 and str_delim.len > 0) try buf.appendSlice(str_delim);
         _ = try writer.print("{}", .{item});
     }
+    try buf.append(0);
 
-    const str_ptr = try self.allocator.create([]const u8);
-    str_ptr.* = buf.items;
-    try self.value_stack.append(Value.new(.{ .string = str_ptr }));
+    try self.value_stack.append(try Value.newStringZ(self.allocator, buf.items));
     self.ip.* += 1;
 }
 fn strEndsWith(self: *Vm) anyerror!void {
@@ -1710,14 +1699,17 @@ fn strEndsWith(self: *Vm) anyerror!void {
 
     const str = self.value_stack.pop();
     const ending = self.value_stack.pop();
-    if (str.ty != .string or ending.ty != .string) return self.ctx.err(
+    if (str.ty != .obj or
+        str.ty.obj.* != .string or
+        ending.ty != .obj or
+        ending.ty.obj.* != .string) return self.ctx.err(
         "endsWith callee and arg must be strings.",
         .{},
         error.InvalidEndsWith,
         offset,
     );
 
-    const result = Value.new(.{ .boolean = std.mem.endsWith(u8, str.ty.string.*, ending.ty.string.*) });
+    const result = Value.new(.{ .boolean = std.mem.endsWith(u8, std.mem.sliceTo(str.ty.obj.string, 0), std.mem.sliceTo(ending.ty.obj.string, 0)) });
 
     try self.value_stack.append(result);
     self.ip.* += 1;
@@ -1729,14 +1721,20 @@ fn strStartsWith(self: *Vm) anyerror!void {
 
     const str = self.value_stack.pop();
     const start = self.value_stack.pop();
-    if (str.ty != .string or start.ty != .string) return self.ctx.err(
+    if (str.ty != .obj or
+        str.ty.obj.* != .string or
+        start.ty != .obj or
+        start.ty.obj.* != .string) return self.ctx.err(
         "startsWith callee and arg must be strings.",
         .{},
         error.InvalidStartsWith,
         offset,
     );
 
-    const result = Value.new(.{ .boolean = std.mem.startsWith(u8, str.ty.string.*, start.ty.string.*) });
+    const str_str = std.mem.sliceTo(str.ty.obj.string, 0);
+    const start_str = std.mem.sliceTo(start.ty.obj.string, 0);
+
+    const result = Value.new(.{ .boolean = std.mem.startsWith(u8, str_str, start_str) });
     try self.value_stack.append(result);
 
     self.ip.* += 1;
@@ -1747,7 +1745,7 @@ fn listMap(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "map not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidMap,
@@ -1755,22 +1753,21 @@ fn listMap(self: *Vm) anyerror!void {
     );
 
     const f = self.value_stack.pop();
-    if (f.ty != .func) return self.ctx.err(
+    if (f.ty != .obj or f.ty.obj.* != .func) return self.ctx.err(
         "map requres function argument.",
         .{},
         error.InvalidMap,
         offset,
     );
 
-    var list_ptr = try self.allocator.create(std.ArrayList(Value));
-    list_ptr.* = try std.ArrayList(Value).initCapacity(self.allocator, l.ty.list.items.len);
+    var list = try std.ArrayList(Value).initCapacity(self.allocator, l.ty.obj.list.items.len);
 
-    for (l.ty.list.items) |item, i| {
+    for (l.ty.obj.list.items) |item, i| {
         const v = try self.execListPredicate(f, item, i);
-        list_ptr.appendAssumeCapacity(v);
+        list.appendAssumeCapacity(v);
     }
 
-    try self.value_stack.append(Value.new(.{ .list = list_ptr }));
+    try self.value_stack.append(try Value.newList(self.allocator, list));
     self.ip.* += 1;
 }
 fn listFilter(self: *Vm) anyerror!void {
@@ -1779,7 +1776,7 @@ fn listFilter(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "filter not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidFilter,
@@ -1787,22 +1784,21 @@ fn listFilter(self: *Vm) anyerror!void {
     );
 
     const f = self.value_stack.pop();
-    if (f.ty != .func) return self.ctx.err(
+    if (f.ty != .obj or f.ty.obj.* != .func) return self.ctx.err(
         "filter requires function argument",
         .{},
         error.InvalidFilter,
         offset,
     );
 
-    var list_ptr = try self.allocator.create(std.ArrayList(Value));
-    list_ptr.* = std.ArrayList(Value).init(self.allocator);
+    var list = std.ArrayList(Value).init(self.allocator);
 
-    for (l.ty.list.items) |item, i| {
+    for (l.ty.obj.list.items) |item, i| {
         const v = try self.execListPredicate(f, item, i);
-        if (isTruthy(v)) try list_ptr.append(item);
+        if (isTruthy(v)) try list.append(item);
     }
 
-    try self.value_stack.append(Value.new(.{ .list = list_ptr }));
+    try self.value_stack.append(try Value.newList(self.allocator, list));
     self.ip.* += 1;
 }
 fn each(self: *Vm) anyerror!void {
@@ -1811,7 +1807,9 @@ fn each(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const container = self.value_stack.pop();
-    if (container.ty != .list and container.ty != .map) return self.ctx.err(
+    if (container.ty != .obj or
+        container.ty.obj.* != .list and
+        container.ty.obj.* != .map) return self.ctx.err(
         "each not allowed on {s}.",
         .{@tagName(container.ty)},
         error.InvalidEach,
@@ -1819,14 +1817,14 @@ fn each(self: *Vm) anyerror!void {
     );
 
     const f = self.value_stack.pop();
-    if (f.ty != .func) return self.ctx.err(
+    if (f.ty != .obj or f.ty.obj.* != .func) return self.ctx.err(
         "each requres function argument.",
         .{},
         error.InvalidEach,
         offset,
     );
 
-    const container_len = switch (container.ty) {
+    const container_len = switch (container.ty.obj.*) {
         .list => |l| l.items.len,
         .map => |m| m.count(),
         else => unreachable,
@@ -1838,10 +1836,10 @@ fn each(self: *Vm) anyerror!void {
         return;
     }
 
-    if (container.ty == .list) {
-        for (container.ty.list.items) |item, i| _ = try self.execListPredicate(f, item, i);
+    if (container.ty.obj.* == .list) {
+        for (container.ty.obj.list.items) |item, i| _ = try self.execListPredicate(f, item, i);
     } else {
-        var iter = container.ty.map.iterator();
+        var iter = container.ty.obj.map.iterator();
         var i: usize = 0;
         while (iter.next()) |entry| : (i += 1) _ = try self.execMapPredicate(f, entry.key_ptr.*, entry.value_ptr.*, i);
     }
@@ -1855,7 +1853,7 @@ fn listReduce(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "reduce not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidReduce,
@@ -1864,14 +1862,14 @@ fn listReduce(self: *Vm) anyerror!void {
 
     var acc = self.value_stack.pop();
     const f = self.value_stack.pop();
-    if (f.ty != .func) return self.ctx.err(
+    if (f.ty != .obj or f.ty.obj.* != .func) return self.ctx.err(
         "reduce requires function argument.",
         .{},
         error.InvalidReduce,
         offset,
     );
 
-    if (l.ty.list.items.len == 0) {
+    if (l.ty.obj.list.items.len == 0) {
         try self.value_stack.append(Value.new(.nil));
         self.ip.* += 1;
         return;
@@ -1882,7 +1880,7 @@ fn listReduce(self: *Vm) anyerror!void {
     defer vm_arena.deinit();
     const vm_allocator = vm_arena.allocator();
 
-    for (l.ty.list.items) |item, i| {
+    for (l.ty.obj.list.items) |item, i| {
         // Set up function scope.
         var func_scope = Scope.init(vm_allocator, .function);
 
@@ -1890,15 +1888,15 @@ fn listReduce(self: *Vm) anyerror!void {
         try func_scope.map.put("acc", acc);
         try func_scope.map.put("it", item);
         try func_scope.map.put("@0", item);
-        if (f.ty.func.params.len > 0) try func_scope.map.put(f.ty.func.params[0], acc);
-        if (f.ty.func.params.len > 1) try func_scope.map.put(f.ty.func.params[1], item);
+        if (f.ty.obj.func.params.len > 0) try func_scope.map.put(f.ty.obj.func.params[0], acc);
+        if (f.ty.obj.func.params.len > 1) try func_scope.map.put(f.ty.obj.func.params[1], item);
         try func_scope.map.put("index", Value.new(.{ .uint = i }));
 
         _ = try self.pushScope(func_scope);
 
         var vm = try init(
             vm_allocator,
-            f.ty.func.instructions,
+            f.ty.obj.func.instructions,
             self.scope_stack,
             self.ctx,
             self.output,
@@ -1945,7 +1943,7 @@ fn listPush(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "push not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidPush,
@@ -1953,7 +1951,7 @@ fn listPush(self: *Vm) anyerror!void {
     );
 
     var item = self.value_stack.pop();
-    try l.ty.list.append(try item.copy(l.ty.list.allocator));
+    try l.ty.obj.list.append(try item.copy(l.ty.obj.list.allocator));
     try self.value_stack.append(l);
 
     self.ip.* += 1;
@@ -1964,14 +1962,14 @@ fn listPop(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const l = self.value_stack.pop();
-    if (l.ty != .list) return self.ctx.err(
+    if (l.ty != .obj or l.ty.obj.* != .list) return self.ctx.err(
         "pop not allowed on {s}.",
         .{@tagName(l.ty)},
         error.InvalidPop,
         offset,
     );
 
-    try self.value_stack.append(l.ty.list.pop()); //TODO: Deinit popped value?
+    try self.value_stack.append(l.ty.obj.list.pop()); //TODO: Deinit popped value?
     self.ip.* += 1;
 }
 
@@ -1984,30 +1982,28 @@ fn execListPredicate(self: *Vm, func: Value, item: Value, index: usize) anyerror
     try func_scope.map.put("it", item);
     try func_scope.map.put("index", index_val);
 
-    if (func.ty.func.params.len > 0) try func_scope.map.put(func.ty.func.params[0], item);
-    if (func.ty.func.params.len > 1) try func_scope.map.put(func.ty.func.params[1], index_val);
+    if (func.ty.obj.func.params.len > 0) try func_scope.map.put(func.ty.obj.func.params[0], item);
+    if (func.ty.obj.func.params.len > 1) try func_scope.map.put(func.ty.obj.func.params[1], index_val);
 
-    return self.execPredicate(func.ty.func.instructions, func_scope);
+    return self.execPredicate(func.ty.obj.func.instructions, func_scope);
 }
 
 fn execMapPredicate(self: *Vm, func: Value, key: []const u8, item: Value, index: usize) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function);
 
-    const str_ptr = try self.allocator.create([]const u8);
-    str_ptr.* = key;
-    const key_val = Value.new(.{ .string = str_ptr });
+    const key_val = try Value.newString(self.allocator, key);
     const index_val = Value.new(.{ .uint = index });
 
     try func_scope.map.put("key", key_val);
     try func_scope.map.put("value", item);
     try func_scope.map.put("index", Value.new(.{ .uint = index }));
 
-    if (func.ty.func.params.len > 0) try func_scope.map.put(func.ty.func.params[0], key_val);
-    if (func.ty.func.params.len > 1) try func_scope.map.put(func.ty.func.params[1], item);
-    if (func.ty.func.params.len > 2) try func_scope.map.put(func.ty.func.params[2], index_val);
+    if (func.ty.obj.func.params.len > 0) try func_scope.map.put(func.ty.obj.func.params[0], key_val);
+    if (func.ty.obj.func.params.len > 1) try func_scope.map.put(func.ty.obj.func.params[1], item);
+    if (func.ty.obj.func.params.len > 2) try func_scope.map.put(func.ty.obj.func.params[2], index_val);
 
-    return self.execPredicate(func.ty.func.instructions, func_scope);
+    return self.execPredicate(func.ty.obj.func.instructions, func_scope);
 }
 
 fn execPredicate(self: *Vm, instructions: []const u8, func_scope: Scope) anyerror!Value {
@@ -2042,7 +2038,7 @@ fn execRedir(self: *Vm) !void {
 
     // Get filename
     const filename = self.value_stack.pop();
-    if (filename.ty != .string) return self.ctx.err(
+    if (filename.ty != .obj or filename.ty.obj.* != .string) return self.ctx.err(
         "Redirection filename must evaluate to a string",
         .{},
         error.InvalidRedirect,
@@ -2052,7 +2048,7 @@ fn execRedir(self: *Vm) !void {
     // Open file
     var create_flags: std.fs.File.CreateFlags = .{};
     if (!clobber) create_flags.truncate = false;
-    var file = try std.fs.cwd().createFile(filename.ty.string.*, create_flags);
+    var file = try std.fs.cwd().createFile(std.mem.sliceTo(filename.ty.obj.string, 0), create_flags);
     defer file.close();
     if (!clobber) try file.seekFromEnd(0);
 
@@ -2074,24 +2070,23 @@ fn strToLower(self: *Vm) !void {
     self.ip.* += 2;
 
     const s = self.value_stack.pop();
-    if (s.ty != .string) return self.ctx.err(
+    if (s.ty != .obj or s.ty.obj.* != .string) return self.ctx.err(
         "toLower not allowed on {s}.",
         .{@tagName(s.ty)},
         error.InvalidtoLower,
         offset,
     );
 
-    if (s.ty.string.len == 0) {
+    if (std.mem.sliceTo(s.ty.obj.string, 0).len == 0) {
         try self.value_stack.append(s);
         self.ip.* += 1;
         return;
     }
 
-    const str_ptr = try self.allocator.create([]const u8);
-    str_ptr.* = try ziglyph.toLowerStr(self.allocator, s.ty.string.*);
-    const lower_s = Value.new(.{ .string = str_ptr });
+    const lower_str = try ziglyph.toLowerStr(self.allocator, std.mem.sliceTo(s.ty.obj.string, 0));
+    const lower_val = try Value.newString(self.allocator, lower_str);
 
-    try self.value_stack.append(lower_s);
+    try self.value_stack.append(lower_val);
     self.ip.* += 1; // num_args
 }
 fn strToUpper(self: *Vm) !void {
@@ -2100,24 +2095,23 @@ fn strToUpper(self: *Vm) !void {
     self.ip.* += 2;
 
     const s = self.value_stack.pop();
-    if (s.ty != .string) return self.ctx.err(
+    if (s.ty != .obj or s.ty.obj.* != .string) return self.ctx.err(
         "toUpper not allowed on {s}.",
         .{@tagName(s.ty)},
         error.InvalidtoUpper,
         offset,
     );
 
-    if (s.ty.string.len == 0) {
+    if (std.mem.sliceTo(s.ty.obj.string, 0).len == 0) {
         try self.value_stack.append(s);
         self.ip.* += 1;
         return;
     }
 
-    const str_ptr = try self.allocator.create([]const u8);
-    str_ptr.* = try ziglyph.toUpperStr(self.allocator, s.ty.string.*);
-    const upper_s = Value.new(.{ .string = str_ptr });
+    const upper_str = try ziglyph.toUpperStr(self.allocator, std.mem.sliceTo(s.ty.obj.string, 0));
+    const upper_val = try Value.newString(self.allocator, upper_str);
 
-    try self.value_stack.append(upper_s);
+    try self.value_stack.append(upper_val);
     self.ip.* += 1; // num_args
 }
 
@@ -2132,13 +2126,27 @@ fn popScope(self: *Vm) Scope {
 }
 
 // Helpers
+fn inObjectTypes(value: Value, types: []const std.meta.Tag(Value.Object)) bool {
+    if (value.ty != .obj) return false;
+    return for (types) |ty| {
+        if (value.ty.obj.* == ty) break true;
+    } else false;
+}
 
 fn isTruthy(value: Value) bool {
     return switch (value.ty) {
         .boolean => |b| b,
         .float => |f| f != 0.0,
         .int => |i| i != 0,
-        .string => |s| s.len != 0,
+        .obj => |o| obj: {
+            break :obj switch (o.*) {
+                .func => true,
+                .list => |l| l.items.len != 0,
+                .map => |m| m.count() != 0,
+                .range => |r| r[1] - r[0] != 0,
+                .string => |s| std.mem.sliceTo(s, 0).len != 0,
+            };
+        },
         .uint => |u| u != 0,
 
         else => false,
@@ -2241,18 +2249,18 @@ test "Vm strings" {
     const allocator = arena.allocator();
 
     var got = try testVmValue(allocator, "\"foobar\"");
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foobar", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("foobar", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator, "\"foobar\" \"foobar\"");
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foobar", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("foobar", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator,
         \\"foo {#d:0>3# 2} bar"
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foo 002 bar", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("foo 002 bar", std.mem.sliceTo(got.ty.obj.string, 0));
 }
 
 test "Vm function literal" {
@@ -2263,12 +2271,12 @@ test "Vm function literal" {
     var got = try testVmValue(allocator,
         \\{ foo, bar => 1 }
     );
-    try std.testing.expectEqual(Value.Tag.func, got.ty);
-    try std.testing.expectEqual(@as(usize, 2), got.ty.func.params.len);
-    try std.testing.expectEqualStrings("foo", got.ty.func.params[0]);
-    try std.testing.expectEqualStrings("bar", got.ty.func.params[1]);
-    try std.testing.expectEqual(@as(usize, 12), got.ty.func.instructions.len);
-    try std.testing.expectEqual(Compiler.Opcode.uint, @intToEnum(Compiler.Opcode, got.ty.func.instructions[0]));
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqual(@as(usize, 2), got.ty.obj.func.params.len);
+    try std.testing.expectEqualStrings("foo", got.ty.obj.func.params[0]);
+    try std.testing.expectEqualStrings("bar", got.ty.obj.func.params[1]);
+    try std.testing.expectEqual(@as(usize, 12), got.ty.obj.func.instructions.len);
+    try std.testing.expectEqual(Compiler.Opcode.uint, @intToEnum(Compiler.Opcode, got.ty.obj.func.instructions[0]));
 }
 
 test "Vm function call / define, store, load" {
@@ -2319,14 +2327,14 @@ test "Vm infix" {
     got = try testVmValue(allocator,
         \\"foo" ++ "bar"
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foobar", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("foobar", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator,
         \\"-" ** 3
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("---", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("---", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator, "true and false");
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
@@ -2357,10 +2365,10 @@ test "Vm list literal" {
     const allocator = arena.allocator();
 
     var got = try testVmValue(allocator, "[1, 2, 3]");
-    try std.testing.expectEqual(Value.Tag.list, got.ty);
-    try std.testing.expectEqual(@as(usize, 3), got.ty.list.items.len);
-    try std.testing.expectEqual(Value.Tag.uint, got.ty.list.items[0].ty);
-    try std.testing.expectEqual(@as(u64, 1), got.ty.list.items[0].ty.uint);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqual(@as(usize, 3), got.ty.obj.list.items.len);
+    try std.testing.expectEqual(Value.Tag.uint, got.ty.obj.list.items[0].ty);
+    try std.testing.expectEqual(@as(u64, 1), got.ty.obj.list.items[0].ty.uint);
 }
 
 test "Vm map literal" {
@@ -2371,10 +2379,10 @@ test "Vm map literal" {
     var got = try testVmValue(allocator,
         \\["a": 1, "b": 2]
     );
-    try std.testing.expectEqual(Value.Tag.map, got.ty);
-    try std.testing.expectEqual(@as(usize, 2), got.ty.map.count());
-    try std.testing.expectEqual(Value.Tag.uint, got.ty.map.get("a").?.ty);
-    try std.testing.expectEqual(@as(u64, 1), got.ty.map.get("a").?.ty.uint);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqual(@as(usize, 2), got.ty.obj.map.count());
+    try std.testing.expectEqual(Value.Tag.uint, got.ty.obj.map.get("a").?.ty);
+    try std.testing.expectEqual(@as(u64, 1), got.ty.obj.map.get("a").?.ty.uint);
 }
 
 test "Vm subscripts" {
@@ -2623,14 +2631,14 @@ test "Vm method builtins" {
     got = try testVmValue(allocator,
         \\["a": 3, "b": 2, "c": 1].keysByValueAsc()[0]
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("c", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("c", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator,
         \\["a": 3, "b": 2, "c": 1].keysByValueDesc()[0]
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("a", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("a", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator,
         \\["a": 1, "b": 2, "c": 3].values().len()
@@ -2665,8 +2673,8 @@ test "Vm method builtins" {
     got = try testVmValue(allocator,
         \\["a", "z", "B"].min()
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("B", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("B", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator, "[2, 3, 1].sortAsc()[0]");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
@@ -2722,14 +2730,14 @@ test "Vm method builtins" {
     got = try testVmValue(allocator,
         \\"foo,bar,baz".split(",")[1]
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("bar", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("bar", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator,
         \\["foo", 1, 2.3, nil].join(",")
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foo,1,2.3,", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("foo,1,2.3,", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator,
         \\f := { a => a * 2 + index }
@@ -2773,8 +2781,8 @@ test "Vm method builtins" {
     got = try testVmValue(allocator,
         \\"H\u65\u301llo".chars()[1]
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("\u{65}\u{301}", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("\u{65}\u{301}", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator,
         \\"Hello".startsWith("Hell")
@@ -2806,12 +2814,12 @@ test "Vm method builtins" {
     got = try testVmValue(allocator,
         \\"FOO".toLower()
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("foo", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("foo", std.mem.sliceTo(got.ty.obj.string, 0));
 
     got = try testVmValue(allocator,
         \\"foo".toUpper()
     );
-    try std.testing.expectEqual(Value.Tag.string, got.ty);
-    try std.testing.expectEqualStrings("FOO", got.ty.string.*);
+    try std.testing.expectEqual(Value.Tag.obj, got.ty);
+    try std.testing.expectEqualStrings("FOO", std.mem.sliceTo(got.ty.obj.string, 0));
 }

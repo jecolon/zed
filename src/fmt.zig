@@ -201,15 +201,15 @@ pub fn runtimePrint(
             );
         },
         's' => {
-            if (value.ty != .string) return error.InvalidFormat;
+            if (value.ty != .obj or value.ty.obj.* != .string) return error.InvalidFormat;
 
             try std.fmt.formatBuf(
-                value.ty.string.*,
+                std.mem.sliceTo(value.ty.obj.string, 0),
                 format.options,
                 writer,
             );
         },
 
-        else => unreachable,
+        else => return error.InvalidFormat,
     }
 }
