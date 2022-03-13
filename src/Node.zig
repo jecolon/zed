@@ -5,6 +5,7 @@ pub const Type = union(enum) {
     builtin: Token.Tag,
     float: f64,
     func_return: *Node,
+    global: Token.Tag,
     ident: []const u8,
     int: i64,
     list: []Node,

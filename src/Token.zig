@@ -67,6 +67,16 @@ pub const Tag = enum {
     pd_onRec,
     pd_onExit,
 
+    at_cols,
+    at_file,
+    at_frnum,
+    at_ifs,
+    at_irs,
+    at_ofs,
+    at_ors,
+    at_rec,
+    at_rnum,
+
     op_add_eq,
     op_concat,
     op_define,
@@ -74,7 +84,6 @@ pub const Tag = enum {
     op_elvis,
     op_elvis_eq,
     op_eq,
-    op_global,
     op_gte,
     op_lte,
     op_mod_eq,
@@ -177,6 +186,16 @@ pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "onFile", .pd_onFile },
     .{ "onRec", .pd_onRec },
     .{ "onExit", .pd_onExit },
+
+    .{ "@cols", .at_cols },
+    .{ "@file", .at_file },
+    .{ "@frnum", .at_frnum },
+    .{ "@ifs", .at_ifs },
+    .{ "@irs", .at_irs },
+    .{ "@ofs", .at_ofs },
+    .{ "@ors", .at_ors },
+    .{ "@rec", .at_rec },
+    .{ "@rnum", .at_rnum },
 });
 
 len: u16,

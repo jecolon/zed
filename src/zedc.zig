@@ -42,7 +42,7 @@ pub fn main() !void {
     const program = try parser.parse();
 
     // Backend / Compile to bytecode
-    var compiler = try Compiler.init(arena.allocator());
+    var compiler = try Compiler.init(arena.allocator(), ctx);
     const compiled = try compiler.compileProgram(arena.allocator(), program);
 
     // Output

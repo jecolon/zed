@@ -69,7 +69,7 @@ pub fn main() anyerror!void {
         const program = try parser.parse();
 
         // Backend / Compile to bytecode
-        var compiler = try Compiler.init(tmp_arena.allocator());
+        var compiler = try Compiler.init(tmp_arena.allocator(), ctx);
         compiled = try compiler.compileProgram(static_allocator, program);
         tmp_arena.deinit();
         need_tmp_deinit = false;
@@ -134,12 +134,13 @@ pub fn main() anyerror!void {
             scope_stack.rnum += 1;
             scope_stack.frnum += 1;
         }) {
-            scope_stack.record = record;
-
             // onRec
             tmp_arena = std.heap.ArenaAllocator.init(allocator);
             need_tmp_deinit = true;
             const tmp_allocator = tmp_arena.allocator();
+
+            scope_stack.record = try tmp_allocator.dupeZ(u8, record);
+
             var recs_vm = try Vm.init(
                 tmp_allocator,
                 compiled[2],
@@ -150,15 +151,15 @@ pub fn main() anyerror!void {
             try recs_vm.run();
 
             // New record, new fileds.
-            scope_stack.columns = try tmp_allocator.create(std.ArrayList(Value));
-            scope_stack.columns.* = std.ArrayList(Value).init(tmp_allocator);
+            scope_stack.columns = std.ArrayList(Value).init(tmp_allocator);
 
             // Loop over fields
-            var field_iter = std.mem.split(u8, scope_stack.record, scope_stack.ifs);
+            const str_rec = std.mem.sliceTo(scope_stack.record, 0);
+            const str_ifs = std.mem.sliceTo(scope_stack.ifs, 0);
+            var field_iter = std.mem.split(u8, str_rec, str_ifs);
+
             while (field_iter.next()) |field| {
-                const str_ptr = try tmp_allocator.create([]const u8);
-                str_ptr.* = field;
-                try scope_stack.columns.append(Value.new(.{ .string = str_ptr }));
+                try scope_stack.columns.append(try Value.newString(tmp_allocator, field));
             }
 
             // For each record, exec the rules.
@@ -175,7 +176,7 @@ pub fn main() anyerror!void {
 
             // Output
             if (output.items.len != 0 and output.items.len != prev_output_len) {
-                try output.appendSlice(scope_stack.ors);
+                try output.appendSlice(std.mem.sliceTo(scope_stack.ors, 0));
             }
 
             // To know if we have new output.

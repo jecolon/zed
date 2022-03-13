@@ -89,6 +89,8 @@ pub fn run(self: *Vm) !void {
             .define => try self.execDefine(),
             .load => try self.execLoad(),
             .store => try self.execStore(),
+            .global => try self.execGlobal(),
+            .gstore => try self.execGlobalStore(),
             // Infix
             .add => try self.execAdd(),
             .sub => try self.execSub(),
@@ -119,11 +121,6 @@ pub fn run(self: *Vm) !void {
             .redir => try self.execRedir(),
             // Printing
             .sprint => try self.execSprint(),
-
-            else => {
-                std.log.err("{s}", .{@tagName(opcode)}); //TODO: Remove this.
-                unreachable;
-            },
         }
     }
 }
@@ -420,6 +417,98 @@ fn execStore(self: *Vm) !void {
         try self.scope_stack.update(name, new_value);
         try self.value_stack.append(new_value);
     }
+}
+fn execGlobal(self: *Vm) !void {
+    self.ip.* += 1;
+    const global = @intToEnum(Token.Tag, self.instructions[self.ip.*]);
+    self.ip.* += 1;
+
+    const result = switch (global) {
+        .at_cols => try Value.newList(self.allocator, self.scope_stack.columns),
+        .at_file => try Value.newStringP(self.allocator, self.scope_stack.file),
+        .at_frnum => Value{ .ty = .{ .uint = @intCast(u64, self.scope_stack.frnum) } },
+        .at_ifs => try Value.newStringP(self.allocator, self.scope_stack.ifs),
+        .at_irs => try Value.newStringP(self.allocator, self.scope_stack.irs),
+        .at_ofs => try Value.newStringP(self.allocator, self.scope_stack.ofs),
+        .at_ors => try Value.newStringP(self.allocator, self.scope_stack.ors),
+        .at_rec => try Value.newStringP(self.allocator, self.scope_stack.record),
+        .at_rnum => Value{ .ty = .{ .uint = @intCast(u64, self.scope_stack.frnum) } },
+
+        else => unreachable,
+    };
+
+    try self.value_stack.append(result);
+}
+fn execGlobalStore(self: *Vm) !void {
+    // Get the offset.
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+    // Get the global type.
+    const global = @intToEnum(Token.Tag, self.instructions[self.ip.*]);
+    self.ip.* += 1;
+    // Get the value to assign.
+    const rvalue = self.value_stack.pop();
+
+    switch (global) {
+        .at_ifs => {
+            if (!inObjectTypes(rvalue, &[_]ObjectTag{.string})) return self.ctx.err(
+                "@ifs must be a string.",
+                .{},
+                error.InvalidIfs,
+                offset,
+            );
+            self.scope_stack.ifs = try self.scope_stack.allocator.dupeZ(u8, std.mem.sliceTo(rvalue.ty.obj.string, 0));
+        },
+        .at_irs => {
+            if (!inObjectTypes(rvalue, &[_]ObjectTag{.string})) return self.ctx.err(
+                "@irs must be a string.",
+                .{},
+                error.InvalidIrs,
+                offset,
+            );
+            self.scope_stack.irs = try self.scope_stack.allocator.dupeZ(u8, std.mem.sliceTo(rvalue.ty.obj.string, 0));
+        },
+        .at_ofs => {
+            if (!inObjectTypes(rvalue, &[_]ObjectTag{.string})) return self.ctx.err(
+                "@ofs must be a string.",
+                .{},
+                error.InvalidOfs,
+                offset,
+            );
+            self.scope_stack.ofs = try self.scope_stack.allocator.dupeZ(u8, std.mem.sliceTo(rvalue.ty.obj.string, 0));
+        },
+        .at_ors => {
+            if (!inObjectTypes(rvalue, &[_]ObjectTag{.string})) return self.ctx.err(
+                "@ors must be a string.",
+                .{},
+                error.InvalidOrs,
+                offset,
+            );
+            self.scope_stack.ors = try self.scope_stack.allocator.dupeZ(u8, std.mem.sliceTo(rvalue.ty.obj.string, 0));
+        },
+        .at_rec => {
+            if (!inObjectTypes(rvalue, &[_]ObjectTag{.string})) return self.ctx.err(
+                "@rec must be a string.",
+                .{},
+                error.InvalidRec,
+                offset,
+            );
+            self.scope_stack.record = try self.allocator.dupeZ(u8, std.mem.sliceTo(rvalue.ty.obj.string, 0));
+        },
+        .at_cols => {
+            if (!inObjectTypes(rvalue, &[_]ObjectTag{.list})) return self.ctx.err(
+                "@cols must be a list.",
+                .{},
+                error.InvalidCols,
+                offset,
+            );
+            self.scope_stack.columns = (try rvalue.copy(self.allocator)).ty.obj.list;
+        },
+        else => unreachable,
+    }
+
+    try self.value_stack.append(rvalue);
 }
 
 // Arithmetic
@@ -2183,7 +2272,7 @@ fn testVmValue(allocator: std.mem.Allocator, input: []const u8) !Value {
     };
     const program = try parser.parse();
 
-    var compiler = try Compiler.init(allocator);
+    var compiler = try Compiler.init(allocator, ctx);
     for (program.rules) |n| try compiler.compile(n);
 
     var scope_stack = ScopeStack.init(allocator);

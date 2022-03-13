@@ -94,7 +94,9 @@ fn lexGlobal(self: *Lexer) !Token {
     self.run(isIdentByte);
     const src = self.ctx.src[start .. self.offset.? + 1];
 
-    return Token.new(.op_global, start, src.len);
+    if (Token.predef.get(src)) |tag| return Token.new(tag, start, src.len);
+
+    return Token.new(.ident, start, src.len);
 }
 
 fn lexIdent(self: *Lexer) Token {
@@ -390,6 +392,10 @@ fn isNewline(byte: u8) bool {
     return '\n' == byte or '\r' == byte;
 }
 
+fn isDigit(byte: u8) bool {
+    return '0' <= byte and byte <= '9';
+}
+
 fn isNumeric(byte: u8) bool {
     return switch (byte) {
         '+',
@@ -576,9 +582,9 @@ test "Lex string" {
 
 test "Lex global" {
     const allocator = std.testing.allocator;
-    var tokens = try testLex(allocator, "@foo");
+    var tokens = try testLex(allocator, "@file");
     defer tokens.deinit(allocator);
-    try singleTokenTests(tokens, .op_global, 4);
+    try singleTokenTests(tokens, .at_file, 5);
 
     //try std.testing.expectError(error.InvalidGlobal, testLex(allocator,
     //    \\@+

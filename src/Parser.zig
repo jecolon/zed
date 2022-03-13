@@ -188,7 +188,17 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .kw_select => Parser.parseRecRange,
         .kw_while => Parser.parseWhile,
 
-        .op_global => Parser.parseGlobal,
+        .at_cols,
+        .at_file,
+        .at_frnum,
+        .at_ifs,
+        .at_irs,
+        .at_ofs,
+        .at_ors,
+        .at_rec,
+        .at_rnum,
+        => Parser.parseGlobal,
+
         .op_neg, .punct_bang => Parser.parsePrefix,
 
         .pd_false, .pd_true => Parser.parseBoolean,
@@ -315,7 +325,9 @@ fn parseExpression(self: *Parser, precedence: Precedence) anyerror!Node {
 
 // Parse functions.
 fn parseAssign(self: *Parser, lvalue: Node) anyerror!Node {
-    if (lvalue.ty != .ident and lvalue.ty != .subscript) return self.ctx.err(
+    if (lvalue.ty != .ident and
+        lvalue.ty != .subscript and
+        lvalue.ty != .global) return self.ctx.err(
         "{s} = ?",
         .{@tagName(lvalue.ty)},
         error.InvalidAssignment,
@@ -603,9 +615,7 @@ fn parseFunc(self: *Parser) anyerror!Node {
 }
 
 fn parseGlobal(self: *Parser) anyerror!Node {
-    const start = self.currentOffset();
-    const end = self.currentOffset() + self.currentLen();
-    return Node.new(.{ .ident = self.ctx.src[start..end] }, start);
+    return Node.new(.{ .global = self.currentTag() }, self.currentOffset());
 }
 
 fn parseGrouped(self: *Parser) anyerror!Node {

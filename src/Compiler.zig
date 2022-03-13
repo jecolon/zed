@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const Context = @import("Context.zig");
 const Node = @import("Node.zig");
 const Parser = @import("Parser.zig");
 const Scope = @import("Scope.zig");
@@ -29,10 +30,11 @@ pub const Opcode = enum {
     func_return,
     // Variables
     define,
-    ident,
     load,
     set,
     store,
+    global,
+    gstore,
     // Infix
     add,
     sub,
@@ -78,6 +80,7 @@ const JumpUpdates = struct {
 };
 
 allocator: std.mem.Allocator,
+ctx: Context,
 ctx_stack: std.ArrayList(std.ArrayList(u8)),
 current_loop_start: ?*Index = null, // Index of instruction at current loop start; if applicable.
 instructions: *std.ArrayList(u8) = undefined,
@@ -85,9 +88,10 @@ jump_updates: ?*JumpUpdates = null, // Indexes of jump instruciton operands that
 
 const Compiler = @This();
 
-pub fn init(allocator: std.mem.Allocator) !Compiler {
+pub fn init(allocator: std.mem.Allocator, ctx: Context) !Compiler {
     var self = Compiler{
         .allocator = allocator,
+        .ctx = ctx,
         .ctx_stack = std.ArrayList(std.ArrayList(u8)).init(allocator),
     };
     try self.pushContext();
@@ -100,27 +104,27 @@ pub fn compileProgram(self: *Compiler, allocator: std.mem.Allocator, program: Pa
     defer arena.deinit();
     const arena_allocator = arena.allocator();
 
-    var compiler = try init(arena_allocator);
+    var compiler = try init(arena_allocator, self.ctx);
     for (program.inits) |n| try compiler.compile(n);
     compiled[0] = try allocator.dupe(u8, compiler.instructions.items);
     errdefer allocator.free(compiled[0]);
 
-    compiler = try init(arena_allocator);
+    compiler = try init(arena_allocator, self.ctx);
     for (program.files) |n| try compiler.compile(n);
     compiled[1] = try allocator.dupe(u8, compiler.instructions.items);
     errdefer allocator.free(compiled[1]);
 
-    compiler = try init(arena_allocator);
+    compiler = try init(arena_allocator, self.ctx);
     for (program.recs) |n| try compiler.compile(n);
     compiled[2] = try allocator.dupe(u8, compiler.instructions.items);
     errdefer allocator.free(compiled[2]);
 
-    compiler = try init(arena_allocator);
+    compiler = try init(arena_allocator, self.ctx);
     for (program.rules) |n| try compiler.compile(n);
     compiled[3] = try allocator.dupe(u8, compiler.instructions.items);
     errdefer allocator.free(compiled[3]);
 
-    compiler = try init(arena_allocator);
+    compiler = try init(arena_allocator, self.ctx);
     for (program.exits) |n| try compiler.compile(n);
     compiled[4] = try allocator.dupe(u8, compiler.instructions.items);
 
@@ -148,6 +152,7 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         .define => try self.compileDefine(node),
         .ident => try self.compileLoad(node),
         .assign => try self.compileStore(node),
+        .global => try self.compileGlobal(node),
         // Operators
         .infix => try self.compileInfix(node),
         .prefix => try self.compilePrefix(node),
@@ -311,6 +316,18 @@ fn compileStore(self: *Compiler, node: Node) anyerror!void {
         try self.pushEnum(node.ty.assign.combo);
         try self.pushSlice(node.ty.assign.lvalue.ty.ident);
         try self.pushByte(0);
+    } else if (node.ty.assign.lvalue.ty == .global) {
+        const global = node.ty.assign.lvalue.ty.global;
+        if (global == .at_file or global == .at_frnum or global == .at_rnum) return self.ctx.err(
+            "{s} is a read-only global.",
+            .{@tagName(global)},
+            error.ReadOnlyGlobal,
+            node.offset,
+        );
+
+        try self.pushInstruction(.gstore);
+        try self.pushOffset(node.offset);
+        try self.pushEnum(node.ty.assign.lvalue.ty.global);
     } else {
         try self.compile(node.ty.assign.lvalue.ty.subscript.index.*);
         try self.compile(node.ty.assign.lvalue.ty.subscript.container.*);
@@ -318,6 +335,11 @@ fn compileStore(self: *Compiler, node: Node) anyerror!void {
         try self.pushOffset(node.offset);
         try self.pushEnum(node.ty.assign.combo);
     }
+}
+
+fn compileGlobal(self: *Compiler, node: Node) !void {
+    try self.pushInstruction(.global);
+    try self.pushEnum(node.ty.global);
 }
 
 fn compileInfix(self: *Compiler, node: Node) anyerror!void {
@@ -652,7 +674,6 @@ fn popCurrentLoopIndex(self: *Compiler) void {
 // Tests
 
 test "Compiler predefined constant values" {
-    const Context = @import("Context.zig");
     const Lexer = @import("Lexer.zig");
 
     const allocator = std.testing.allocator;
@@ -674,7 +695,7 @@ test "Compiler predefined constant values" {
     };
     const program = try parser.parse();
 
-    var compiler = try init(arena.allocator());
+    var compiler = try init(arena.allocator(), ctx);
     for (program.rules) |n| try compiler.compile(n);
 
     try std.testing.expectEqual(@as(usize, 12), compiler.instructions.items.len);
