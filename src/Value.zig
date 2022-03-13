@@ -77,6 +77,11 @@ pub fn newStringP(allocator: std.mem.Allocator, str: [*:0]const u8) !Value {
     return Value.new(.{ .obj = obj_ptr });
 }
 
+pub fn getStr(self: Value) []const u8 {
+    std.debug.assert(self.ty == .obj and self.ty.obj.* == .string);
+    return std.mem.sliceTo(self.ty.obj.string, 0);
+}
+
 pub fn copy(self: Value, allocator: std.mem.Allocator) anyerror!Value {
     return switch (self.ty) {
         .boolean => self,

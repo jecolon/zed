@@ -458,7 +458,7 @@ fn execGlobalStore(self: *Vm) !void {
                 error.InvalidIfs,
                 offset,
             );
-            self.scope_stack.ifs = try self.scope_stack.allocator.dupeZ(u8, std.mem.sliceTo(rvalue.ty.obj.string, 0));
+            self.scope_stack.ifs = try self.scope_stack.allocator.dupeZ(u8, rvalue.getStr());
         },
         .at_irs => {
             if (!inObjectTypes(rvalue, &[_]ObjectTag{.string})) return self.ctx.err(
@@ -467,7 +467,7 @@ fn execGlobalStore(self: *Vm) !void {
                 error.InvalidIrs,
                 offset,
             );
-            self.scope_stack.irs = try self.scope_stack.allocator.dupeZ(u8, std.mem.sliceTo(rvalue.ty.obj.string, 0));
+            self.scope_stack.irs = try self.scope_stack.allocator.dupeZ(u8, rvalue.getStr());
         },
         .at_ofs => {
             if (!inObjectTypes(rvalue, &[_]ObjectTag{.string})) return self.ctx.err(
@@ -476,7 +476,7 @@ fn execGlobalStore(self: *Vm) !void {
                 error.InvalidOfs,
                 offset,
             );
-            self.scope_stack.ofs = try self.scope_stack.allocator.dupeZ(u8, std.mem.sliceTo(rvalue.ty.obj.string, 0));
+            self.scope_stack.ofs = try self.scope_stack.allocator.dupeZ(u8, rvalue.getStr());
         },
         .at_ors => {
             if (!inObjectTypes(rvalue, &[_]ObjectTag{.string})) return self.ctx.err(
@@ -485,7 +485,7 @@ fn execGlobalStore(self: *Vm) !void {
                 error.InvalidOrs,
                 offset,
             );
-            self.scope_stack.ors = try self.scope_stack.allocator.dupeZ(u8, std.mem.sliceTo(rvalue.ty.obj.string, 0));
+            self.scope_stack.ors = try self.scope_stack.allocator.dupeZ(u8, rvalue.getStr());
         },
         .at_rec => {
             if (!inObjectTypes(rvalue, &[_]ObjectTag{.string})) return self.ctx.err(
@@ -494,7 +494,7 @@ fn execGlobalStore(self: *Vm) !void {
                 error.InvalidRec,
                 offset,
             );
-            self.scope_stack.record = try self.allocator.dupeZ(u8, std.mem.sliceTo(rvalue.ty.obj.string, 0));
+            self.scope_stack.record = try self.allocator.dupeZ(u8, rvalue.getStr());
         },
         .at_cols => {
             if (!inObjectTypes(rvalue, &[_]ObjectTag{.list})) return self.ctx.err(
@@ -615,8 +615,8 @@ fn execConcat(self: *Vm) anyerror!void {
         offset,
     );
 
-    const str_left = std.mem.sliceTo(left.ty.obj.string, 0);
-    const str_right = std.mem.sliceTo(right.ty.obj.string, 0);
+    const str_left = left.getStr();
+    const str_right = right.getStr();
 
     var buf = try self.allocator.alloc(u8, str_left.len + str_right.len + 1);
     std.mem.copy(u8, buf, str_left);
@@ -639,7 +639,7 @@ fn execRepeat(self: *Vm) anyerror!void {
         offset,
     );
 
-    const str_left = std.mem.sliceTo(left.ty.obj.string, 0);
+    const str_left = left.getStr();
 
     var buf = try self.allocator.alloc(u8, str_left.len * right.ty.uint + 1);
     var i: usize = 0;
@@ -703,7 +703,7 @@ fn execMap(self: *Vm) !void {
     while (i < len) : (i += 1) {
         const value = self.value_stack.pop();
         const key = self.value_stack.pop();
-        map.putAssumeCapacity(std.mem.sliceTo(key.ty.obj.string, 0), value);
+        map.putAssumeCapacity(key.getStr(), value);
     }
 
     try self.value_stack.append(try Value.newMap(self.allocator, map));
@@ -768,7 +768,7 @@ fn execSubscriptMap(self: *Vm, map: Value, offset: u16) !void {
         error.InvalidSubscript,
         offset,
     );
-    const value = if (map.ty.obj.map.get(std.mem.sliceTo(key.ty.obj.string, 0))) |v| v else Value.new(.nil);
+    const value = if (map.ty.obj.map.get(key.getStr())) |v| v else Value.new(.nil);
     try self.value_stack.append(value);
 }
 fn execSet(self: *Vm) !void {
@@ -837,14 +837,14 @@ fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
         offset,
     );
     const rvalue = self.value_stack.pop();
-    const key_copy = try map.ty.obj.map.allocator.dupe(u8, std.mem.sliceTo(key.ty.obj.string, 0));
+    const key_copy = try map.ty.obj.map.allocator.dupe(u8, key.getStr());
 
     // Store
     if (combo == .none) {
         try map.ty.obj.map.put(key_copy, try rvalue.copy(map.ty.obj.map.allocator)); //TODO: Deinit old value?
         try self.value_stack.append(rvalue);
     } else {
-        const old_value = map.ty.obj.map.get(std.mem.sliceTo(key.ty.obj.string, 0)) orelse Value.new(.{ .uint = 0 });
+        const old_value = map.ty.obj.map.get(key.getStr()) orelse Value.new(.{ .uint = 0 });
 
         const new_value = switch (combo) {
             .none => unreachable,
@@ -1063,7 +1063,7 @@ fn strChars(self: *Vm) anyerror!void {
 
     var list = std.ArrayList(Value).init(self.allocator);
 
-    var giter = GraphemeIterator.init(std.mem.sliceTo(str.ty.obj.string, 0)) catch |err| return self.ctx.err(
+    var giter = GraphemeIterator.init(str.getStr()) catch |err| return self.ctx.err(
         "Unicode error.",
         .{},
         err,
@@ -1175,15 +1175,15 @@ fn contains(self: *Vm) anyerror!void {
                 if (needle.eql(value_ptr.*)) break Value.new(.{ .boolean = true });
             } else Value.new(.{ .boolean = false });
         },
-        .string => |s| str: {
-            if (needle.ty != .obj or needle.ty.obj.* != .string) return self.ctx.err(
+        .string => str: {
+            if (!inObjectTypes(needle, &[_]ObjectTag{.string})) return self.ctx.err(
                 "contains arg on strings must be a string.",
                 .{},
                 error.InvalidContains,
                 offset,
             );
 
-            break :str Value.new(.{ .boolean = std.mem.containsAtLeast(u8, std.mem.sliceTo(s, 0), 1, std.mem.sliceTo(needle.ty.obj.string, 0)) });
+            break :str Value.new(.{ .boolean = std.mem.containsAtLeast(u8, haystack.getStr(), 1, needle.getStr()) });
         },
         else => unreachable,
     };
@@ -1211,18 +1211,18 @@ fn indexOf(self: *Vm) anyerror!void {
         .list => |l| for (l.items) |item, i| {
             if (needle.eql(item)) break Value.new(.{ .uint = i });
         } else Value.new(.nil),
-        .string => |s| str: {
-            if (needle.ty != .obj or needle.ty.obj.* != .string) return self.ctx.err(
+        .string => str: {
+            if (!inObjectTypes(needle, &[_]ObjectTag{.string})) return self.ctx.err(
                 "indexOf arg on strings must be a string.",
                 .{},
                 error.InvalidIndexOf,
                 offset,
             );
 
-            var giter = try GraphemeIterator.init(std.mem.sliceTo(s, 0));
+            var giter = try GraphemeIterator.init(haystack.getStr());
             var i: usize = 0;
             break :str while (giter.next()) |grapheme| : (i += 1) {
-                if (std.mem.eql(u8, std.mem.sliceTo(needle.ty.obj.string, 0), grapheme.bytes)) break Value.new(.{ .uint = i });
+                if (std.mem.eql(u8, needle.getStr(), grapheme.bytes)) break Value.new(.{ .uint = i });
             } else Value.new(.nil);
         },
         else => unreachable,
@@ -1253,19 +1253,19 @@ fn lastIndexOf(self: *Vm) anyerror!void {
                 if (needle.eql(l.items[len - i])) break Value.new(.{ .uint = i });
             } else Value.new(.nil);
         },
-        .string => |s| str: {
-            if (needle.ty != .obj or needle.ty.obj.* != .string) return self.ctx.err(
+        .string => str: {
+            if (!inObjectTypes(needle, &[_]ObjectTag{.string})) return self.ctx.err(
                 "lastIndexOf arg on strings must be a string.",
                 .{},
                 error.InvalidLastIndexOf,
                 offset,
             );
 
-            var giter = try GraphemeIterator.init(std.mem.sliceTo(s, 0));
+            var giter = try GraphemeIterator.init(haystack.getStr());
             var i: usize = 0;
             var index = Value.new(.nil);
             while (giter.next()) |grapheme| : (i += 1) {
-                if (std.mem.eql(u8, std.mem.sliceTo(needle.ty.obj.string, 0), grapheme.bytes)) index = Value.new(.{ .uint = i });
+                if (std.mem.eql(u8, needle.getStr(), grapheme.bytes)) index = Value.new(.{ .uint = i });
             }
 
             break :str index;
@@ -1296,7 +1296,7 @@ fn length(self: *Vm) anyerror!void {
     const result = switch (value.ty.obj.*) {
         .list => |l| Value.new(.{ .uint = l.items.len }),
         .map => |m| Value.new(.{ .uint = m.count() }),
-        .string => |s| Value.new(.{ .uint = std.mem.sliceTo(s, 0).len }),
+        .string => Value.new(.{ .uint = value.getStr().len }),
         else => unreachable,
     };
 
@@ -1735,8 +1735,8 @@ fn strSplit(self: *Vm) anyerror!void {
         offset,
     );
 
-    const str_str = std.mem.sliceTo(str.ty.obj.string, 0);
-    const delim_str = std.mem.sliceTo(delim.ty.obj.string, 0);
+    const str_str = str.getStr();
+    const delim_str = delim.getStr();
 
     var list = std.ArrayList(Value).init(self.allocator);
     var iter = std.mem.split(u8, str_str, delim_str);
@@ -1770,7 +1770,7 @@ fn listJoin(self: *Vm) anyerror!void {
 
     var buf = std.ArrayList(u8).init(self.allocator);
     var writer = buf.writer();
-    const str_delim = std.mem.sliceTo(delim.ty.obj.string, 0);
+    const str_delim = delim.getStr();
 
     for (l.ty.obj.list.items) |item, i| {
         if (i != 0 and str_delim.len > 0) try buf.appendSlice(str_delim);
@@ -1798,7 +1798,7 @@ fn strEndsWith(self: *Vm) anyerror!void {
         offset,
     );
 
-    const result = Value.new(.{ .boolean = std.mem.endsWith(u8, std.mem.sliceTo(str.ty.obj.string, 0), std.mem.sliceTo(ending.ty.obj.string, 0)) });
+    const result = Value.new(.{ .boolean = std.mem.endsWith(u8, str.getStr(), ending.getStr()) });
 
     try self.value_stack.append(result);
     self.ip.* += 1;
@@ -1820,8 +1820,8 @@ fn strStartsWith(self: *Vm) anyerror!void {
         offset,
     );
 
-    const str_str = std.mem.sliceTo(str.ty.obj.string, 0);
-    const start_str = std.mem.sliceTo(start.ty.obj.string, 0);
+    const str_str = str.getStr();
+    const start_str = start.getStr();
 
     const result = Value.new(.{ .boolean = std.mem.startsWith(u8, str_str, start_str) });
     try self.value_stack.append(result);
@@ -2137,7 +2137,7 @@ fn execRedir(self: *Vm) !void {
     // Open file
     var create_flags: std.fs.File.CreateFlags = .{};
     if (!clobber) create_flags.truncate = false;
-    var file = try std.fs.cwd().createFile(std.mem.sliceTo(filename.ty.obj.string, 0), create_flags);
+    var file = try std.fs.cwd().createFile(filename.getStr(), create_flags);
     defer file.close();
     if (!clobber) try file.seekFromEnd(0);
 
@@ -2166,13 +2166,13 @@ fn strToLower(self: *Vm) !void {
         offset,
     );
 
-    if (std.mem.sliceTo(s.ty.obj.string, 0).len == 0) {
+    if (s.getStr().len == 0) {
         try self.value_stack.append(s);
         self.ip.* += 1;
         return;
     }
 
-    const lower_str = try ziglyph.toLowerStr(self.allocator, std.mem.sliceTo(s.ty.obj.string, 0));
+    const lower_str = try ziglyph.toLowerStr(self.allocator, s.getStr());
     const lower_val = try Value.newString(self.allocator, lower_str);
 
     try self.value_stack.append(lower_val);
@@ -2191,13 +2191,13 @@ fn strToUpper(self: *Vm) !void {
         offset,
     );
 
-    if (std.mem.sliceTo(s.ty.obj.string, 0).len == 0) {
+    if (s.getStr().len == 0) {
         try self.value_stack.append(s);
         self.ip.* += 1;
         return;
     }
 
-    const upper_str = try ziglyph.toUpperStr(self.allocator, std.mem.sliceTo(s.ty.obj.string, 0));
+    const upper_str = try ziglyph.toUpperStr(self.allocator, s.getStr());
     const upper_val = try Value.newString(self.allocator, upper_str);
 
     try self.value_stack.append(upper_val);
@@ -2233,7 +2233,7 @@ fn isTruthy(value: Value) bool {
                 .list => |l| l.items.len != 0,
                 .map => |m| m.count() != 0,
                 .range => |r| r[1] - r[0] != 0,
-                .string => |s| std.mem.sliceTo(s, 0).len != 0,
+                .string => value.getStr().len != 0,
             };
         },
         .uint => |u| u != 0,
@@ -2339,17 +2339,17 @@ test "Vm strings" {
 
     var got = try testVmValue(allocator, "\"foobar\"");
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("foobar", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("foobar", got.getStr());
 
     got = try testVmValue(allocator, "\"foobar\" \"foobar\"");
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("foobar", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("foobar", got.getStr());
 
     got = try testVmValue(allocator,
         \\"foo {#d:0>3# 2} bar"
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("foo 002 bar", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("foo 002 bar", got.getStr());
 }
 
 test "Vm function literal" {
@@ -2417,13 +2417,13 @@ test "Vm infix" {
         \\"foo" ++ "bar"
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("foobar", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("foobar", got.getStr());
 
     got = try testVmValue(allocator,
         \\"-" ** 3
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("---", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("---", got.getStr());
 
     got = try testVmValue(allocator, "true and false");
     try std.testing.expectEqual(Value.Tag.boolean, got.ty);
@@ -2721,13 +2721,13 @@ test "Vm method builtins" {
         \\["a": 3, "b": 2, "c": 1].keysByValueAsc()[0]
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("c", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("c", got.getStr());
 
     got = try testVmValue(allocator,
         \\["a": 3, "b": 2, "c": 1].keysByValueDesc()[0]
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("a", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("a", got.getStr());
 
     got = try testVmValue(allocator,
         \\["a": 1, "b": 2, "c": 3].values().len()
@@ -2763,7 +2763,7 @@ test "Vm method builtins" {
         \\["a", "z", "B"].min()
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("B", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("B", got.getStr());
 
     got = try testVmValue(allocator, "[2, 3, 1].sortAsc()[0]");
     try std.testing.expectEqual(Value.Tag.uint, got.ty);
@@ -2820,13 +2820,13 @@ test "Vm method builtins" {
         \\"foo,bar,baz".split(",")[1]
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("bar", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("bar", got.getStr());
 
     got = try testVmValue(allocator,
         \\["foo", 1, 2.3, nil].join(",")
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("foo,1,2.3,", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("foo,1,2.3,", got.getStr());
 
     got = try testVmValue(allocator,
         \\f := { a => a * 2 + index }
@@ -2871,7 +2871,7 @@ test "Vm method builtins" {
         \\"H\u65\u301llo".chars()[1]
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("\u{65}\u{301}", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("\u{65}\u{301}", got.getStr());
 
     got = try testVmValue(allocator,
         \\"Hello".startsWith("Hell")
@@ -2904,11 +2904,11 @@ test "Vm method builtins" {
         \\"FOO".toLower()
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("foo", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("foo", got.getStr());
 
     got = try testVmValue(allocator,
         \\"foo".toUpper()
     );
     try std.testing.expectEqual(Value.Tag.obj, got.ty);
-    try std.testing.expectEqualStrings("FOO", std.mem.sliceTo(got.ty.obj.string, 0));
+    try std.testing.expectEqualStrings("FOO", got.getStr());
 }
