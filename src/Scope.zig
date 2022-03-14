@@ -1,14 +1,14 @@
 const std = @import("std");
 
-const Value = @import("Value.zig");
-
-const Scope = @This();
+const Value = @import("value.zig").Value;
 
 pub const Type = enum {
     block,
     function,
     loop,
 };
+
+const Scope = @This();
 
 map: std.StringHashMap(Value),
 ty: Type,

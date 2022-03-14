@@ -7,7 +7,7 @@ pub const Type = union(enum) {
     func_return: *Node,
     global: Token.Tag,
     ident: []const u8,
-    int: i64,
+    int: i32,
     list: []Node,
     map: []Entry,
     loop_break,
@@ -15,7 +15,7 @@ pub const Type = union(enum) {
     nil,
     stmt_end,
     string: []const Segment,
-    uint: u64,
+    uint: u32,
 
     assign: Assign,
     call: Call,

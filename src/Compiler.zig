@@ -83,7 +83,7 @@ allocator: std.mem.Allocator,
 ctx: Context,
 ctx_stack: std.ArrayList(std.ArrayList(u8)),
 current_loop_start: ?*Index = null, // Index of instruction at current loop start; if applicable.
-instructions: *std.ArrayList(u8) = undefined,
+bytecode: *std.ArrayList(u8) = undefined,
 jump_updates: ?*JumpUpdates = null, // Indexes of jump instruciton operands that need updating.
 
 const Compiler = @This();
@@ -106,27 +106,27 @@ pub fn compileProgram(self: *Compiler, allocator: std.mem.Allocator, program: Pa
 
     var compiler = try init(arena_allocator, self.ctx);
     for (program.inits) |n| try compiler.compile(n);
-    compiled[0] = try allocator.dupe(u8, compiler.instructions.items);
+    compiled[0] = try allocator.dupe(u8, compiler.bytecode.items);
     errdefer allocator.free(compiled[0]);
 
     compiler = try init(arena_allocator, self.ctx);
     for (program.files) |n| try compiler.compile(n);
-    compiled[1] = try allocator.dupe(u8, compiler.instructions.items);
+    compiled[1] = try allocator.dupe(u8, compiler.bytecode.items);
     errdefer allocator.free(compiled[1]);
 
     compiler = try init(arena_allocator, self.ctx);
     for (program.recs) |n| try compiler.compile(n);
-    compiled[2] = try allocator.dupe(u8, compiler.instructions.items);
+    compiled[2] = try allocator.dupe(u8, compiler.bytecode.items);
     errdefer allocator.free(compiled[2]);
 
     compiler = try init(arena_allocator, self.ctx);
     for (program.rules) |n| try compiler.compile(n);
-    compiled[3] = try allocator.dupe(u8, compiler.instructions.items);
+    compiled[3] = try allocator.dupe(u8, compiler.bytecode.items);
     errdefer allocator.free(compiled[3]);
 
     compiler = try init(arena_allocator, self.ctx);
     for (program.exits) |n| try compiler.compile(n);
-    compiled[4] = try allocator.dupe(u8, compiler.instructions.items);
+    compiled[4] = try allocator.dupe(u8, compiler.bytecode.items);
 
     return compiled;
 }
@@ -188,23 +188,20 @@ fn compileNil(self: *Compiler, node: Node) !void {
 }
 
 fn compileFloat(self: *Compiler, node: Node) !void {
-    var slice: []const u8 = std.mem.sliceAsBytes(&[1]f64{node.ty.float});
+    var slice = std.mem.asBytes(&node.ty.float);
     try self.pushInstruction(.float);
-    try self.pushOffset(node.offset);
     try self.pushSlice(slice);
 }
 
 fn compileInt(self: *Compiler, node: Node) !void {
-    var slice: []const u8 = std.mem.sliceAsBytes(&[1]i64{node.ty.int});
+    var slice = std.mem.asBytes(&node.ty.int);
     try self.pushInstruction(.int);
-    try self.pushOffset(node.offset);
     try self.pushSlice(slice);
 }
 
 fn compileUint(self: *Compiler, node: Node) !void {
-    var slice: []const u8 = std.mem.sliceAsBytes(&[1]u64{node.ty.uint});
+    var slice = std.mem.asBytes(&node.ty.uint);
     try self.pushInstruction(.uint);
-    try self.pushOffset(node.offset);
     try self.pushSlice(slice);
 }
 
@@ -237,15 +234,14 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
     }
 
     try self.pushInstruction(.string);
-    try self.pushOffset(node.offset);
     try self.pushLen(len);
 }
 
 fn compileFunc(self: *Compiler, node: Node) anyerror!void {
-    // Compile function body to instructions.
+    // Compile function body to bytecode.
     try self.pushContext();
     for (node.ty.func.body) |n| try self.compile(n);
-    const func_instructions = self.popContext();
+    const func_bytecode = self.popContext();
 
     // Serialize function to bytes.
     try self.pushInstruction(.func);
@@ -260,9 +256,9 @@ fn compileFunc(self: *Compiler, node: Node) anyerror!void {
             try self.pushByte(0);
         }
     }
-    // Function instructions
-    try self.pushLen(func_instructions.len);
-    if (func_instructions.len != 0) try self.pushSlice(func_instructions);
+    // Function bytecode
+    try self.pushLen(func_bytecode.len);
+    if (func_bytecode.len != 0) try self.pushSlice(func_bytecode);
 }
 
 fn compileReturn(self: *Compiler, node: Node) anyerror!void {
@@ -410,7 +406,6 @@ fn compileList(self: *Compiler, node: Node) anyerror!void {
     var i: usize = 1;
     while (i <= len) : (i += 1) try self.compile(node.ty.list[len - i]);
     try self.pushInstruction(.list);
-    try self.pushOffset(node.offset);
     try self.pushLen(len);
 }
 fn compileMap(self: *Compiler, node: Node) anyerror!void {
@@ -545,12 +540,12 @@ fn compileRange(self: *Compiler, node: Node) anyerror!void {
 
 fn compileRecRange(self: *Compiler, node: Node) anyerror!void {
     // Action
-    var action_instructions: []const u8 = "";
+    var action_bytecode: []const u8 = "";
 
     if (node.ty.rec_range.action.len > 0) {
         try self.pushContext();
         for (node.ty.rec_range.action) |n| try self.compile(n);
-        action_instructions = self.popContext();
+        action_bytecode = self.popContext();
     }
 
     if (node.ty.rec_range.to) |to| {
@@ -561,11 +556,10 @@ fn compileRecRange(self: *Compiler, node: Node) anyerror!void {
     }
 
     try self.pushInstruction(.rec_range);
-    try self.pushOffset(node.offset);
     try self.pushByte(node.ty.rec_range.id);
     try self.pushByte(@boolToInt(node.ty.rec_range.exclusive));
-    try self.pushLen(action_instructions.len);
-    if (action_instructions.len != 0) try self.pushSlice(action_instructions);
+    try self.pushLen(action_bytecode.len);
+    if (action_bytecode.len != 0) try self.pushSlice(action_bytecode);
     try self.pushByte(@boolToInt(node.ty.rec_range.from != null));
     try self.pushByte(@boolToInt(node.ty.rec_range.to != null));
 }
@@ -601,52 +595,52 @@ fn head(self: Compiler) *std.ArrayList(u8) {
 
 fn pushContext(self: *Compiler) !void {
     try self.ctx_stack.append(std.ArrayList(u8).init(self.allocator));
-    self.instructions = self.head();
+    self.bytecode = self.head();
 }
 
 fn popContext(self: *Compiler) []const u8 {
     std.debug.assert(self.ctx_stack.items.len > 1);
-    var popped_instructions = self.ctx_stack.pop();
-    self.instructions = self.head();
-    return popped_instructions.toOwnedSlice();
+    var popped_bytecode = self.ctx_stack.pop();
+    self.bytecode = self.head();
+    return popped_bytecode.toOwnedSlice();
 }
 
 fn pushInstruction(self: *Compiler, opcode: Opcode) !void {
-    try self.instructions.append(@enumToInt(opcode));
+    try self.bytecode.append(@enumToInt(opcode));
 }
 
 fn pushOffset(self: *Compiler, offset: u16) !void {
-    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{offset}));
+    try self.bytecode.appendSlice(std.mem.sliceAsBytes(&[1]u16{offset}));
 }
 
 fn pushLen(self: *Compiler, len: usize) !void {
-    try self.instructions.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, len)}));
+    try self.bytecode.appendSlice(std.mem.sliceAsBytes(&[1]u16{@intCast(u16, len)}));
 }
 
 fn pushSlice(self: *Compiler, slice: []const u8) !void {
-    try self.instructions.appendSlice(slice);
+    try self.bytecode.appendSlice(slice);
 }
 
 fn pushEnum(self: *Compiler, v: anytype) !void {
-    try self.instructions.append(@enumToInt(v));
+    try self.bytecode.append(@enumToInt(v));
 }
 
 fn pushByte(self: *Compiler, n: anytype) !void {
-    try self.instructions.append(@intCast(u8, n));
+    try self.bytecode.append(@intCast(u8, n));
 }
 
 // Returns index of first byte pushed.
 fn pushZeroes(self: *Compiler) !usize {
-    try self.instructions.append(0);
-    try self.instructions.append(0);
-    return self.instructions.items.len - 2;
+    try self.bytecode.append(0);
+    try self.bytecode.append(0);
+    return self.bytecode.items.len - 2;
 }
 
 fn updateJumpIndex(self: *Compiler, index: usize) void {
-    std.debug.assert(index < self.instructions.items.len);
-    var jump_index_bytes = std.mem.sliceAsBytes(&[_]u16{@intCast(u16, self.instructions.items.len)});
-    self.instructions.items[index] = jump_index_bytes[0];
-    self.instructions.items[index + 1] = jump_index_bytes[1];
+    std.debug.assert(index < self.bytecode.items.len);
+    var jump_index_bytes = std.mem.sliceAsBytes(&[_]u16{@intCast(u16, self.bytecode.items.len)});
+    self.bytecode.items[index] = jump_index_bytes[0];
+    self.bytecode.items[index + 1] = jump_index_bytes[1];
 }
 
 fn pushJumpUpdates(self: *Compiler) anyerror!void {
@@ -662,7 +656,7 @@ fn popJumpUpdates(self: *Compiler) void {
 
 fn pushCurrentLoopIndex(self: *Compiler) anyerror!void {
     var current_loop_start_ptr = try self.allocator.create(Index);
-    current_loop_start_ptr.* = .{ .index = @intCast(u16, self.instructions.items.len), .prev = self.current_loop_start };
+    current_loop_start_ptr.* = .{ .index = @intCast(u16, self.bytecode.items.len), .prev = self.current_loop_start };
     self.current_loop_start = current_loop_start_ptr;
 }
 
@@ -698,14 +692,14 @@ test "Compiler predefined constant values" {
     var compiler = try init(arena.allocator(), ctx);
     for (program.rules) |n| try compiler.compile(n);
 
-    try std.testing.expectEqual(@as(usize, 12), compiler.instructions.items.len);
-    try std.testing.expectEqual(Opcode.bool_true, @intToEnum(Opcode, compiler.instructions.items[0]));
-    try std.testing.expectEqual(@as(u16, 0), std.mem.bytesAsSlice(u16, compiler.instructions.items[1..3])[0]);
-    try std.testing.expectEqual(Opcode.pop, @intToEnum(Opcode, compiler.instructions.items[3]));
-    try std.testing.expectEqual(Opcode.bool_false, @intToEnum(Opcode, compiler.instructions.items[4]));
-    try std.testing.expectEqual(@as(u16, 5), std.mem.bytesAsSlice(u16, compiler.instructions.items[5..7])[0]);
-    try std.testing.expectEqual(Opcode.pop, @intToEnum(Opcode, compiler.instructions.items[7]));
-    try std.testing.expectEqual(Opcode.nil, @intToEnum(Opcode, compiler.instructions.items[8]));
-    try std.testing.expectEqual(@as(u16, 11), std.mem.bytesAsSlice(u16, compiler.instructions.items[9..11])[0]);
-    try std.testing.expectEqual(Opcode.pop, @intToEnum(Opcode, compiler.instructions.items[11]));
+    try std.testing.expectEqual(@as(usize, 12), compiler.bytecode.items.len);
+    try std.testing.expectEqual(Opcode.bool_true, @intToEnum(Opcode, compiler.bytecode.items[0]));
+    try std.testing.expectEqual(@as(u16, 0), std.mem.bytesAsSlice(u16, compiler.bytecode.items[1..3])[0]);
+    try std.testing.expectEqual(Opcode.pop, @intToEnum(Opcode, compiler.bytecode.items[3]));
+    try std.testing.expectEqual(Opcode.bool_false, @intToEnum(Opcode, compiler.bytecode.items[4]));
+    try std.testing.expectEqual(@as(u16, 5), std.mem.bytesAsSlice(u16, compiler.bytecode.items[5..7])[0]);
+    try std.testing.expectEqual(Opcode.pop, @intToEnum(Opcode, compiler.bytecode.items[7]));
+    try std.testing.expectEqual(Opcode.nil, @intToEnum(Opcode, compiler.bytecode.items[8]));
+    try std.testing.expectEqual(@as(u16, 11), std.mem.bytesAsSlice(u16, compiler.bytecode.items[9..11])[0]);
+    try std.testing.expectEqual(Opcode.pop, @intToEnum(Opcode, compiler.bytecode.items[11]));
 }

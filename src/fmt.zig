@@ -1,7 +1,8 @@
 const std = @import("std");
 const FormatOptions = std.fmt.FormatOptions;
 
-const Value = @import("Value.zig");
+const value = @import("value.zig");
+const Value = value.Value;
 
 const Lexer = struct {
     offset: ?usize = null,
@@ -136,61 +137,55 @@ pub fn parseFormat(fmt: []const u8) anyerror!FormatSpec {
 pub fn runtimePrint(
     allocator: std.mem.Allocator,
     fmt: []const u8,
-    value: Value,
+    v: Value,
     writer: anytype,
 ) anyerror!void {
     const format = try parseFormat(fmt);
 
     switch (format.spec) {
         'd' => {
-            if (value.ty != .float and value.ty != .int and value.ty != .uint) return error.InvalidFormat;
-
-            switch (value.ty) {
-                .float => {
-                    var buf = std.ArrayList(u8).init(allocator);
-                    defer buf.deinit();
-                    var buf_writer = buf.writer();
-                    try std.fmt.formatFloatDecimal(
-                        value.ty.float,
-                        format.options,
-                        buf_writer,
-                    );
-                    try std.fmt.formatBuf(
-                        buf.items,
-                        format.options,
-                        writer,
-                    );
-                },
-                .int => {
-                    try std.fmt.formatInt(
-                        value.ty.int,
-                        10,
-                        .lower,
-                        format.options,
-                        writer,
-                    );
-                },
-                .uint => {
-                    try std.fmt.formatInt(
-                        value.ty.uint,
-                        10,
-                        .lower,
-                        format.options,
-                        writer,
-                    );
-                },
-
-                else => unreachable,
+            if (!value.isFloat(v) and !value.isInt(v) and !value.isUint(v)) return error.InvalidFormatD;
+            if (value.asFloat(v)) |f| {
+                var buf = std.ArrayList(u8).init(allocator);
+                defer buf.deinit();
+                var buf_writer = buf.writer();
+                try std.fmt.formatFloatDecimal(
+                    f,
+                    format.options,
+                    buf_writer,
+                );
+                try std.fmt.formatBuf(
+                    buf.items,
+                    format.options,
+                    writer,
+                );
+            }
+            if (value.asInt(v)) |i| {
+                try std.fmt.formatInt(
+                    i,
+                    10,
+                    .lower,
+                    format.options,
+                    writer,
+                );
+            }
+            if (value.asUint(v)) |u| {
+                try std.fmt.formatInt(
+                    u,
+                    10,
+                    .lower,
+                    format.options,
+                    writer,
+                );
             }
         },
         'e' => {
-            if (value.ty != .float) return error.InvalidFormat;
-
+            if (!value.isFloat(v)) return error.InvalidFormatE;
             var buf = std.ArrayList(u8).init(allocator);
             defer buf.deinit();
             var buf_writer = buf.writer();
             try std.fmt.formatFloatScientific(
-                value.ty.float,
+                value.asFloat(v).?,
                 format.options,
                 buf_writer,
             );
@@ -201,15 +196,15 @@ pub fn runtimePrint(
             );
         },
         's' => {
-            if (value.ty != .obj or value.ty.obj.* != .string) return error.InvalidFormat;
-
+            if (!value.isAnyStr(v)) return error.InvalidFormatS;
+            const s = if (value.unboxStr(v)) |u| std.mem.asBytes(&u) else value.asString(v).?.string;
             try std.fmt.formatBuf(
-                std.mem.sliceTo(value.ty.obj.string, 0),
+                s,
                 format.options,
                 writer,
             );
         },
 
-        else => return error.InvalidFormat,
+        else => return error.UnknownFormatSpec,
     }
 }

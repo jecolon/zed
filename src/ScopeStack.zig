@@ -1,30 +1,31 @@
 const std = @import("std");
 
 const Scope = @import("Scope.zig");
-const Value = @import("Value.zig");
+const value = @import("value.zig");
+const Value = value.Value;
 
 const ScopeStack = @This();
 
 allocator: std.mem.Allocator,
-columns: std.ArrayList(Value) = undefined,
+columns: Value = value.val_nil,
 global_scope: std.StringHashMap(Value),
 stack: std.ArrayList(Scope),
 
 // Current data filename
-file: [*:0]const u8 = "",
+file: Value = value.val_nil,
 // Record numbering
 frnum: usize = 1,
 rnum: usize = 1,
 // Current record
 rec_buf: [1024 * 64]u8 = undefined,
-record: [*:0]const u8 = undefined,
+record: Value = value.val_nil,
 // Record ranges
 rec_ranges: std.AutoHashMap(u8, void) = undefined,
 // Delimiters
-ifs: [*:0]const u8 = ",",
-irs: [*:0]const u8 = "\n",
-ofs: [*:0]const u8 = ",",
-ors: [*:0]const u8 = "\n",
+ifs: Value = value.strToValue(","),
+irs: Value = value.strToValue("\n"),
+ofs: Value = value.strToValue(","),
+ors: Value = value.strToValue("\n"),
 
 const builtins = std.ComptimeStringMap(void, .{
     .{ "atan2", {} },
@@ -104,7 +105,6 @@ pub fn isDefined(self: ScopeStack, key: []const u8) bool {
 
     const len = self.stack.items.len;
     var i: usize = 1;
-
     while (i <= len) : (i += 1) {
         if (self.stack.items[len - i].map.contains(key)) return true;
         //if (self.stack.items[len - i].ty == .function) return self.stack.items[0].isDefined(key);
@@ -113,54 +113,48 @@ pub fn isDefined(self: ScopeStack, key: []const u8) bool {
     return self.global_scope.contains(key);
 }
 
-pub fn load(self: ScopeStack, key: []const u8) !?Value {
+pub fn load(self: ScopeStack, key: []const u8) ?Value {
     const len = self.stack.items.len;
     var i: usize = 1;
-
     while (i <= len) : (i += 1) {
-        if (self.stack.items[len - i].map.get(key)) |value| return value;
+        if (self.stack.items[len - i].map.get(key)) |v| return v;
         //if (self.stack.items[len - i].ty == .function) return self.stack.items[0].load(key);
     }
 
     return self.global_scope.get(key);
 }
 
-pub fn store(self: *ScopeStack, key: []const u8, value: Value) !void {
+pub fn store(self: *ScopeStack, key: []const u8, v: Value) !void {
     if (self.stack.items.len > 0) {
-        try self.stack.items[self.stack.items.len - 1].map.put(key, value);
+        try self.stack.items[self.stack.items.len - 1].map.put(key, v);
     } else {
         const key_copy = try self.allocator.dupe(u8, key);
-        try self.global_scope.put(key_copy, try value.copy(self.allocator));
+        try self.global_scope.put(key_copy, try value.copy(v, self.allocator));
     }
 }
 
-pub fn update(self: *ScopeStack, key: []const u8, value: Value) !void {
+pub fn update(self: *ScopeStack, key: []const u8, v: Value) !void {
     const len = self.stack.items.len;
     var i: usize = 1;
-
     while (i <= len) : (i += 1) {
-        if (self.stack.items[len - i].map.contains(key)) return self.stack.items[len - i].map.put(key, value);
+        if (self.stack.items[len - i].map.contains(key)) return self.stack.items[len - i].map.put(key, v);
         //if (self.stack.items[len - i].ty == .function) return self.stack.items[0].update(key, value);
     }
 
-    if (self.global_scope.get(key)) |old_value| old_value.deinit(self.allocator);
-    try self.global_scope.put(key, try value.copy(self.allocator));
+    try self.global_scope.put(key, try value.copy(v, self.allocator));
 }
 
 // Debug
 pub fn dump(self: ScopeStack) void {
     std.debug.print("\n*** ScopeStack Dump Begin ***\n", .{});
-
     for (self.stack.items) |scope, i| {
         std.debug.print("*** Scope #{} Dump Begin ***\n", .{i});
         scope.dump();
         std.debug.print("*** Scope #{} Dump End ***\n", .{i});
     }
-
     std.debug.print("*** Global Scope Dump Begin ***\n", .{});
     var iter = self.global_scope.iterator();
     while (iter.next()) |entry| std.debug.print("\t{s}: {}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
     std.debug.print("*** Global Scope Dump End ***\n", .{});
-
     std.debug.print("*** ScopeStack Dump End ***\n", .{});
 }
