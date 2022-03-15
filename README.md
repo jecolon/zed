@@ -100,7 +100,7 @@ To create a list:
 
 ```
 list := [1, 2, 3]
-list_2 := [] # empty list
+empty := []
 ```
 
 ## Maps
@@ -108,7 +108,7 @@ To create a map:
 
 ```
 map := ["a": 1, "b": 2, "c": 3]
-map_2 := [:] # empty map
+empty := [:]
 ```
 
 Note that map keys have to evalutate to strings, i.e. literals, variables, or operations that produce a string result.
@@ -312,6 +312,12 @@ such as lists, maps, ranges, and strings.
 ["a": 1, "b": 2].keysByValueDesc()      # returns list of keys, sorted by descending values
 ["a": 1, "b": 2].values()               # returns list of values
 ["a": 1, "b": 2].each() { key, value, index => print("{key}: {value}") }
+
+# Ranges
+(0 ..< 10).each() { print(index, it) }
+(0 ..< 10).filter() { it > 5 }          # returns a list
+(0 ..< 10).map() { it * 2 }             # returns a list
+(0 ..< 10).reduce(1) { acc * it }
 ```
 
 ## Compiling to Bytecode
