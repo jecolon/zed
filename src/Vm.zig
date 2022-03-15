@@ -286,7 +286,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
         .pd_each => try self.execEach(),
         .pd_endsWith => try self.execStrEndStart(false),
         .pd_exp => try self.execOneArgMath(builtin),
-        .pd_filter => try self.execListFilter(),
+        .pd_filter => try self.execFilter(),
         .pd_join => try self.execListJoin(),
         .pd_indexOf => try self.execIndexOf(),
         .pd_int => try self.execOneArgMath(builtin),
@@ -296,7 +296,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
         .pd_lastIndexOf => try self.execLastIndexOf(),
         .pd_len => try self.execLen(),
         .pd_log => try self.execOneArgMath(builtin),
-        .pd_map => try self.execListMap(),
+        .pd_map => try self.execMapMethod(),
         .pd_max => try self.execListMax(),
         .pd_mean => try self.execListMean(),
         .pd_median => try self.execListMedian(),
@@ -306,7 +306,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
         .pd_pop => try self.execListPop(),
         .pd_push => try self.execListPush(),
         .pd_rand => try self.execRand(),
-        .pd_reduce => try self.execListReduce(),
+        .pd_reduce => try self.execReduce(),
         .pd_reverse => try self.execListReverse(),
         .pd_sin => try self.execOneArgMath(builtin),
         .pd_sortAsc => try self.execListSort(true),
@@ -1968,19 +1968,24 @@ fn execStrEndStart(self: *Vm, start: bool) anyerror!void {
     try self.value_stack.append(result);
     self.ip.* += 1;
 }
-fn execListMap(self: *Vm) anyerror!void {
+fn execMapMethod(self: *Vm) anyerror!void {
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
 
-    const l = self.value_stack.pop();
-    const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`map` only works on lists.",
+    const container = self.value_stack.pop();
+    if (value.asList(container)) |list_obj_ptr| {
+        return self.execMapList(list_obj_ptr, offset);
+    } else if (value.asRange(container)) |range_obj_ptr| {
+        return self.execMapRange(range_obj_ptr, offset);
+    } else return self.ctx.err(
+        "`map` only works on lists and ranges.",
         .{},
-        error.InvalidMap,
+        error.InvalidEach,
         offset,
     );
-
+}
+fn execMapList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) anyerror!void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
         "`map` requres function argument.",
@@ -1991,7 +1996,7 @@ fn execListMap(self: *Vm) anyerror!void {
 
     // No-ops
     if (func_obj_ptr.func.bytecode == null or list_obj_ptr.list.items.len == 0) {
-        try self.value_stack.append(l);
+        try self.value_stack.append(value.addrToValue(@ptrToInt(list_obj_ptr)));
         self.ip.* += 1;
         return;
     }
@@ -2009,19 +2014,54 @@ fn execListMap(self: *Vm) anyerror!void {
     try self.value_stack.append(value.addrToValue(obj_addr));
     self.ip.* += 1;
 }
-fn execListFilter(self: *Vm) anyerror!void {
+fn execMapRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) anyerror!void {
+    const f = self.value_stack.pop();
+    const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
+        "`map` requres function argument.",
+        .{},
+        error.InvalidMap,
+        offset,
+    );
+
+    // No-ops
+    if (func_obj_ptr.func.bytecode == null or range_obj_ptr.range[1] - range_obj_ptr.range[0] == 0) {
+        try self.value_stack.append(value.addrToValue(@ptrToInt(range_obj_ptr)));
+        self.ip.* += 1;
+        return;
+    }
+
+    var list = try std.ArrayList(Value).initCapacity(self.allocator, range_obj_ptr.range[1] - range_obj_ptr.range[0]);
+
+    var i = range_obj_ptr.range[0];
+    while (i < range_obj_ptr.range[1]) : (i += 1) {
+        const v = try self.execRangePredicate(func_obj_ptr, i);
+        list.appendAssumeCapacity(v);
+    }
+
+    const obj_ptr = try self.allocator.create(value.Object);
+    obj_ptr.* = .{ .list = list };
+    const obj_addr = @ptrToInt(obj_ptr);
+    try self.value_stack.append(value.addrToValue(obj_addr));
+    self.ip.* += 1;
+}
+fn execFilter(self: *Vm) anyerror!void {
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
 
-    const l = self.value_stack.pop();
-    const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`filter` only works on lists.",
+    const container = self.value_stack.pop();
+    if (value.asList(container)) |list_obj_ptr| {
+        return self.execFilterList(list_obj_ptr, offset);
+    } else if (value.asRange(container)) |range_obj_ptr| {
+        return self.execFilterRange(range_obj_ptr, offset);
+    } else return self.ctx.err(
+        "`filter` only works on lists and ranges.",
         .{},
-        error.InvalidFilter,
+        error.InvalidEach,
         offset,
     );
-
+}
+fn execFilterList(self: *Vm, list_obj_ptr: *const value.Object, offset: u16) !void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
         "`filter` arg must be a function.",
@@ -2032,7 +2072,7 @@ fn execListFilter(self: *Vm) anyerror!void {
 
     // No-ops
     if (func_obj_ptr.func.bytecode == null or list_obj_ptr.list.items.len == 0) {
-        try self.value_stack.append(l);
+        try self.value_stack.append(value.addrToValue(@ptrToInt(list_obj_ptr)));
         self.ip.* += 1;
         return;
     }
@@ -2042,6 +2082,39 @@ fn execListFilter(self: *Vm) anyerror!void {
     for (list_obj_ptr.list.items) |item, i| {
         const v = try self.execListPredicate(func_obj_ptr, item, i);
         if (isTruthy(v)) try list.append(item);
+    }
+
+    const obj_ptr = try self.allocator.create(value.Object);
+    obj_ptr.* = .{ .list = list };
+    const obj_addr = @ptrToInt(obj_ptr);
+    try self.value_stack.append(value.addrToValue(obj_addr));
+    self.ip.* += 1;
+}
+fn execFilterRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) !void {
+    const f = self.value_stack.pop();
+    const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
+        "`filter` arg must be a function.",
+        .{},
+        error.InvalidFilter,
+        offset,
+    );
+
+    var list = std.ArrayList(Value).init(self.allocator);
+
+    // No-ops
+    if (func_obj_ptr.func.bytecode == null or range_obj_ptr.range[1] - range_obj_ptr.range[0] == 0) {
+        const obj_ptr = try self.allocator.create(value.Object);
+        obj_ptr.* = .{ .list = list };
+        const obj_addr = @ptrToInt(obj_ptr);
+        try self.value_stack.append(value.addrToValue(obj_addr));
+        self.ip.* += 1;
+        return;
+    }
+
+    var i = range_obj_ptr.range[0];
+    while (i < range_obj_ptr.range[1]) : (i += 1) {
+        const v = try self.execRangePredicate(func_obj_ptr, i);
+        if (isTruthy(v)) try list.append(value.uintToValue(i));
     }
 
     const obj_ptr = try self.allocator.create(value.Object);
@@ -2060,8 +2133,10 @@ fn execEach(self: *Vm) anyerror!void {
         return self.execEachList(list_obj_ptr, offset);
     } else if (value.asMap(container)) |map_obj_ptr| {
         return self.execEachMap(map_obj_ptr, offset);
+    } else if (value.asRange(container)) |range_obj_ptr| {
+        return self.execEachRange(range_obj_ptr, offset);
     } else return self.ctx.err(
-        "`each` only works on lists and maps.",
+        "`each` only works on lists, maps, and ranges.",
         .{},
         error.InvalidEach,
         offset,
@@ -2076,14 +2151,8 @@ fn execEachList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) !void {
         offset,
     );
 
-    const obj_addr = @ptrToInt(list_obj_ptr);
-    if (func_obj_ptr.func.bytecode == null or list_obj_ptr.list.items.len == 0) {
-        try self.value_stack.append(value.addrToValue(obj_addr));
-        self.ip.* += 1;
-        return;
-    }
-
     // No-ops
+    const obj_addr = @ptrToInt(list_obj_ptr);
     if (func_obj_ptr.func.bytecode == null or list_obj_ptr.list.items.len == 0) {
         try self.value_stack.append(value.addrToValue(obj_addr));
         self.ip.* += 1;
@@ -2104,14 +2173,8 @@ fn execEachMap(self: *Vm, map_obj_ptr: *value.Object, offset: u16) !void {
         offset,
     );
 
-    const obj_addr = @ptrToInt(map_obj_ptr);
-    if (func_obj_ptr.func.bytecode == null or map_obj_ptr.map.count() == 0) {
-        try self.value_stack.append(value.addrToValue(obj_addr));
-        self.ip.* += 1;
-        return;
-    }
-
     // No-ops
+    const obj_addr = @ptrToInt(map_obj_ptr);
     if (func_obj_ptr.func.bytecode == null or map_obj_ptr.map.count() == 0) {
         try self.value_stack.append(value.addrToValue(obj_addr));
         self.ip.* += 1;
@@ -2125,19 +2188,47 @@ fn execEachMap(self: *Vm, map_obj_ptr: *value.Object, offset: u16) !void {
     try self.value_stack.append(value.addrToValue(obj_addr));
     self.ip.* += 1;
 }
-fn execListReduce(self: *Vm) anyerror!void {
+fn execEachRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) !void {
+    const f = self.value_stack.pop();
+    const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
+        "`each` arg must be a function.",
+        .{},
+        error.InvalidEach,
+        offset,
+    );
+
+    // No-ops
+    const obj_addr = @ptrToInt(range_obj_ptr);
+    if (func_obj_ptr.func.bytecode == null or range_obj_ptr.range[1] - range_obj_ptr.range[0] == 0) {
+        try self.value_stack.append(value.addrToValue(obj_addr));
+        self.ip.* += 1;
+        return;
+    }
+
+    var i = range_obj_ptr.range[0];
+    while (i < range_obj_ptr.range[1]) : (i += 1) _ = try self.execRangePredicate(func_obj_ptr, i);
+
+    try self.value_stack.append(value.addrToValue(obj_addr));
+    self.ip.* += 1;
+}
+fn execReduce(self: *Vm) anyerror!void {
     self.ip.* += 1;
     const offset = self.getOffset();
     self.ip.* += 2;
 
-    const l = self.value_stack.pop();
-    const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`reduce` only works on lists.",
+    const container = self.value_stack.pop();
+    if (value.asList(container)) |list_obj_ptr| {
+        return self.execReduceList(list_obj_ptr, offset);
+    } else if (value.asRange(container)) |range_obj_ptr| {
+        return self.execReduceRange(range_obj_ptr, offset);
+    } else return self.ctx.err(
+        "`reduce` only works on lists and ranges.",
         .{},
-        error.InvalidReduce,
+        error.InvalidEach,
         offset,
     );
-
+}
+fn execReduceList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) anyerror!void {
     var acc = self.value_stack.pop();
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
@@ -2171,6 +2262,63 @@ fn execListReduce(self: *Vm) anyerror!void {
         if (func_obj_ptr.func.params) |params| {
             if (params.len > 0) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[0]..], 0), acc);
             if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), item);
+        }
+
+        _ = try self.pushScope(func_scope);
+
+        var vm = try init(
+            vm_allocator,
+            func_obj_ptr.func.bytecode.?,
+            self.scope_stack,
+            self.ctx,
+            self.output,
+        );
+        try vm.run();
+
+        _ = self.popScope();
+
+        acc = vm.last_popped;
+    }
+
+    try self.value_stack.append(acc);
+    self.ip.* += 1;
+}
+fn execReduceRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) anyerror!void {
+    var acc = self.value_stack.pop();
+    const f = self.value_stack.pop();
+    const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
+        "`reduce` last arg must be a function.",
+        .{},
+        error.InvalidReduce,
+        offset,
+    );
+
+    // No-ops
+    if (func_obj_ptr.func.bytecode == null or range_obj_ptr.range[1] - range_obj_ptr.range[0] == 0) {
+        try self.value_stack.append(value.val_nil);
+        self.ip.* += 1;
+        return;
+    }
+
+    // Set up sub-VM arena.
+    var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer vm_arena.deinit();
+    const vm_allocator = vm_arena.allocator();
+
+    var i = range_obj_ptr.range[0];
+    while (i < range_obj_ptr.range[1]) : (i += 1) {
+        // Set up function scope.
+        var func_scope = Scope.init(vm_allocator, .function);
+
+        const index_val = value.uintToValue(i);
+
+        // Assign args as locals in function scope.
+        try func_scope.map.put("acc", acc);
+        try func_scope.map.put("it", index_val);
+        try func_scope.map.put("@0", index_val);
+        if (func_obj_ptr.func.params) |params| {
+            if (params.len > 0) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[0]..], 0), acc);
+            if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), index_val);
         }
 
         _ = try self.pushScope(func_scope);
@@ -2295,6 +2443,22 @@ fn execMapPredicate(self: *Vm, func_obj_ptr: *const value.Object, key: []const u
         if (params.len > 0) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[0]..], 0), key_val);
         if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), item);
         if (params.len > 2) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[2]..], 0), index_val);
+    }
+
+    return self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
+}
+
+fn execRangePredicate(self: *Vm, func_obj_ptr: *const value.Object, index: u32) anyerror!Value {
+    // Assign args as locals in function scope.
+    var func_scope = Scope.init(self.allocator, .function); //TODO: Can we use other allocator here?
+
+    const index_val = value.uintToValue(index);
+
+    try func_scope.map.put("it", index_val);
+    try func_scope.map.put("@0", index_val);
+
+    if (func_obj_ptr.func.params) |params| {
+        if (params.len > 0) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[0]..], 0), index_val);
     }
 
     return self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
