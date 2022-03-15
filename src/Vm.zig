@@ -459,9 +459,9 @@ fn execGlobal(self: *Vm) !void {
         .at_cols => self.scope_stack.columns,
         .at_file => self.scope_stack.file,
         .at_frnum => self.scope_stack.frnum,
-        .at_ifs => self.scope_stack.ifs,
+        .at_ics => self.scope_stack.ics,
         .at_irs => self.scope_stack.irs,
-        .at_ofs => self.scope_stack.ofs,
+        .at_ocs => self.scope_stack.ocs,
         .at_ors => self.scope_stack.ors,
         .at_rec => self.scope_stack.record,
         .at_rnum => self.scope_stack.frnum,
@@ -482,14 +482,14 @@ fn execGlobalStore(self: *Vm) !void {
     const rvalue = self.value_stack.pop();
 
     switch (global) {
-        .at_ifs => {
+        .at_ics => {
             if (!value.isAnyStr(rvalue)) return self.ctx.err(
-                "@ifs must be a string.",
+                "@ics must be a string.",
                 .{},
-                error.InvalidIfs,
+                error.InvalidIcs,
                 offset,
             );
-            self.scope_stack.ifs = rvalue;
+            self.scope_stack.ics = rvalue;
         },
         .at_irs => {
             if (!value.isAnyStr(rvalue)) return self.ctx.err(
@@ -500,14 +500,14 @@ fn execGlobalStore(self: *Vm) !void {
             );
             self.scope_stack.irs = rvalue;
         },
-        .at_ofs => {
+        .at_ocs => {
             if (!value.isAnyStr(rvalue)) return self.ctx.err(
-                "@ofs must be a string.",
+                "@ocs must be a string.",
                 .{},
-                error.InvalidOfs,
+                error.InvalidOcs,
                 offset,
             );
-            self.scope_stack.ofs = rvalue;
+            self.scope_stack.ocs = rvalue;
         },
         .at_ors => {
             if (!value.isAnyStr(rvalue)) return self.ctx.err(
@@ -1221,7 +1221,7 @@ fn execPrint(self: *Vm) anyerror!void {
     var writer = self.output.writer();
     var i: usize = 0;
     while (i < num_args) : (i += 1) {
-        if (i != 0) try value.print(self.scope_stack.ofs, writer);
+        if (i != 0) try value.print(self.scope_stack.ocs, writer);
         try value.print(self.value_stack.pop(), writer);
     }
 
@@ -1238,7 +1238,7 @@ fn execSprint(self: *Vm) anyerror!void {
 
     var i: usize = 0;
     while (i < num_args) : (i += 1) {
-        if (i != 0) try value.print(self.scope_stack.ofs, writer);
+        if (i != 0) try value.print(self.scope_stack.ocs, writer);
         try value.print(self.value_stack.pop(), writer);
     }
 
@@ -2261,6 +2261,7 @@ fn execListPredicate(self: *Vm, func_obj_ptr: *const value.Object, item: Value, 
     const index_val = value.uintToValue(@intCast(u32, index));
 
     try func_scope.map.put("it", item);
+    try func_scope.map.put("@0", item);
     try func_scope.map.put("index", index_val);
 
     if (func_obj_ptr.func.params) |params| {

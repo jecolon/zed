@@ -177,8 +177,8 @@ pub fn main() anyerror!void {
 
             // Loop over fields
             const str_rec = if (value.unboxStr(scope_stack.record)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(scope_stack.record).?.string;
-            const str_ifs = if (value.unboxStr(scope_stack.ifs)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(scope_stack.ifs).?.string;
-            var field_iter = std.mem.split(u8, str_rec, str_ifs);
+            const str_ics = if (value.unboxStr(scope_stack.ics)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(scope_stack.ics).?.string;
+            var field_iter = std.mem.split(u8, str_rec, str_ics);
 
             while (field_iter.next()) |field| {
                 if (field.len < 7) {

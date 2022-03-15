@@ -22,9 +22,9 @@ record: Value = value.val_nil,
 // Record ranges
 rec_ranges: std.AutoHashMap(u8, void) = undefined,
 // Delimiters
-ifs: Value = value.strToValue(","),
+ics: Value = value.strToValue(","),
 irs: Value = value.strToValue("\n"),
-ofs: Value = value.strToValue(","),
+ocs: Value = value.strToValue(","),
 ors: Value = value.strToValue("\n"),
 
 const builtins = std.ComptimeStringMap(void, .{
@@ -73,9 +73,9 @@ const globals = std.ComptimeStringMap(void, .{
     .{ "@cols", {} },
     .{ "@file", {} },
     .{ "@frnum", {} },
-    .{ "@ifs", {} },
+    .{ "@ics", {} },
     .{ "@irs", {} },
-    .{ "@ofs", {} },
+    .{ "@ocs", {} },
     .{ "@ors", {} },
     .{ "@rec", {} },
     .{ "@rnum", {} },
