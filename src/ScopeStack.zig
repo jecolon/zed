@@ -14,8 +14,8 @@ stack: std.ArrayList(Scope),
 // Current data filename
 file: Value = value.val_nil,
 // Record numbering
-frnum: usize = 1,
-rnum: usize = 1,
+frnum: usize = 0,
+rnum: usize = 0,
 // Current record
 rec_buf: [1024 * 64]u8 = undefined,
 record: Value = value.val_nil,
