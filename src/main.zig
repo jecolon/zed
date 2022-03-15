@@ -54,7 +54,12 @@ pub fn main() anyerror!void {
             _ = try program_file.readAll(bytes_buf);
             compiled[i] = bytes_buf;
         }
-        //TODO: Set ctx.src with .zed file contents.
+        // Need program source for error messages.
+        var fn_buf: [1024]u8 = undefined;
+        const src_filename = try std.fmt.bufPrint(&fn_buf, "{s}.zed", .{std.mem.trimRight(u8, program_filename, ".zbc")});
+        var src_file = try std.fs.cwd().openFile(src_filename, .{});
+        defer src_file.close();
+        ctx.src = try src_file.readToEndAlloc(static_allocator, 1024 * 64); // 64K
     } else {
         const program_src = try program_file.readToEndAlloc(static_allocator, 1024 * 64); // 64K
         ctx.src = program_src;

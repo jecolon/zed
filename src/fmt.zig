@@ -197,7 +197,7 @@ pub fn runtimePrint(
         },
         's' => {
             if (!value.isAnyStr(v)) return error.InvalidFormatS;
-            const s = if (value.unboxStr(v)) |u| std.mem.asBytes(&u) else value.asString(v).?.string;
+            const s = if (value.unboxStr(v)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(v).?.string;
             try std.fmt.formatBuf(
                 s,
                 format.options,
