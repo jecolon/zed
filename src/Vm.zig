@@ -2420,7 +2420,7 @@ fn isTruthy(v: Value) bool {
     if (value.asMap(v)) |m| return m.map.count() != 0;
     if (value.asRange(v)) |r| return r.range[1] - r.range[0] != 0;
     if (value.asString(v)) |s| return s.string.len != 0;
-    if (value.unboxStr(v)) |u| return std.mem.sliceTo(std.mem.asBytes(&u), 0).len != 0;
+    if (value.unboxStr(v)) |u| return u != 0;
     return false;
 }
 
@@ -3024,4 +3024,8 @@ test "Vm method builtins" {
     );
     got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
     try std.testing.expectEqualStrings("FOO", got_str);
+
+    got = try testVmValue(allocator, "\"\"");
+    const got_u = value.unboxStr(got).?;
+    try std.testing.expectEqual(@as(u64, 0), got_u);
 }
