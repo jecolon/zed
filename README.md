@@ -133,6 +133,36 @@ func_3 := { it + 1 }    # same as func_2
 func_4 := { @0 + @1 }   # implicit "@N" param names for all args
 ```
 
+### Implicit Parameter Names 
+Every function gets a set of implicit parameter names defined in its scope. This allows you to define functions in a 
+succint manner, which is useful in the context of methods that take functions as a predicate.
+
+- `it`: The first argument passed to a call is bound to the name `it`.
+- `@0`, `@1`, ... : Every argument is bound to one of these numeric names starting at `@0`.
+- `index`: For list, map, and range methods, the index of the current element is bound to `index`.
+- `key`, `value`: For map methods, the current entry key and value.
+- `acc`: For the `reduce` methods, the passed-in accumulator.
+
+Some examples:
+
+```
+adder := { a, b => a + b }      # explicit param names 
+adder := { @0 + @1 }            # implicit @ params
+addOne := { a => a + 1 }        # explicit first param name 
+addOne := { it + 1 }            # implicit first param name 
+
+[1, 2, 3].each() { v, i => print(i, v) }        # explicit list predicate param names
+[1, 2, 3].each() { print(index, it) }           # implicit list predicate param names
+[1, 2, 3].reduce(0) { a, v => a + v }           # explicit list reduce accumulator and value names
+[1, 2, 3].reduce(0) { acc + it }                # implicit list reduce accumulator and value names
+
+["a": 1, "b": 2].each() { k, v, i => print(i, k, v) }   # explicit map predicate param names
+["a": 1, "b": 2].each() { print(index, key, value) }    # implicit map predicate param names
+
+(3..<7).map() { v, i => v * i }         # explicit range param names
+(3..<7).map() { it * index }            # implicit range param names; produces [0, 4, 10, 18]
+```
+
 ## Conditionals
 The usual suspects found in most dynamic languages. Note that for conditions the following truth table applies:
 
@@ -174,19 +204,21 @@ a ?= 1  # Since nil is not truthy, a is now 1
 
 ## Loops
 Just the `while` and `do while` loops. Anything else can be done with the iterative methods on lists and maps.
-Loop conditions adhere to the same truth table as conditonals in zed.
+Loop conditions adhere to the same truth table as conditonals in zed. `continue` and `break` work as expected.
 
 ```
 i := 0
 while (i < 10) {
-    print(i)
     i += 1
+    if (i == 2) continue
+    print(i)
 }
 
 do {
-    print(i)
     i += 1
-} while (i < 10) # will print i at least once
+    if (i == 8) break
+    print(i)
+} while (i < 10)        # will print i at least once
 ```
 
 ## Operators
@@ -225,10 +257,15 @@ a -= b ; a *= b
 a /= b ; a %= b
 a ?= b
 
-a + b !> "out.txt" ; a + b +> "out.txt"  # file redirect (clobbers ; appends)
+a + b !> "out.txt" ; a + b +> "out.txt"  # output redirect (clobbers ; appends)
 ```
 
-## File processing events
+### Output Redirection
+Noteworthy among the operators above are the two output redirection operators: `!>` and `+>`. With these, you can redirect 
+what any expression produces to a file. `!>` overwrites (*clobbers*) any existing file with the given name, whereas `+>`
+appends to any existing file. Both operators create the given file if it doesn't exist.
+
+## File Processing Events
 Similar to AWK's `BEGIN` and `END` blocks, zed provides several *event* blocks that let you execute code at precise 
 points during file processing.
 
@@ -240,6 +277,34 @@ onExit {}    # executes once at program exit.
 ```
 
 Any code outside of these event blocks is executed for every record of every input file.
+
+## Record Ranges 
+If you want to execute code for records that lie within starting and ending conditions, you can use *record ranges*.
+Depending on the keywords used, record ranges can be exclusive or inclusive of the record that matches the ending condition.
+
+```
+# inclusive range of records:
+select (@cols[0] == "<html>") ..= (@cols[0] == "</html>") { print(@rec) }
+
+# same as previous line; default action is to print the current record:
+select (@cols[0] == "<html>") ..= (@cols[0] == "</html>")
+
+# exclusive range of records:
+select (@cols[1] == "Product") ..< (@rec == "") { print(@cols[0], @cols[1]) }
+
+# start range at first record (no start condition):
+select ..< (@rec == "END") { print(@cols.mean()) }
+
+# range until the end of input (no end condition):
+select (@rnum == 10) { print(sqrt(@cols[2]) }
+
+# you can nest record ranges
+select (@rec == "<html>") ..= (@rec == "</html>") {
+    select (@rec == "<body>") ..= (@rec == "</body>") {
+        print(@cols[0])
+    }
+}
+```
 
 ## Global variables
 Here we differ a bit in what zed calls *Global* variables. These are predefined varibales that are always available
@@ -267,6 +332,7 @@ cos(-1)
 exp(5)
 int(3.9)
 log(3.14)
+print("foo", @cols[0], 1 + 1)
 rand(10)
 sin(3.14)
 sqrt(49)

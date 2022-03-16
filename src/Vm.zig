@@ -2032,9 +2032,13 @@ fn execMapRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) anye
 
     var list = try std.ArrayList(Value).initCapacity(self.allocator, range_obj_ptr.range[1] - range_obj_ptr.range[0]);
 
-    var i = range_obj_ptr.range[0];
-    while (i < range_obj_ptr.range[1]) : (i += 1) {
-        const v = try self.execRangePredicate(func_obj_ptr, i);
+    var n = range_obj_ptr.range[0];
+    var i: u32 = 0;
+    while (n < range_obj_ptr.range[1]) : ({
+        n += 1;
+        i += 1;
+    }) {
+        const v = try self.execRangePredicate(func_obj_ptr, n, i);
         list.appendAssumeCapacity(v);
     }
 
@@ -2111,10 +2115,14 @@ fn execFilterRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) !
         return;
     }
 
-    var i = range_obj_ptr.range[0];
-    while (i < range_obj_ptr.range[1]) : (i += 1) {
-        const v = try self.execRangePredicate(func_obj_ptr, i);
-        if (isTruthy(v)) try list.append(value.uintToValue(i));
+    var n = range_obj_ptr.range[0];
+    var i: u32 = 0;
+    while (n < range_obj_ptr.range[1]) : ({
+        n += 1;
+        i += 1;
+    }) {
+        const v = try self.execRangePredicate(func_obj_ptr, n, i);
+        if (isTruthy(v)) try list.append(value.uintToValue(n));
     }
 
     const obj_ptr = try self.allocator.create(value.Object);
@@ -2205,8 +2213,12 @@ fn execEachRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) !vo
         return;
     }
 
-    var i = range_obj_ptr.range[0];
-    while (i < range_obj_ptr.range[1]) : (i += 1) _ = try self.execRangePredicate(func_obj_ptr, i);
+    var n = range_obj_ptr.range[0];
+    var i: u32 = 0;
+    while (n < range_obj_ptr.range[1]) : ({
+        n += 1;
+        i += 1;
+    }) _ = try self.execRangePredicate(func_obj_ptr, n, i);
 
     try self.value_stack.append(value.addrToValue(obj_addr));
     self.ip.* += 1;
@@ -2305,20 +2317,27 @@ fn execReduceRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) a
     defer vm_arena.deinit();
     const vm_allocator = vm_arena.allocator();
 
-    var i = range_obj_ptr.range[0];
-    while (i < range_obj_ptr.range[1]) : (i += 1) {
+    var n = range_obj_ptr.range[0];
+    var i: u32 = 0;
+    while (n < range_obj_ptr.range[1]) : ({
+        n += 1;
+        i += 1;
+    }) {
         // Set up function scope.
         var func_scope = Scope.init(vm_allocator, .function);
 
-        const index_val = value.uintToValue(i);
+        const n_val = value.uintToValue(n);
+        const i_val = value.uintToValue(i);
 
         // Assign args as locals in function scope.
         try func_scope.map.put("acc", acc);
-        try func_scope.map.put("it", index_val);
-        try func_scope.map.put("@0", index_val);
+        try func_scope.map.put("it", n_val);
+        try func_scope.map.put("@0", n_val);
+        try func_scope.map.put("index", i_val);
         if (func_obj_ptr.func.params) |params| {
             if (params.len > 0) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[0]..], 0), acc);
-            if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), index_val);
+            if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), n_val);
+            if (params.len > 2) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[2]..], 0), i_val);
         }
 
         _ = try self.pushScope(func_scope);
@@ -2448,17 +2467,20 @@ fn execMapPredicate(self: *Vm, func_obj_ptr: *const value.Object, key: []const u
     return self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
 }
 
-fn execRangePredicate(self: *Vm, func_obj_ptr: *const value.Object, index: u32) anyerror!Value {
+fn execRangePredicate(self: *Vm, func_obj_ptr: *const value.Object, n: u32, i: u32) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function); //TODO: Can we use other allocator here?
 
-    const index_val = value.uintToValue(index);
+    const n_val = value.uintToValue(n);
+    const i_val = value.uintToValue(i);
 
-    try func_scope.map.put("it", index_val);
-    try func_scope.map.put("@0", index_val);
+    try func_scope.map.put("it", n_val);
+    try func_scope.map.put("@0", n_val);
+    try func_scope.map.put("index", i_val);
 
     if (func_obj_ptr.func.params) |params| {
-        if (params.len > 0) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[0]..], 0), index_val);
+        if (params.len > 0) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[0]..], 0), n_val);
+        if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), i_val);
     }
 
     return self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
