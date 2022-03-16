@@ -46,7 +46,14 @@ octal     := 0o777      # octal literal
 million   := 1_000_000  # underscores for readability; can be used in any of above literals.
 ```
 
-Operations among equal numeric types produce the same type, otherwise floating point is the result type.
+Operations among equal numeric types produce the same type, otherwise floating point is the result type. If strings are 
+involved in arithmetic operations, an attempt to parse the string as a float is made, if unsuccesful, the string is 
+replaced with `0`. For example:
+
+```
+"1.2" + 3 == 4.2
+"foo" + 3 == 3
+```
 
 ## Strings
 Use `"` to enclose strings. They must be valid UTF-8 text.
@@ -444,22 +451,28 @@ We can't finish this README without the classic word counting example in zed. Th
 *words* and then presents them in descending order of occurrence.
 
 ```
+# Only once at program start
 onInit {
-    @ics = " "
-    counts := [:]
+    @ics = " "          # Set input column separator. (default is ",")
+    counts := [:]       # Initialize empty word counts map.
 }
 
+# Before processing each record
 onRec {
-    if (@rec) @rec = @rec.toLower()
+    if (@rec) @rec = @rec.toLower()     # If the record isn't empty, lower case it.
 }
 
-if (@rec) {
-    @cols.each() { counts[it] += 1 }
+# For each record (default input record separator (@irs) is "\n"
+if (@rec) {                             # if the record isn't empty,
+    @cols.each() { counts[it] += 1 }    # increment each column's count in counts map.
 }
 
+# Only once at program exit
 onExit {
-    print("{#s: <20# "Word"}   Count\n")
-    print("-" ** 28 ++ "\n")
+    print("{#s: <20# "Word"}   Count\n")        # Header
+    print("-" ** 28 ++ "\n")                    # Uses string repeat (**) and concat (++)
+
+    # Sort counts by descending value and print formatted keys and values.
     counts.keysByValueDesc().each() { print("{#s:.<20# it} {#d: >7# counts[it]}\n") }
 }
 ```
