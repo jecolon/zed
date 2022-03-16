@@ -1,0 +1,4 @@
+*.zig text eol=lf
+*.mod text eol=lf
+*.lock text eol=lf
+*.md text eol=lf
