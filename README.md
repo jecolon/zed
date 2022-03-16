@@ -491,6 +491,13 @@ $ ls ./zig-out/bin/
 zed zedc 
 ```
 
+**Windows Users**: To avoid compilation errors due to how Windows handles line breaks, the `git` command on Windows
+should be:
+
+```
+$ git clone --config core.autocrlf=false https://github.com/jecolon/zed
+```
+
 In the `zig-out/bin` subdirectory, you'll find `zed` and `zedc` binaries. `zed` runs source and compiled zed programs as 
 explained above, and `zedc` compiles source zed programs to bytecode. You can put these binaries in your system's path 
 for convenience. Note the aboce `zig build -Drelease-fast` produces the highest performance binary, but can be prone to 
