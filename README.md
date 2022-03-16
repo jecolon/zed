@@ -477,3 +477,23 @@ onExit {
 }
 ```
 
+## Building From source
+zed is developed with the latest [Zig compiler](https://ziglang.org/download/). You'll also need the 
+[zigmod](https://github.com/nektro/zigmod/releases/tag/r77) package manager (just a signle binary).
+Once you have the zig and zigmod binaries somewhere you can run them, follow these steps to compile `zed` and `zedc`:
+
+```
+$ git clone https://github.com/jecolon/zed 
+$ cd zed 
+$ zigmod fetch
+$ zig build -Drelease-fast
+$ ls ./zig-out/bin/ 
+zed zedc 
+```
+
+In the `zig-out/bin` subdirectory, you'll find `zed` and `zedc` binaries. `zed` runs source and compiled zed programs as 
+explained above, and `zedc` compiles source zed programs to bytecode. You can put these binaries in your system's path 
+for convenience. Note the aboce `zig build -Drelease-fast` produces the highest performance binary, but can be prone to 
+undefined behavior. If safety is your top priority, use `zig build -Drelease-safe` instead. If binary size is your top 
+priority, use `zig build -Drelease-small`.
+
