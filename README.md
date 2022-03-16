@@ -239,6 +239,8 @@ onRec {}     # executes on new record start.
 onExit {}    # executes once at program exit.
 ```
 
+Any code outside of these event blocks is executed for every record of every input file.
+
 ## Global variables
 Here we differ a bit in what zed calls *Global* variables. These are predefined varibales that are always available
 throughout program execution. They provide information about the current state of file processing. They're distinguished
@@ -337,12 +339,13 @@ You can now execute this bytecode with the `zed` command as shown next.
 
 ## Running zed Programs
 zed can either compile and run `.zed` source files directly or just go straight to executing `.zbc` compiled bytecode
-produced by `zedc` ahread-of-time. To complile and execute a `.zed` source file:
+produced by `zedc` ahread-of-time. After the source or bytecode file name, you can list one or more input files to process
+in the order as they appear on the command line. To complile and execute a `.zed` source file:
 
 ```
 $ ls
 your_data_1.csv your_data_2.csv your_program.zed
-$ zed your_program.zed your_data_1 your_data_2.csv
+$ zed your_program.zed your_data_1.csv your_data_2.csv
 Word            Count
 ---------------------
 the.............    9
@@ -360,7 +363,7 @@ the error occurred.
 ```
 $ ls
 your_data_1.csv your_data_2.csv your_program.zbc your_program.zed
-$ zed your_program.zbc your_data_1 your_data_2.csv
+$ zed your_program.zbc your_data_1.csv your_data_2.csv
 Word            Count
 ---------------------
 the.............    9
