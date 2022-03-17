@@ -1,3 +1,5 @@
+![zed](https://github.com/jecolon/zed/blob/main/assets/zed_logo_1.png?raw=true)
+
 # zed
 The zed Programming Language is inspired by AWK in its main mode of operating on text files divided into records (usually lines), and columns within
 thos recoeds. Although inspired by AWK, zed is quite another language, with many features adopted from other dynamic languages. zed is written in 
