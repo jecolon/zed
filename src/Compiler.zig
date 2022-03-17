@@ -105,28 +105,19 @@ pub fn compileProgram(self: *Compiler, allocator: std.mem.Allocator, program: Pa
     const arena_allocator = arena.allocator();
 
     var compiler = try init(arena_allocator, self.ctx);
-    for (program.inits) |n| try compiler.compile(n);
-    compiled[0] = try allocator.dupe(u8, compiler.bytecode.items);
-    errdefer allocator.free(compiled[0]);
-
-    compiler = try init(arena_allocator, self.ctx);
-    for (program.files) |n| try compiler.compile(n);
-    compiled[1] = try allocator.dupe(u8, compiler.bytecode.items);
-    errdefer allocator.free(compiled[1]);
-
-    compiler = try init(arena_allocator, self.ctx);
-    for (program.recs) |n| try compiler.compile(n);
-    compiled[2] = try allocator.dupe(u8, compiler.bytecode.items);
-    errdefer allocator.free(compiled[2]);
-
-    compiler = try init(arena_allocator, self.ctx);
-    for (program.rules) |n| try compiler.compile(n);
-    compiled[3] = try allocator.dupe(u8, compiler.bytecode.items);
-    errdefer allocator.free(compiled[3]);
-
-    compiler = try init(arena_allocator, self.ctx);
-    for (program.exits) |n| try compiler.compile(n);
-    compiled[4] = try allocator.dupe(u8, compiler.bytecode.items);
+    for (compiled) |_, i| {
+        try compiler.pushContext();
+        const event = switch (i) {
+            0 => program.inits,
+            1 => program.files,
+            2 => program.recs,
+            3 => program.rules,
+            4 => program.exits,
+            else => unreachable,
+        };
+        for (event) |n| try compiler.compile(n);
+        compiled[i] = try allocator.dupe(u8, compiler.popContext());
+    }
 
     return compiled;
 }

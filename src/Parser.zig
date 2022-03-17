@@ -7,7 +7,7 @@ const Node = @import("Node.zig");
 const Token = @import("Token.zig");
 
 allocator: std.mem.Allocator,
-can_break: bool = false, // Parsing something that can be broken out of or continued? (i.e. loops)
+can_break: bool = false, // Parsing a loop?
 ctx: Context,
 range_id: u8 = 0,
 token_index: ?u16 = null,
@@ -574,7 +574,7 @@ fn parseFloat(self: *Parser) anyerror!Node {
 
 fn parseFunc(self: *Parser) anyerror!Node {
     var node = Node.new(
-        .{ .func = .{ .body = undefined, .params = &[_][]const u8{} } }, //TODO: Parse params.
+        .{ .func = .{ .body = undefined, .params = &[_][]const u8{} } },
         self.currentOffset(),
     );
 
@@ -588,10 +588,12 @@ fn parseFunc(self: *Parser) anyerror!Node {
                 error.InvalidParam,
                 self.currentOffset(),
             );
+
             const param_node = try self.parseIdent();
             try params_list.append(param_node.ty.ident);
             _ = self.skipTag(.punct_comma);
         }
+
         node.ty.func.params = params_list.items;
     } else {
         _ = self.skipTag(.punct_fat_rarrow); // Optional =>
