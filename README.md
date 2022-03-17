@@ -135,9 +135,9 @@ Functions are created via literals:
 
 ```
 func := { a, b => a + b }
-func_2 := { => it + 1 } # implicit "it" param name for 1st arg
-func_3 := { it + 1 }    # same as func_2
-func_4 := { @0 + @1 }   # implicit "@N" param names for all args
+func_2 := { => it + 1 }         # implicit "it" param name for 1st arg
+func_3 := { it + 1 }            # same as func_2
+func_4 := { @0 + @1 }           # implicit "@N" param names for all args
 ```
 
 ### Implicit Parameter Names 
@@ -357,6 +357,7 @@ such as lists, maps, ranges, and strings.
 "foo".indexOf("o")
 "foo".lastIndexOf("o")
 "foo".len()
+"foo".replace("oo", "ee")       # returns new string
 "foo".startsWith("fo")
 "foo".toLower()                 # returns new string
 "foo".toUpper()                 # returns new string
@@ -379,6 +380,7 @@ such as lists, maps, ranges, and strings.
 [1, 2, 3].sortAsc()                     # modifies list
 [1, 2, 3].sortDesc()                    # modifies list
 [1, 2, 3].stdev()                       # Standard deviation
+[1, 2, 1, 3, 1].unique()                # returns new list
 
 # Map methods
 ["a": 1, "b": 2].len()
