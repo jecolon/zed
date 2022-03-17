@@ -271,7 +271,11 @@ fn execFunc(self: *Vm) !void {
 fn execReturn(self: *Vm) void {
     self.popFrame();
     // Unwind scopes up to the function's scope.
-    while (true) if (self.popScope().ty == .function) break;
+    while (true) {
+        var popped_scope = self.popScope();
+        popped_scope.map.deinit();
+        if (popped_scope.ty == .function) break;
+    }
 }
 
 fn execBuiltin(self: *Vm) anyerror!void {
@@ -1129,9 +1133,14 @@ fn execScopeIn(self: *Vm) anyerror!void {
 fn execScopeOut(self: *Vm) anyerror!void {
     const scope_type = @intToEnum(Scope.Type, self.bytecode[self.ip.* + 1]);
     if (scope_type == .loop) {
-        while (true) if (self.popScope().ty == .loop) break;
+        while (true) {
+            var popped_scope = self.popScope();
+            popped_scope.map.deinit();
+            if (popped_scope.ty == .loop) break;
+        }
     } else {
-        _ = self.popScope();
+        var popped_scope = self.popScope();
+        popped_scope.map.deinit();
     }
     self.ip.* += 2;
 }
@@ -2265,6 +2274,7 @@ fn execReduceList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) anyerror!
     for (list_obj_ptr.list.items) |item, i| {
         // Set up function scope.
         var func_scope = Scope.init(vm_allocator, .function);
+        defer func_scope.map.deinit();
 
         // Assign args as locals in function scope.
         try func_scope.map.put("acc", acc);
@@ -2325,6 +2335,7 @@ fn execReduceRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) a
     }) {
         // Set up function scope.
         var func_scope = Scope.init(vm_allocator, .function);
+        defer func_scope.map.deinit();
 
         const n_val = value.uintToValue(n);
         const i_val = value.uintToValue(i);
@@ -2424,6 +2435,7 @@ fn execListPop(self: *Vm) anyerror!void {
 fn execListPredicate(self: *Vm, func_obj_ptr: *const value.Object, item: Value, index: usize) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function); //TODO: Can we use other allocator here?
+    defer func_scope.map.deinit();
 
     const index_val = value.uintToValue(@intCast(u32, index));
 
@@ -2442,6 +2454,7 @@ fn execListPredicate(self: *Vm, func_obj_ptr: *const value.Object, item: Value, 
 fn execMapPredicate(self: *Vm, func_obj_ptr: *const value.Object, key: []const u8, item: Value, index: usize) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function);
+    defer func_scope.map.deinit();
 
     var key_val: Value = undefined;
     if (key.len < 7) {
@@ -2470,6 +2483,7 @@ fn execMapPredicate(self: *Vm, func_obj_ptr: *const value.Object, key: []const u
 fn execRangePredicate(self: *Vm, func_obj_ptr: *const value.Object, n: u32, i: u32) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function); //TODO: Can we use other allocator here?
+    defer func_scope.map.deinit();
 
     const n_val = value.uintToValue(n);
     const i_val = value.uintToValue(i);
