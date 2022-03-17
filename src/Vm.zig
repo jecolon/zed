@@ -2266,14 +2266,9 @@ fn execReduceList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) anyerror!
         return;
     }
 
-    // Set up sub-VM arena.
-    var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
-    defer vm_arena.deinit();
-    const vm_allocator = vm_arena.allocator();
-
     for (list_obj_ptr.list.items) |item, i| {
         // Set up function scope.
-        var func_scope = Scope.init(vm_allocator, .function);
+        var func_scope = Scope.init(self.allocator, .function);
         defer func_scope.map.deinit();
 
         // Assign args as locals in function scope.
@@ -2286,20 +2281,7 @@ fn execReduceList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) anyerror!
             if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), item);
         }
 
-        _ = try self.pushScope(func_scope);
-
-        var vm = try init(
-            vm_allocator,
-            func_obj_ptr.func.bytecode.?,
-            self.scope_stack,
-            self.ctx,
-            self.output,
-        );
-        try vm.run();
-
-        _ = self.popScope();
-
-        acc = vm.last_popped;
+        acc = try self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
     }
 
     try self.value_stack.append(acc);
@@ -2322,11 +2304,6 @@ fn execReduceRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) a
         return;
     }
 
-    // Set up sub-VM arena.
-    var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
-    defer vm_arena.deinit();
-    const vm_allocator = vm_arena.allocator();
-
     var n = range_obj_ptr.range[0];
     var i: u32 = 0;
     while (n < range_obj_ptr.range[1]) : ({
@@ -2334,7 +2311,7 @@ fn execReduceRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) a
         i += 1;
     }) {
         // Set up function scope.
-        var func_scope = Scope.init(vm_allocator, .function);
+        var func_scope = Scope.init(self.allocator, .function);
         defer func_scope.map.deinit();
 
         const n_val = value.uintToValue(n);
@@ -2351,20 +2328,7 @@ fn execReduceRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) a
             if (params.len > 2) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[2]..], 0), i_val);
         }
 
-        _ = try self.pushScope(func_scope);
-
-        var vm = try init(
-            vm_allocator,
-            func_obj_ptr.func.bytecode.?,
-            self.scope_stack,
-            self.ctx,
-            self.output,
-        );
-        try vm.run();
-
-        _ = self.popScope();
-
-        acc = vm.last_popped;
+        acc = try self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
     }
 
     try self.value_stack.append(acc);
@@ -3170,6 +3134,11 @@ test "Vm method builtins" {
 
     got = try testVmValue(allocator,
         \\[1, 2, 3].reduce(1) { acc * it }
+    );
+    try std.testing.expectEqual(@as(u32, 6), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\(1..=3).reduce(1) { acc * it }
     );
     try std.testing.expectEqual(@as(u32, 6), value.asUint(got).?);
 
