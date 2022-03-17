@@ -232,6 +232,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .pd_push,
         .pd_rand,
         .pd_reduce,
+        .pd_replace,
         .pd_reverse,
         .pd_sin,
         .pd_sortAsc,
@@ -242,6 +243,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .pd_stdev,
         .pd_toLower,
         .pd_toUpper,
+        .pd_unique,
         .pd_values,
         => Parser.parseBuiltin,
 
@@ -399,6 +401,7 @@ fn isBuiltinMethod(tag: Token.Tag) bool {
         .pd_pop,
         .pd_push,
         .pd_reduce,
+        .pd_replace,
         .pd_reverse,
         .pd_sortAsc,
         .pd_sortDesc,
@@ -407,6 +410,7 @@ fn isBuiltinMethod(tag: Token.Tag) bool {
         .pd_stdev,
         .pd_toLower,
         .pd_toUpper,
+        .pd_unique,
         .pd_values,
         => true,
 

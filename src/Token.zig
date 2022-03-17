@@ -50,6 +50,7 @@ pub const Tag = enum {
     pd_push,
     pd_rand,
     pd_reduce,
+    pd_replace,
     pd_reverse,
     pd_sin,
     pd_sortAsc,
@@ -60,6 +61,7 @@ pub const Tag = enum {
     pd_stdev,
     pd_toLower,
     pd_toUpper,
+    pd_unique,
     pd_values,
 
     pd_onInit,
@@ -170,6 +172,7 @@ pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "push", .pd_push },
     .{ "rand", .pd_rand },
     .{ "reduce", .pd_reduce },
+    .{ "replace", .pd_replace },
     .{ "reverse", .pd_reverse },
     .{ "sin", .pd_sin },
     .{ "sortAsc", .pd_sortAsc },
@@ -180,6 +183,7 @@ pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "stdev", .pd_stdev },
     .{ "toLower", .pd_toLower },
     .{ "toUpper", .pd_toUpper },
+    .{ "unique", .pd_unique },
     .{ "values", .pd_values },
 
     .{ "onInit", .pd_onInit },

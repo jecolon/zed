@@ -56,6 +56,7 @@ const builtins = std.ComptimeStringMap(void, .{
     .{ "push", {} },
     .{ "rand", {} },
     .{ "reduce", {} },
+    .{ "replace", {} },
     .{ "reverse", {} },
     .{ "sin", {} },
     .{ "sortAsc", {} },
@@ -66,6 +67,7 @@ const builtins = std.ComptimeStringMap(void, .{
     .{ "stdev", {} },
     .{ "toLower", {} },
     .{ "toUpper", {} },
+    .{ "unique", {} },
     .{ "values", {} },
 });
 

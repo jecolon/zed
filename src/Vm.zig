@@ -283,45 +283,47 @@ fn execBuiltin(self: *Vm) anyerror!void {
     const builtin = @intToEnum(Token.Tag, self.bytecode[self.ip.*]);
 
     return switch (builtin) {
-        .pd_atan2 => try self.execAtan2(),
-        .pd_chars => try self.execChars(),
-        .pd_contains => try self.execContains(),
-        .pd_cos => try self.execOneArgMath(builtin),
-        .pd_each => try self.execEach(),
-        .pd_endsWith => try self.execStrEndStart(false),
-        .pd_exp => try self.execOneArgMath(builtin),
-        .pd_filter => try self.execFilter(),
-        .pd_join => try self.execListJoin(),
-        .pd_indexOf => try self.execIndexOf(),
-        .pd_int => try self.execOneArgMath(builtin),
-        .pd_keys => try self.execMapKeys(),
-        .pd_keysByValueAsc => try self.execMapKeysByValue(true),
-        .pd_keysByValueDesc => try self.execMapKeysByValue(false),
-        .pd_lastIndexOf => try self.execLastIndexOf(),
-        .pd_len => try self.execLen(),
-        .pd_log => try self.execOneArgMath(builtin),
-        .pd_map => try self.execMapMethod(),
-        .pd_max => try self.execListMax(),
-        .pd_mean => try self.execListMean(),
-        .pd_median => try self.execListMedian(),
-        .pd_min => try self.execListMin(),
-        .pd_mode => try self.execListMode(),
-        .pd_print => try self.execPrint(),
-        .pd_pop => try self.execListPop(),
-        .pd_push => try self.execListPush(),
-        .pd_rand => try self.execRand(),
-        .pd_reduce => try self.execReduce(),
-        .pd_reverse => try self.execListReverse(),
-        .pd_sin => try self.execOneArgMath(builtin),
-        .pd_sortAsc => try self.execListSort(true),
-        .pd_sortDesc => try self.execListSort(false),
-        .pd_split => try self.execStrSplit(),
-        .pd_sqrt => try self.execOneArgMath(builtin),
-        .pd_startsWith => try self.execStrEndStart(true),
-        .pd_stdev => try self.execListStdev(),
-        .pd_toLower => try self.execStrCase(true),
-        .pd_toUpper => try self.execStrCase(false),
-        .pd_values => try self.execMapValues(),
+        .pd_atan2 => self.execAtan2(),
+        .pd_chars => self.execChars(),
+        .pd_contains => self.execContains(),
+        .pd_cos => self.execOneArgMath(builtin),
+        .pd_each => self.execEach(),
+        .pd_endsWith => self.execStrEndStart(false),
+        .pd_exp => self.execOneArgMath(builtin),
+        .pd_filter => self.execFilter(),
+        .pd_join => self.execListJoin(),
+        .pd_indexOf => self.execIndexOf(),
+        .pd_int => self.execOneArgMath(builtin),
+        .pd_keys => self.execMapKeys(),
+        .pd_keysByValueAsc => self.execMapKeysByValue(true),
+        .pd_keysByValueDesc => self.execMapKeysByValue(false),
+        .pd_lastIndexOf => self.execLastIndexOf(),
+        .pd_len => self.execLen(),
+        .pd_log => self.execOneArgMath(builtin),
+        .pd_map => self.execMapMethod(),
+        .pd_max => self.execListMax(),
+        .pd_mean => self.execListMean(),
+        .pd_median => self.execListMedian(),
+        .pd_min => self.execListMin(),
+        .pd_mode => self.execListMode(),
+        .pd_print => self.execPrint(),
+        .pd_pop => self.execListPop(),
+        .pd_push => self.execListPush(),
+        .pd_rand => self.execRand(),
+        .pd_reduce => self.execReduce(),
+        .pd_replace => self.execReplace(),
+        .pd_reverse => self.execListReverse(),
+        .pd_sin => self.execOneArgMath(builtin),
+        .pd_sortAsc => self.execListSort(true),
+        .pd_sortDesc => self.execListSort(false),
+        .pd_split => self.execStrSplit(),
+        .pd_sqrt => self.execOneArgMath(builtin),
+        .pd_startsWith => self.execStrEndStart(true),
+        .pd_stdev => self.execListStdev(),
+        .pd_toLower => self.execStrCase(true),
+        .pd_toUpper => self.execStrCase(false),
+        .pd_unique => self.execUnique(),
+        .pd_values => self.execMapValues(),
         else => unreachable,
     };
 }
@@ -2533,7 +2535,7 @@ fn execStrCase(self: *Vm, lower: bool) !void {
     if (!value.isAnyStr(s)) return self.ctx.err(
         "Case conversion only works on strings.",
         .{},
-        error.InvalidtoLower,
+        error.InvalidToCase,
         offset,
     );
 
@@ -2562,6 +2564,110 @@ fn execStrCase(self: *Vm, lower: bool) !void {
     }
 
     self.ip.* += 1; // num_args
+}
+
+fn execUnique(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const l = self.value_stack.pop();
+    const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
+        "`unique` only works on lists.",
+        .{},
+        error.InvalidUnique,
+        offset,
+    );
+
+    var new_list = std.ArrayList(Value).init(self.allocator);
+
+    // No-op
+    if (list_obj_ptr.list.items.len == 0) {
+        const obj_ptr = try self.allocator.create(value.Object);
+        obj_ptr.* = .{ .list = new_list };
+        try self.value_stack.append(value.addrToValue(@ptrToInt(obj_ptr)));
+        self.ip.* += 1;
+        return;
+    }
+
+    var item_set = std.AutoArrayHashMap(Value, void).init(self.allocator);
+    defer item_set.deinit();
+    try item_set.ensureTotalCapacity(@intCast(u32, list_obj_ptr.list.items.len));
+
+    for (list_obj_ptr.list.items) |item| item_set.putAssumeCapacity(item, {});
+    for (item_set.keys()) |item| try new_list.append(item);
+
+    const obj_ptr = try self.allocator.create(value.Object);
+    obj_ptr.* = .{ .list = new_list };
+    try self.value_stack.append(value.addrToValue(@ptrToInt(obj_ptr)));
+
+    self.ip.* += 1; // num_args
+}
+
+fn execReplace(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const num_args = self.bytecode[self.ip.*];
+    self.ip.* += 1;
+
+    if (num_args != 3) return self.ctx.err(
+        "`replace` requires two args",
+        .{},
+        error.InvalidReplace,
+        offset,
+    );
+
+    const str = self.value_stack.pop();
+    if (!value.isAnyStr(str)) return self.ctx.err(
+        "`replace` only works on strings.",
+        .{},
+        error.InvalidReplace,
+        offset,
+    );
+    const str_str = if (value.unboxStr(str)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(str).?.string;
+
+    // No-op
+    if (str_str.len == 0) {
+        try self.value_stack.append(str);
+        return;
+    }
+
+    const needle = self.value_stack.pop();
+    if (!value.isAnyStr(needle)) return self.ctx.err(
+        "`replace` needle must be a string.",
+        .{},
+        error.InvalidReplace,
+        offset,
+    );
+    const needle_str = if (value.unboxStr(needle)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(needle).?.string;
+    if (needle_str.len == 0) return self.ctx.err(
+        "`replace` needle can't be empty.",
+        .{},
+        error.InvalidReplace,
+        offset,
+    );
+
+    const rep = self.value_stack.pop();
+    if (!value.isAnyStr(rep)) return self.ctx.err(
+        "`replace` replacement must be a string.",
+        .{},
+        error.InvalidReplace,
+        offset,
+    );
+    const rep_str = if (value.unboxStr(rep)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(rep).?.string;
+
+    const new_str = try std.mem.replaceOwned(u8, self.allocator, str_str, needle_str, rep_str);
+
+    if (new_str.len < 7) {
+        try self.value_stack.append(value.strToValue(new_str));
+    } else {
+        const obj_ptr = try self.allocator.create(value.Object);
+        obj_ptr.* = .{ .string = new_str };
+        const obj_addr = @ptrToInt(obj_ptr);
+        try self.value_stack.append(value.addrToValue(obj_addr));
+    }
 }
 
 // Scopes
@@ -2985,7 +3091,88 @@ test "Vm math builtins" {
     try std.testing.expectEqual(@as(f64, 7), value.asFloat(got).?);
 }
 
-test "Vm method builtins" {
+test "Vm each, map, filter, reduce " {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\total := 0
+        \\[1, 2, 3].each() { total = total + it }
+        \\total
+    );
+    try std.testing.expectEqual(@as(u32, 6), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\f := { a => a * 2 + index }
+        \\[1, 2, 3].map(f)[1]
+    );
+    try std.testing.expectEqual(@as(u32, 5), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\[1, 2, 3].filter() { it > 1 }[1]
+    );
+    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\[1, 2, 3].reduce(1) { acc * it }
+    );
+    try std.testing.expectEqual(@as(u32, 6), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\(1..=3).reduce(1) { acc * it }
+    );
+    try std.testing.expectEqual(@as(u32, 6), value.asUint(got).?);
+}
+
+test "Vm len" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator, "[1, 2, 3].len()");
+    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\["a": 1, "b": 2, "c": 3].len()
+    );
+    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\"foo".len()
+    );
+    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
+}
+
+test "Vm map methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\["a": 1, "b": 2, "c": 3].keys().len()
+    );
+    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\["a": 3, "b": 2, "c": 1].keysByValueAsc()[0]
+    );
+    var got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
+    try std.testing.expectEqualStrings("c", got_str);
+
+    got = try testVmValue(allocator,
+        \\["a": 3, "b": 2, "c": 1].keysByValueDesc()[0]
+    );
+    got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
+    try std.testing.expectEqualStrings("a", got_str);
+
+    got = try testVmValue(allocator,
+        \\["a": 1, "b": 2, "c": 3].values().len()
+    );
+    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
+}
+
+test "Vm statistics" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -3007,42 +3194,7 @@ test "Vm method builtins" {
         \\l.stdev()
     ;
 
-    var got = try testVmValue(allocator, "[1, 2, 3].len()");
-    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
-
-    got = try testVmValue(allocator,
-        \\["a": 1, "b": 2, "c": 3].len()
-    );
-    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
-
-    got = try testVmValue(allocator,
-        \\"foo".len()
-    );
-    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
-
-    got = try testVmValue(allocator,
-        \\["a": 1, "b": 2, "c": 3].keys().len()
-    );
-    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
-
-    got = try testVmValue(allocator,
-        \\["a": 3, "b": 2, "c": 1].keysByValueAsc()[0]
-    );
-    var got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
-    try std.testing.expectEqualStrings("c", got_str);
-
-    got = try testVmValue(allocator,
-        \\["a": 3, "b": 2, "c": 1].keysByValueDesc()[0]
-    );
-    got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
-    try std.testing.expectEqualStrings("a", got_str);
-
-    got = try testVmValue(allocator,
-        \\["a": 1, "b": 2, "c": 3].values().len()
-    );
-    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
-
-    got = try testVmValue(allocator, mean_input);
+    var got = try testVmValue(allocator, mean_input);
     try std.testing.expectEqual(@as(f64, 2), value.asFloat(got).?);
 
     got = try testVmValue(allocator, median_input);
@@ -3053,8 +3205,14 @@ test "Vm method builtins" {
 
     got = try testVmValue(allocator, stdev_input);
     try std.testing.expectEqual(@as(f64, 1.0671873729054748), value.asFloat(got).?);
+}
 
-    got = try testVmValue(allocator, "[1, 2, 3].min()");
+test "Vm min max" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator, "[1, 2, 3].min()");
     try std.testing.expectEqual(@as(u32, 1), value.asUint(got).?);
 
     got = try testVmValue(allocator, "[1, 2, 3].max()");
@@ -3063,19 +3221,28 @@ test "Vm method builtins" {
     got = try testVmValue(allocator,
         \\["a", "z", "B"].min()
     );
-    got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
+    var got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
     try std.testing.expectEqualStrings("B", got_str);
+}
 
-    got = try testVmValue(allocator, "[2, 3, 1].sortAsc()[0]");
+test "Vm sort" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator, "[2, 3, 1].sortAsc()[0]");
     try std.testing.expectEqual(@as(u32, 1), value.asUint(got).?);
 
     got = try testVmValue(allocator, "[2, 3, 1].sortDesc()[0]");
     try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
+}
 
-    got = try testVmValue(allocator, "[2, 3, 1].reverse()[0]");
-    try std.testing.expectEqual(@as(u32, 1), value.asUint(got).?);
+test "Vm contains indexOf lastIndexOf" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
-    got = try testVmValue(allocator, "[2, 3, 1].contains(3)");
+    var got = try testVmValue(allocator, "[2, 3, 1].contains(3)");
     try std.testing.expectEqual(value.val_true, got);
 
     got = try testVmValue(allocator, "[2, 3, 1].contains(4)");
@@ -3101,11 +3268,20 @@ test "Vm method builtins" {
         \\"H\u65\u301llo".lastIndexOf("l")
     );
     try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
+}
+
+test "Vm reverse, split, join" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator, "[2, 3, 1].reverse()[0]");
+    try std.testing.expectEqual(@as(u32, 1), value.asUint(got).?);
 
     got = try testVmValue(allocator,
         \\"foo,bar,baz".split(",")[1]
     );
-    got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
+    var got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
     try std.testing.expectEqualStrings("bar", got_str);
 
     got = try testVmValue(allocator,
@@ -3113,51 +3289,17 @@ test "Vm method builtins" {
     );
     got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
     try std.testing.expectEqualStrings("foo,1,2.3,", got_str);
+}
 
-    got = try testVmValue(allocator,
-        \\f := { a => a * 2 + index }
-        \\[1, 2, 3].map(f)[1]
-    );
-    try std.testing.expectEqual(@as(u32, 5), value.asUint(got).?);
+test "Vm string methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
-    got = try testVmValue(allocator,
-        \\[1, 2, 3].filter() { it > 1 }[1]
-    );
-    try std.testing.expectEqual(@as(u32, 3), value.asUint(got).?);
-
-    got = try testVmValue(allocator,
-        \\total := 0
-        \\[1, 2, 3].each() { total = total + it }
-        \\total
-    );
-    try std.testing.expectEqual(@as(u32, 6), value.asUint(got).?);
-
-    got = try testVmValue(allocator,
-        \\[1, 2, 3].reduce(1) { acc * it }
-    );
-    try std.testing.expectEqual(@as(u32, 6), value.asUint(got).?);
-
-    got = try testVmValue(allocator,
-        \\(1..=3).reduce(1) { acc * it }
-    );
-    try std.testing.expectEqual(@as(u32, 6), value.asUint(got).?);
-
-    //try testLastValueWithOutput(
-    //    \\print("foo", 1, 2, 3.14)
-    //, Value.new(.nil), "foo,1,2,3.14");
-    //try testLastValueWithOutput(
-    //    \\print("foo", 1, 2, 3.14, "foo {1}")
-    //, Value.new(.nil), "foo,1,2,3.14,foo 1");
-    //try testLastValueWithOutput(
-    //    \\print("foo", 1, 2, 3.14, "{#d:0>3# 1}")
-    //, Value.new(.nil), "foo,1,2,3.14,001");
-    //try testLastValue(
-    //, Value.new(.{ .string = "\u{65}\u{301}" }));
-    //
-    got = try testVmValue(allocator,
+    var got = try testVmValue(allocator,
         \\"H\u65\u301llo".chars()[1]
     );
-    got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
+    var got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
     try std.testing.expectEqualStrings("\u{65}\u{301}", got_str);
 
     got = try testVmValue(allocator,
@@ -3169,19 +3311,6 @@ test "Vm method builtins" {
         \\"Hello".endsWith("llo")
     );
     try std.testing.expectEqual(value.val_true, got);
-
-    got = try testVmValue(allocator,
-        \\l := [1]
-        \\l.push(2)
-        \\l[1]
-    );
-    try std.testing.expectEqual(@as(u32, 2), value.asUint(got).?);
-
-    got = try testVmValue(allocator,
-        \\l := [1]
-        \\l.pop()
-    );
-    try std.testing.expectEqual(@as(u32, 1), value.asUint(got).?);
 
     got = try testVmValue(allocator,
         \\"FOO".toLower()
@@ -3198,4 +3327,43 @@ test "Vm method builtins" {
     got = try testVmValue(allocator, "\"\"");
     const got_u = value.unboxStr(got).?;
     try std.testing.expectEqual(@as(u64, 0), got_u);
+
+    got = try testVmValue(allocator,
+        \\"foo".replace("oo", "ee")
+    );
+    got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
+    try std.testing.expectEqualStrings("fee", got_str);
+}
+
+test "Vm list methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator,
+        \\l := [1]
+        \\l.push(2)
+        \\l[1]
+    );
+    try std.testing.expectEqual(@as(u32, 2), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\l := [1]
+        \\l.pop()
+    );
+    try std.testing.expectEqual(@as(u32, 1), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\l := [1, 2, 1, 3, 1, 3]
+        \\u := l.unique()
+        \\u.reduce(0) { acc + it }
+    );
+    try std.testing.expectEqual(@as(u32, 6), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\l := [1, 2, 1, 3, 1, 3]
+        \\u := l.unique()
+        \\u[0]
+    );
+    try std.testing.expectEqual(@as(u32, 1), value.asUint(got).?);
 }
