@@ -183,7 +183,7 @@ fn execFormat(self: *Vm) !void {
         v,
         writer,
     ) catch |err| return self.ctx.err(
-        "Error in string interpolation '{s}'.",
+        "Error in string interpolation #{s}#.",
         .{spec},
         err,
         offset,
