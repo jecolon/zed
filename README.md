@@ -1,4 +1,4 @@
-![zed](https://github.com/jecolon/zed/blob/main/assets/zed_logo_1.png?raw=true)
+![zed](https://github.com/jecolon/zed/blob/main/assets/zed_logo_2.png?raw=true)
 
 # zed
 The zed Programming Language is inspired by AWK in its main mode of operating on text files divided into records (usually lines), and columns within
