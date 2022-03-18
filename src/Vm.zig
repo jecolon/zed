@@ -168,17 +168,25 @@ fn execUint(self: *Vm) !void {
 
 fn execFormat(self: *Vm) !void {
     self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
     const spec = std.mem.sliceTo(self.bytecode[self.ip.*..], 0);
     self.ip.* += @intCast(u16, spec.len) + 1;
 
     const v = self.value_stack.pop();
     var buf = std.ArrayList(u8).init(self.allocator);
     var writer = buf.writer();
-    try runtimePrint(
+    runtimePrint(
         self.allocator,
         spec,
         v,
         writer,
+    ) catch |err| return self.ctx.err(
+        "Error in string interpolation '{s}'.",
+        .{spec},
+        err,
+        offset,
     );
 
     if (buf.items.len < 7) {

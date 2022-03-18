@@ -130,6 +130,7 @@ const Redir = struct {
 pub const Ipol = struct {
     format: ?[]const u8,
     nodes: []Node,
+    offset: u16,
 };
 
 pub const Segment = union(enum) {

@@ -971,9 +971,9 @@ fn processEscapes(self: *Parser, str: []const u8) anyerror![]const u8 {
 fn parseIpol(self: *Parser, src: []const u8, offset: u16) anyerror!Node.Ipol {
     var parsable = src;
     var format: ?[]const u8 = null;
+    var end: usize = 1;
 
     if ('#' == src[0]) {
-        var end: usize = 1;
         var reached_eof = true;
 
         while (end < src.len) : (end += 1) {
@@ -994,23 +994,49 @@ fn parseIpol(self: *Parser, src: []const u8, offset: u16) anyerror!Node.Ipol {
         parsable = src[end + 1 ..];
     }
 
+    // Need this for proper offsets in error messages.
+    const spec_len = if (format) |f| @intCast(u16, f.len) + 4 else 1;
+
     // NOTE: Made this mistake more than once; using the same input as the main parser here will cause an infinite loop,
     // subsequent stack overfflow, and NO error message, which will drive you crazy!
     var sub_lexer = Lexer{ .allocator = self.allocator, .ctx = Context{ .filename = self.ctx.filename, .src = parsable } };
-    const sub_tokens = try sub_lexer.lex();
+    const sub_tokens = sub_lexer.lex() catch |err| return self.ctx.err(
+        "Error lexing sting interpolation `{s}`.",
+        .{parsable},
+        err,
+        offset + spec_len,
+    );
     var sub_parser = Parser{
         .allocator = self.allocator,
         .ctx = Context{ .filename = self.ctx.filename, .src = parsable },
         .tokens = sub_tokens,
     };
-    const sub_program = try sub_parser.parse();
+    const sub_program = sub_parser.parse() catch |err| return self.ctx.err(
+        "Error parsing sting interpolation `{s}`.",
+        .{parsable},
+        err,
+        offset + spec_len,
+    );
     const sub_nodes = sub_program.rules;
 
     // Avoid format of stmt_end bug.
-    var end = sub_nodes.len;
+    end = sub_nodes.len;
     if (sub_nodes[end - 1].ty == .stmt_end) end = end - 1;
 
-    return Node.Ipol{ .format = format, .nodes = sub_nodes[0..end] };
+    // Adjust offsets for error messages.
+    for (sub_nodes) |*n| {
+        if (spec_len != 1) {
+            n.offset = offset + spec_len + n.offset - 1;
+        } else {
+            n.offset = offset + spec_len + n.offset;
+        }
+    }
+
+    return Node.Ipol{
+        .format = format,
+        .nodes = sub_nodes[0..end],
+        .offset = offset,
+    };
 }
 
 fn parseString(self: *Parser) anyerror!Node {

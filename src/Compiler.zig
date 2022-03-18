@@ -217,6 +217,7 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
 
                 if (ipol.format) |spec| {
                     try self.pushInstruction(.format);
+                    try self.pushOffset(ipol.offset);
                     try self.pushSlice(spec);
                     try self.pushByte(0);
                 }
