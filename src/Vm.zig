@@ -2291,7 +2291,9 @@ fn execReduceList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) anyerror!
             if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), item);
         }
 
-        acc = try self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
+        try self.pushScope(func_scope);
+        acc = try self.execPredicate(func_obj_ptr.func.bytecode.?);
+        _ = self.popScope();
     }
 
     try self.value_stack.append(acc);
@@ -2338,7 +2340,9 @@ fn execReduceRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) a
             if (params.len > 2) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[2]..], 0), i_val);
         }
 
-        acc = try self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
+        try self.pushScope(func_scope);
+        acc = try self.execPredicate(func_obj_ptr.func.bytecode.?);
+        _ = self.popScope();
     }
 
     try self.value_stack.append(acc);
@@ -2422,7 +2426,11 @@ fn execListPredicate(self: *Vm, func_obj_ptr: *const value.Object, item: Value, 
         if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), index_val);
     }
 
-    return self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
+    try self.pushScope(func_scope);
+    const result = self.execPredicate(func_obj_ptr.func.bytecode.?);
+    _ = self.popScope();
+
+    return result;
 }
 
 fn execMapPredicate(self: *Vm, func_obj_ptr: *const value.Object, key: []const u8, item: Value, index: usize) anyerror!Value {
@@ -2451,7 +2459,11 @@ fn execMapPredicate(self: *Vm, func_obj_ptr: *const value.Object, key: []const u
         if (params.len > 2) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[2]..], 0), index_val);
     }
 
-    return self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
+    try self.pushScope(func_scope);
+    const result = self.execPredicate(func_obj_ptr.func.bytecode.?);
+    _ = self.popScope();
+
+    return result;
 }
 
 fn execRangePredicate(self: *Vm, func_obj_ptr: *const value.Object, n: u32, i: u32) anyerror!Value {
@@ -2471,16 +2483,18 @@ fn execRangePredicate(self: *Vm, func_obj_ptr: *const value.Object, n: u32, i: u
         if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), i_val);
     }
 
-    return self.execPredicate(func_obj_ptr.func.bytecode.?, func_scope);
+    try self.pushScope(func_scope);
+    const result = self.execPredicate(func_obj_ptr.func.bytecode.?);
+    _ = self.popScope();
+
+    return result;
 }
 
-fn execPredicate(self: *Vm, bytecode: []const u8, func_scope: Scope) anyerror!Value {
+fn execPredicate(self: *Vm, bytecode: []const u8) anyerror!Value {
     // Set up Sub-VM arena.
     var vm_arena = std.heap.ArenaAllocator.init(self.allocator);
     defer vm_arena.deinit();
     const vm_allocator = vm_arena.allocator();
-
-    _ = try self.pushScope(func_scope);
 
     var vm = try init(
         vm_allocator,
@@ -2490,8 +2504,6 @@ fn execPredicate(self: *Vm, bytecode: []const u8, func_scope: Scope) anyerror!Va
         self.output,
     );
     try vm.run();
-
-    _ = self.popScope();
 
     return vm.last_popped;
 }
