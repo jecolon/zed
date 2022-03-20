@@ -215,7 +215,7 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
                 try self.pushInstruction(.scope_out);
                 try self.pushEnum(Scope.Type.block);
 
-                if (ipol.format) |spec| {
+                if (ipol.spec) |spec| {
                     try self.pushInstruction(.format);
                     try self.pushOffset(ipol.offset);
                     try self.pushSlice(spec);
@@ -237,20 +237,45 @@ fn compileFunc(self: *Compiler, node: Node) anyerror!void {
 
     // Serialize function to bytes.
     try self.pushInstruction(.func);
+
+    // Skip bytes for cached functions
+    const skip_bytes_index = try self.pushZeroes();
+    var skip_bytes: usize = 0;
+
+    // Function unique hash
+    var buf = std.ArrayList(u8).init(self.allocator);
+    defer buf.deinit();
+    _ = try buf.writer().print("{}", .{node.ty.func});
+    const func_hash = std.hash.Wyhash.hash(Context.seed, buf.items);
+    try self.pushSlice(std.mem.asBytes(&func_hash));
+
     // Function name
     if (node.ty.func.name.len != 0) try self.pushSlice(node.ty.func.name);
     try self.pushByte(0);
+    skip_bytes += node.ty.func.name.len + 1;
+
     // Function params
     try self.pushLen(node.ty.func.params.len);
+    skip_bytes += 2;
+
     if (node.ty.func.params.len != 0) {
         for (node.ty.func.params) |param| {
             try self.pushSlice(param);
             try self.pushByte(0);
+            skip_bytes += param.len + 1;
         }
     }
+
     // Function bytecode
     try self.pushLen(func_bytecode.len);
+    skip_bytes += 2;
+
     if (func_bytecode.len != 0) try self.pushSlice(func_bytecode);
+    skip_bytes += func_bytecode.len;
+
+    const skip_bytes_bytes = std.mem.asBytes(&@intCast(u16, skip_bytes));
+    self.bytecode.items[skip_bytes_index] = skip_bytes_bytes[0];
+    self.bytecode.items[skip_bytes_index + 1] = skip_bytes_bytes[1];
 }
 
 fn compileReturn(self: *Compiler, node: Node) anyerror!void {

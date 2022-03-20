@@ -1033,7 +1033,7 @@ fn parseIpol(self: *Parser, src: []const u8, offset: u16) anyerror!Node.Ipol {
     }
 
     return Node.Ipol{
-        .format = format,
+        .spec = format,
         .nodes = sub_nodes[0..end],
         .offset = offset,
     };
@@ -1337,3 +1337,20 @@ test "Parser booleans" {
     try std.testing.expectEqual(true, program.rules[2].ty.boolean);
     try std.testing.expectEqual(@as(u16, 6), program.rules[2].offset);
 }
+
+//test "Parser print function" {
+//    const allocator = std.testing.allocator;
+//    var arena = std.heap.ArenaAllocator.init(allocator);
+//    defer arena.deinit();
+//    const ctx = Context{ .filename = "inline", .src = "foo := { a, b => z := 1; a + z - b !> \"foo.txt\" }" };
+//    var lexer = Lexer{ .allocator = arena.allocator(), .ctx = ctx };
+//    var tokens = try lexer.lex();
+//    var parser = Parser{
+//        .allocator = arena.allocator(),
+//        .ctx = ctx,
+//        .tokens = tokens,
+//    };
+//    const program = try parser.parse();
+//
+//    std.debug.print("\n--> {} <--\n", .{program.rules[0]});
+//}

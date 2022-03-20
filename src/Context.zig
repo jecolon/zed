@@ -7,6 +7,8 @@ src: []const u8,
 
 const Context = @This();
 
+pub const seed = 2112;
+
 pub fn err(self: Context, comptime fmt: []const u8, args: anytype, e: anyerror, offset: u16) anyerror {
     const location = Location.getLocation(self.filename, self.src, offset);
     std.log.err(fmt, args);

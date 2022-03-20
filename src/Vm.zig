@@ -235,6 +235,21 @@ fn execString(self: *Vm) !void {
 fn execFunc(self: *Vm) !void {
     self.ip.* += 1;
 
+    // Bytes to skip if cached function.
+    const skip_bytes = self.getU16(self.ip.*);
+    self.ip.* += 2;
+
+    // Func hash
+    const func_hash_ptr = @ptrCast(*align(1) const u64, self.bytecode[self.ip.* .. self.ip.* + 8]);
+    self.ip.* += 8;
+
+    // Check for cached function.
+    if (self.scope_stack.func_cache.get(func_hash_ptr.*)) |v| {
+        try self.value_stack.append(v);
+        self.ip.* += skip_bytes;
+        return;
+    }
+
     // Function name
     var func_name_index: ?u16 = null;
     if (self.bytecode[self.ip.*] != 0) {
@@ -250,7 +265,7 @@ fn execFunc(self: *Vm) !void {
 
     var params: ?[]const u16 = null;
     if (params_len != 0) {
-        var params_slice = try self.allocator.alloc(u16, params_len);
+        var params_slice = try self.scope_stack.allocator.alloc(u16, params_len);
         for (params_slice) |_, i| {
             const param = std.mem.sliceTo(self.bytecode[self.ip.*..], 0);
             params_slice[i] = self.ip.*;
@@ -270,10 +285,16 @@ fn execFunc(self: *Vm) !void {
         .params = params,
         .bytecode = func_bytecode,
     };
-    const obj_ptr = try self.allocator.create(value.Object);
+
+    const obj_ptr = try self.scope_stack.allocator.create(value.Object);
     obj_ptr.* = .{ .func = func };
     const obj_addr = @ptrToInt(obj_ptr);
-    try self.value_stack.append(value.addrToValue(obj_addr));
+
+    const obj_val = value.addrToValue(obj_addr);
+    // Cache for further re-use.
+    try self.scope_stack.func_cache.put(func_hash_ptr.*, obj_val);
+
+    try self.value_stack.append(obj_val);
 }
 
 fn execReturn(self: *Vm) void {

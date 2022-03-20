@@ -8,6 +8,7 @@ const ScopeStack = @This();
 
 allocator: std.mem.Allocator,
 columns: Value = value.val_nil,
+func_cache: std.AutoHashMap(u64, Value),
 global_scope: std.StringHashMap(Value),
 stack: std.ArrayList(Scope),
 
@@ -86,6 +87,7 @@ const globals = std.ComptimeStringMap(void, .{
 pub fn init(allocator: std.mem.Allocator) ScopeStack {
     return ScopeStack{
         .allocator = allocator,
+        .func_cache = std.AutoHashMap(u64, Value).init(allocator),
         .global_scope = std.StringHashMap(Value).init(allocator),
         .rec_ranges = std.AutoHashMap(u8, void).init(allocator),
         .stack = std.ArrayList(Scope).init(allocator),
