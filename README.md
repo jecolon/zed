@@ -172,6 +172,51 @@ addOne := { it + 1 }            # implicit first param name
 (3..<7).map() { it * index }            # implicit range param names; produces [0, 4, 10, 18]
 ```
 
+### Memoization
+If you have a function without side-effects like printing output, that always produces the same results given
+the same arguments, you can memoize it to reap significant performance improvements. In the following example,
+calculating the 30th Fibonacci number without memoization takes seconds and considerable memory usage. With 
+memoization, it's practically instantaneous with negligable memory usage. Note that if you want to test this,
+the highest you can go in zed is fib(47) (2971215073). Going higher than that overflows what a 32-bit unsigned
+integer can hold. Without memoization, memory usage skyrockets to insane levels beyond fib(30); you've been warned!
+
+```
+onInit {
+    fib := {
+        if (it < 2) return it
+        return fib(it - 1) + fib(it - 2)
+    }
+
+    memo(fib)       # memoized Fibonacci is blazingly fast 
+    print(fib(30))
+}
+```
+
+Also note that this is practically a non-issue when working with non-recursive functions. The non-recursive `fib` below 
+is blazingly fast even without memoization.
+
+```
+onInit {
+    fib := {
+        a := 0
+        b := 1
+        i := 0
+
+        while (i < it) {
+            tmp := a
+            a = b
+            b = tmp + b
+
+            i += 1
+        }
+
+        return a
+    }
+
+    print(fib(30))
+}
+```
+
 ## Conditionals
 The usual suspects found in most dynamic languages. Note that for conditions the following truth table applies:
 
