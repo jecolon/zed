@@ -84,7 +84,7 @@ pub fn run(self: *Vm) !void {
                     break; // VM exit
                 }
 
-                self.execReturn();
+                try self.execReturn();
             },
             // Variables
             .define => try self.execDefine(),
@@ -281,6 +281,7 @@ fn execFunc(self: *Vm) !void {
     self.ip.* += bytecode_len;
 
     const func = value.Function{
+        .hash = func_hash_ptr.*,
         .name = func_name_index,
         .params = params,
         .bytecode = func_bytecode,
@@ -295,16 +296,6 @@ fn execFunc(self: *Vm) !void {
     try self.scope_stack.func_cache.put(func_hash_ptr.*, obj_val);
 
     try self.value_stack.append(obj_val);
-}
-
-fn execReturn(self: *Vm) void {
-    self.popFrame();
-    // Unwind scopes up to the function's scope.
-    while (true) {
-        var popped_scope = self.popScope();
-        popped_scope.map.deinit();
-        if (popped_scope.ty == .function) break;
-    }
 }
 
 fn execBuiltin(self: *Vm) anyerror!void {
@@ -333,6 +324,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
         .pd_max => self.execListMax(),
         .pd_mean => self.execListMean(),
         .pd_median => self.execListMedian(),
+        .pd_memo => self.execMemo(),
         .pd_min => self.execListMin(),
         .pd_mode => self.execListMode(),
         .pd_print => self.execPrint(),
@@ -379,6 +371,9 @@ fn execCall(self: *Vm) anyerror!void {
         return;
     }
 
+    // Memoized function?
+    if (func_obj_ptr.func.memo) return self.execCallMemo(func_obj_ptr);
+
     // Prepare the child scope.
     var func_scope = Scope.init(self.allocator, .function);
 
@@ -404,6 +399,67 @@ fn execCall(self: *Vm) anyerror!void {
     // Push the function's frame.
     try self.pushScope(func_scope);
     try self.pushFrame(func_obj_ptr.func.bytecode.?);
+}
+fn execCallMemo(self: *Vm, func_obj_ptr: *value.Object) !void {
+    // Process args
+    const num_args = self.bytecode[self.ip.*];
+    self.ip.* += 1;
+
+    // Hash and check for memoized result.
+    var wh = std.hash.Wyhash.init(Context.seed);
+    wh.update(std.mem.asBytes(&func_obj_ptr.func.hash));
+    var args_buf: [256]Value = undefined;
+    var i: usize = 0;
+    while (i < num_args) : (i += 1) args_buf[i] = self.value_stack.pop();
+    const args = args_buf[0..i];
+    wh.update(std.mem.sliceAsBytes(args));
+    const memo_hash = wh.final();
+
+    if (self.scope_stack.func_memo.get(memo_hash)) |v| {
+        try self.value_stack.append(v);
+        return;
+    }
+
+    // Prepare the child scope.
+    var func_scope = Scope.init(self.allocator, .function);
+
+    // Signal need to memo.
+    try func_scope.map.put("@memo", memo_hash);
+
+    // Self-references
+    if (func_obj_ptr.func.name) |idx| {
+        const addr = @ptrToInt(func_obj_ptr);
+        try func_scope.map.put(std.mem.sliceTo(self.bytecode[idx..], 0), value.addrToValue(addr));
+    }
+
+    for (args) |arg, j| {
+        if (j == 0) try func_scope.map.put("it", arg); // it
+        var buf: [4]u8 = undefined;
+        const auto_arg_name = try std.fmt.bufPrint(&buf, "@{}", .{j});
+        try func_scope.map.put(try self.allocator.dupe(u8, auto_arg_name), arg); // @0, @1, ...
+        if (func_obj_ptr.func.params) |params| {
+            if (j < params.len) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[j]..], 0), arg);
+        }
+    }
+
+    // Push the function's frame.
+    try self.pushScope(func_scope);
+    try self.pushFrame(func_obj_ptr.func.bytecode.?);
+}
+fn execReturn(self: *Vm) !void {
+    self.popFrame();
+    // Unwind scopes up to the function's scope.
+    while (true) {
+        var popped_scope = self.popScope();
+
+        // Signal to memoize?
+        if (popped_scope.map.get("@memo")) |hash| {
+            try self.scope_stack.func_memo.put(hash, self.value_stack.items[self.value_stack.items.len - 1]);
+        }
+
+        popped_scope.map.deinit();
+        if (popped_scope.ty == .function) break;
+    }
 }
 
 fn execDefine(self: *Vm) !void {
@@ -2431,7 +2487,7 @@ fn execListPop(self: *Vm) anyerror!void {
     self.ip.* += 1;
 }
 
-fn execListPredicate(self: *Vm, func_obj_ptr: *const value.Object, item: Value, index: usize) anyerror!Value {
+fn execListPredicate(self: *Vm, func_obj_ptr: *value.Object, item: Value, index: usize) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function); //TODO: Can we use other allocator here?
     defer func_scope.map.deinit();
@@ -2454,7 +2510,7 @@ fn execListPredicate(self: *Vm, func_obj_ptr: *const value.Object, item: Value, 
     return result;
 }
 
-fn execMapPredicate(self: *Vm, func_obj_ptr: *const value.Object, key: []const u8, item: Value, index: usize) anyerror!Value {
+fn execMapPredicate(self: *Vm, func_obj_ptr: *value.Object, key: []const u8, item: Value, index: usize) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function);
     defer func_scope.map.deinit();
@@ -2487,7 +2543,7 @@ fn execMapPredicate(self: *Vm, func_obj_ptr: *const value.Object, key: []const u
     return result;
 }
 
-fn execRangePredicate(self: *Vm, func_obj_ptr: *const value.Object, n: u32, i: u32) anyerror!Value {
+fn execRangePredicate(self: *Vm, func_obj_ptr: *value.Object, n: u32, i: u32) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function); //TODO: Can we use other allocator here?
     defer func_scope.map.deinit();
@@ -2709,6 +2765,25 @@ fn execReplace(self: *Vm) !void {
         const obj_addr = @ptrToInt(obj_ptr);
         try self.value_stack.append(value.addrToValue(obj_addr));
     }
+}
+
+fn execMemo(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const f = self.value_stack.pop();
+    const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
+        "`memo` only works on functions.",
+        .{},
+        error.InvalidMemo,
+        offset,
+    );
+
+    func_obj_ptr.func.memo = true;
+
+    try self.value_stack.append(f);
+    self.ip.* += 1;
 }
 
 // Scopes

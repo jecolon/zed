@@ -225,6 +225,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .pd_max,
         .pd_mean,
         .pd_median,
+        .pd_memo,
         .pd_min,
         .pd_mode,
         .pd_print,

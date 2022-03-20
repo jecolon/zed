@@ -92,9 +92,9 @@ pub fn isStr(v: Value) bool {
 }
 
 // Object convenience functions.
-pub fn asFunc(v: Value) ?*const Object {
+pub fn asFunc(v: Value) ?*Object {
     if (asAddr(v)) |addr| {
-        const obj_ptr = @intToPtr(*const Object, addr);
+        const obj_ptr = @intToPtr(*Object, addr);
         if (obj_ptr.* == .func) return obj_ptr;
     }
     return null;
@@ -394,6 +394,7 @@ fn copyFunc(allocator: std.mem.Allocator, func: Function) anyerror!Value {
 
     const obj_ptr = try allocator.create(Object);
     obj_ptr.* = .{ .func = .{
+        .hash = func.hash,
         .name = func.name,
         .params = params,
         .bytecode = bytecode,
@@ -536,6 +537,8 @@ pub const Object = union(enum) {
 
 // Runtime function value.
 pub const Function = struct {
+    hash: u64,
+    memo: bool = false,
     name: ?u16,
     params: ?[]const u16,
     bytecode: ?[]const u8,

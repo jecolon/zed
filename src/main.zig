@@ -56,7 +56,8 @@ pub fn main() anyerror!void {
         }
         // Need program source for error messages.
         var fn_buf: [1024]u8 = undefined;
-        const src_filename = try std.fmt.bufPrint(&fn_buf, "{s}.zed", .{std.mem.trimRight(u8, program_filename, ".zbc")});
+        const idx = std.mem.lastIndexOf(u8, program_filename, ".zbc").?;
+        const src_filename = try std.fmt.bufPrint(&fn_buf, "{s}.zed", .{program_filename[0..idx]});
         var src_file = try std.fs.cwd().openFile(src_filename, .{});
         defer src_file.close();
         ctx.src = try src_file.readToEndAlloc(static_allocator, 1024 * 64); // 64K
