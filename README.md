@@ -1,9 +1,41 @@
 ![zed](https://github.com/jecolon/zed/blob/main/assets/zed_logo_2.png?raw=true)
 
 # zed
-The zed Programming Language is inspired by AWK in its main mode of operating on text files divided into records (usually lines), and columns within
-thos recoeds. Although inspired by AWK, zed is quite another language, with many features adopted from other dynamic languages. zed is written in 
-[Zig](https://ziglang.org), which is an awesome systems-programming, low-level language that enables really high performance when executing zed code.
+The zed Programming Language is inspired by AWK in its main mode of operating on text files divided into records 
+(usually lines), and columns within thos recoeds. Although inspired by AWK, zed is quite another language, with many 
+features adopted from other dynamic languages. zed is written in [Zig](https://ziglang.org), which is an awesome 
+systems-programming, low-level language that enables really high performance when executing zed code.
+
+# TL;DR: A Sample Word Count Program 
+If you just want to get a taste of zed, here's the classic word counting example in zed. This program counts the 
+space-separated *words* and then presents them in descending order of occurrence.
+
+```
+# Only once at program start
+onInit {
+    @ics = " "          # Set input column separator. (default is ",")
+    counts := [:]       # Initialize empty word counts map.
+}
+
+# Before processing each record
+onRec {
+    if (@rec) @rec = @rec.toLower()     # If the record isn't empty, lower case it.
+}
+
+# For each record (default input record separator (@irs) is "\n"
+if (@rec) {                             # if the record isn't empty,
+    @cols.each() { counts[it] += 1 }    # increment each column's count in counts map.
+}
+
+# Only once at program exit
+onExit {
+    print("{#s: <20# "Word"}   Count\n")        # Header
+    print("-" ** 28 ++ "\n")                    # Uses string repeat (**) and concat (++)
+
+    # Sort counts by descending value and print formatted keys and values.
+    counts.keysByValueDesc().each() { print("{#s:.<20# it} {#d: >7# counts[it]}\n") }
+}
+```
 
 # The Language
 ## Comments
@@ -493,37 +525,6 @@ a...............    8
 is..............    3
 $ ls
 your_data_1.csv your_data_2.csv your_program.zbc your_program.zed
-```
-
-## Sample Word Count Program 
-We can't finish this README without the classic word counting example in zed. This program counts the space-separated
-*words* and then presents them in descending order of occurrence.
-
-```
-# Only once at program start
-onInit {
-    @ics = " "          # Set input column separator. (default is ",")
-    counts := [:]       # Initialize empty word counts map.
-}
-
-# Before processing each record
-onRec {
-    if (@rec) @rec = @rec.toLower()     # If the record isn't empty, lower case it.
-}
-
-# For each record (default input record separator (@irs) is "\n"
-if (@rec) {                             # if the record isn't empty,
-    @cols.each() { counts[it] += 1 }    # increment each column's count in counts map.
-}
-
-# Only once at program exit
-onExit {
-    print("{#s: <20# "Word"}   Count\n")        # Header
-    print("-" ** 28 ++ "\n")                    # Uses string repeat (**) and concat (++)
-
-    # Sort counts by descending value and print formatted keys and values.
-    counts.keysByValueDesc().each() { print("{#s:.<20# it} {#d: >7# counts[it]}\n") }
-}
 ```
 
 ## Building From source
