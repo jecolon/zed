@@ -12,7 +12,7 @@ const Value = value.Value;
 const Vm = @import("Vm.zig");
 
 fn printUsage() !void {
-    std.log.err("Usage: zed <your_program_file.zed> <data_file_1> <data_file_2> ... <data_file_n>\n", .{});
+    std.log.err("Usage: zed <your_program_file.zed> [<data_file_1> <data_file_2> ... <data_file_n>]\n", .{});
     return error.InvalidUsage;
 }
 

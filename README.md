@@ -527,6 +527,34 @@ $ ls
 your_data_1.csv your_data_2.csv your_program.zbc your_program.zed
 ```
 
+### Shebang it!
+You can also run your zed code like an executable script in Unix-like systems. Just add a *shebang* line at the top of 
+the file, make it executable, and you can run it directly. Here's a sample session:
+
+```
+$ cat fib.zed
+#!/usr/bin/env zed
+
+onInit {
+    fib := {
+        if (it < 2) return it
+        return fib(it - 1) + fib(it - 2)
+    }
+    memo(fib)
+    print(fib(30), "\n")
+}
+$ chmod +x ./fib.zed 
+$ ./fib.zed 
+832040,
+```
+
+This example uses `/usr/bin/env` to find the `zed` executable in your environment's path. If you haven't placed the `zed`
+binary in your path, you can also use the following shebang line:
+
+```
+#!/<path>/<to>/zed 
+```
+
 ## Building From source
 zed is developed with the latest [Zig compiler](https://ziglang.org/download/). You'll also need the 
 [zigmod](https://github.com/nektro/zigmod/releases/tag/r77) package manager (just a signle binary).
