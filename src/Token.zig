@@ -24,6 +24,7 @@ pub const Tag = enum {
 
     pd_atan2,
     pd_chars,
+    pd_col,
     pd_contains,
     pd_cos,
     pd_each,
@@ -73,6 +74,8 @@ pub const Tag = enum {
     at_cols,
     at_file,
     at_frnum,
+    at_head,
+    at_headers,
     at_ics,
     at_irs,
     at_ocs,
@@ -147,6 +150,7 @@ pub const predef = std.ComptimeStringMap(Tag, .{
 
     .{ "atan2", .pd_atan2 },
     .{ "chars", .pd_chars },
+    .{ "col", .pd_col },
     .{ "contains", .pd_contains },
     .{ "cos", .pd_cos },
     .{ "each", .pd_each },
@@ -196,6 +200,8 @@ pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "@cols", .at_cols },
     .{ "@file", .at_file },
     .{ "@frnum", .at_frnum },
+    .{ "@head", .at_head },
+    .{ "@headers", .at_headers },
     .{ "@ics", .at_ics },
     .{ "@irs", .at_irs },
     .{ "@ocs", .at_ocs },

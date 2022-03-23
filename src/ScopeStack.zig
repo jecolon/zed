@@ -11,6 +11,7 @@ columns: Value = value.val_nil,
 func_cache: std.AutoHashMap(u64, Value),
 func_memo: std.AutoHashMap(u64, Value),
 global_scope: std.StringHashMap(Value),
+headers: std.StringArrayHashMap(usize),
 stack: std.ArrayList(Scope),
 
 // Current data filename
@@ -28,10 +29,13 @@ ics: Value = value.strToValue(","),
 irs: Value = value.strToValue("\n"),
 ocs: Value = value.strToValue(","),
 ors: Value = value.strToValue("\n"),
+// Column headers
+header_row: ?usize = null,
 
 const builtins = std.ComptimeStringMap(void, .{
     .{ "atan2", {} },
     .{ "chars", {} },
+    .{ "col", {} },
     .{ "contains", {} },
     .{ "cos", {} },
     .{ "each", {} },
@@ -51,6 +55,7 @@ const builtins = std.ComptimeStringMap(void, .{
     .{ "max", {} },
     .{ "mean", {} },
     .{ "median", {} },
+    .{ "memo", {} },
     .{ "min", {} },
     .{ "mode", {} },
     .{ "print", {} },
@@ -77,6 +82,7 @@ const globals = std.ComptimeStringMap(void, .{
     .{ "@cols", {} },
     .{ "@file", {} },
     .{ "@frnum", {} },
+    .{ "@head", {} },
     .{ "@ics", {} },
     .{ "@irs", {} },
     .{ "@ocs", {} },
@@ -91,6 +97,7 @@ pub fn init(allocator: std.mem.Allocator) ScopeStack {
         .func_cache = std.AutoHashMap(u64, Value).init(allocator),
         .func_memo = std.AutoHashMap(u64, Value).init(allocator),
         .global_scope = std.StringHashMap(Value).init(allocator),
+        .headers = std.StringArrayHashMap(usize).init(allocator),
         .rec_ranges = std.AutoHashMap(u8, void).init(allocator),
         .stack = std.ArrayList(Scope).init(allocator),
     };

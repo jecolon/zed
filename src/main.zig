@@ -141,7 +141,7 @@ pub fn main() anyerror!void {
         var data_reader = std.io.bufferedReader(data_file.reader()).reader();
 
         // File record numbering
-        scope_stack.frnum = 1;
+        scope_stack.frnum = 0;
 
         // Input record separator
         var str_irs = if (value.unboxStr(scope_stack.irs)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(scope_stack.irs).?.string;
@@ -173,13 +173,26 @@ pub fn main() anyerror!void {
             );
             try recs_vm.run();
 
-            // New record, new fileds.
-            var columns = std.ArrayList(Value).init(tmp_allocator);
-
             // Loop over fields
             const str_rec = if (value.unboxStr(scope_stack.record)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(scope_stack.record).?.string;
             const str_ics = if (value.unboxStr(scope_stack.ics)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(scope_stack.ics).?.string;
             var field_iter = std.mem.split(u8, str_rec, str_ics);
+
+            // Header row?
+            if (scope_stack.header_row != null and scope_stack.header_row.? == scope_stack.frnum) {
+                scope_stack.headers.clearRetainingCapacity();
+
+                var field_index: usize = 0;
+                while (field_iter.next()) |field| : (field_index += 1) {
+                    const field_copy = try scope_stack.allocator.dupe(u8, field);
+                    try scope_stack.headers.put(field_copy, field_index);
+                }
+
+                continue; // On to next row.
+            }
+
+            // New record, new fileds.
+            var columns = std.ArrayList(Value).init(tmp_allocator);
 
             while (field_iter.next()) |field| {
                 if (field.len < 7) {

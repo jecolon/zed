@@ -403,6 +403,8 @@ easilly from other Variables given they start with `@`.
 @frnum          # current record number, relative to current input file (read-only)
 @rec            # current record 
 @cols           # list of current record's columns (read-only)
+@head           # index of row in current data file with column headers (optional)
+@headers        # list of column headers
 @ics            # input column separator 
 @irs            # input record separator 
 @ocs            # output column separator
@@ -414,6 +416,7 @@ Like AWK, zed comes with some builtin functions, mostly math, here they are:
 
 ```
 atan2(0, -1)
+col("FirstName")                # if @head is set, get column by header or index
 cos(-1)
 exp(5)
 int(3.9)

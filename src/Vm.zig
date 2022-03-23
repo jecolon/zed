@@ -305,6 +305,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
     return switch (builtin) {
         .pd_atan2 => self.execAtan2(),
         .pd_chars => self.execChars(),
+        .pd_col => self.execCol(),
         .pd_contains => self.execContains(),
         .pd_cos => self.execOneArgMath(builtin),
         .pd_each => self.execEach(),
@@ -549,13 +550,41 @@ fn execGlobal(self: *Vm) !void {
     const result = switch (global) {
         .at_cols => self.scope_stack.columns,
         .at_file => self.scope_stack.file,
-        .at_frnum => self.scope_stack.frnum,
+        .at_frnum => value.uintToValue(@intCast(u32, self.scope_stack.frnum)),
+        .at_head => hd: {
+            if (self.scope_stack.header_row) |hr| {
+                break :hd value.uintToValue(@intCast(u32, hr));
+            } else {
+                break :hd value.val_nil;
+            }
+        },
+        .at_headers => hdrs: {
+            if (self.scope_stack.header_row == null) break :hdrs value.val_nil;
+
+            var keys_list = std.ArrayList(Value).init(self.allocator);
+
+            for (self.scope_stack.headers.keys()) |key| {
+                if (key.len < 7) {
+                    try keys_list.append(value.strToValue(key));
+                } else {
+                    const obj_ptr = try self.allocator.create(value.Object);
+                    obj_ptr.* = .{ .string = key };
+                    const obj_addr = @ptrToInt(obj_ptr);
+                    try keys_list.append(value.addrToValue(obj_addr));
+                }
+            }
+
+            const obj_ptr = try self.allocator.create(value.Object);
+            obj_ptr.* = .{ .list = keys_list };
+            const addr = @ptrToInt(obj_ptr);
+            break :hdrs value.addrToValue(addr);
+        },
         .at_ics => self.scope_stack.ics,
         .at_irs => self.scope_stack.irs,
         .at_ocs => self.scope_stack.ocs,
         .at_ors => self.scope_stack.ors,
         .at_rec => self.scope_stack.record,
-        .at_rnum => self.scope_stack.frnum,
+        .at_rnum => value.uintToValue(@intCast(u32, self.scope_stack.rnum)),
         else => unreachable,
     };
 
@@ -626,6 +655,32 @@ fn execGlobalStore(self: *Vm) !void {
                 offset,
             );
             self.scope_stack.columns = rvalue;
+        },
+        .at_head => {
+            if (value.asUint(rvalue)) |u| {
+                self.scope_stack.header_row = u;
+            } else return self.ctx.err(
+                "@head must be an unsigned integer.",
+                .{},
+                error.InvalidHead,
+                offset,
+            );
+        },
+        .at_headers => {
+            const hlist = value.asList(rvalue) orelse return self.ctx.err(
+                "@headers must be a list.",
+                .{},
+                error.InvalidHeaders,
+                offset,
+            );
+
+            self.scope_stack.headers.clearRetainingCapacity();
+
+            for (hlist.list.items) |v, i| {
+                const h_str = if (value.unboxStr(v)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(v).?.string;
+                const h_copy = try self.scope_stack.allocator.dupe(u8, h_str);
+                try self.scope_stack.headers.put(h_copy, i);
+            }
         },
         else => unreachable,
     }
@@ -2582,7 +2637,7 @@ fn execPredicate(self: *Vm, bytecode: []const u8) anyerror!Value {
     );
     try vm.run();
 
-    return vm.last_popped;
+    return try value.copy(vm.last_popped, self.allocator);
 }
 
 fn execRedir(self: *Vm) !void {
@@ -2783,6 +2838,58 @@ fn execMemo(self: *Vm) anyerror!void {
     func_obj_ptr.func.memo = true;
 
     try self.value_stack.append(f);
+    self.ip.* += 1;
+}
+
+fn execCol(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const idx = self.value_stack.pop();
+    if (value.asUint(idx)) |ui| {
+        return self.execColUint(ui, offset);
+    } else if (value.isAnyStr(idx)) {
+        return self.execColStr(idx, offset);
+    } else return self.ctx.err(
+        "`col` arg must be a sting or unsigned integer.",
+        .{},
+        error.InvalidCol,
+        offset,
+    );
+}
+
+fn execColUint(self: *Vm, index: u32, offset: u16) !void {
+    const cols_ptr = value.asList(self.scope_stack.columns).?;
+    if (index >= cols_ptr.list.items.len) return self.ctx.err(
+        "Column index out of bounds.",
+        .{},
+        error.OutOfBounds,
+        offset,
+    );
+
+    try self.value_stack.append(cols_ptr.list.items[index]);
+    self.ip.* += 1;
+}
+
+fn execColStr(self: *Vm, index_val: Value, offset: u16) !void {
+    const header_str = if (value.asList(index_val)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(index_val).?.string;
+    const index = self.scope_stack.headers.get(header_str) orelse return self.ctx.err(
+        "Column '{s}' not found.",
+        .{header_str},
+        error.InvalidColumnName,
+        offset,
+    );
+
+    const cols_ptr = value.asList(self.scope_stack.columns).?;
+    if (index >= cols_ptr.list.items.len) return self.ctx.err(
+        "Column index out of bounds.",
+        .{},
+        error.OutOfBounds,
+        offset,
+    );
+
+    try self.value_stack.append(cols_ptr.list.items[index]);
     self.ip.* += 1;
 }
 
@@ -3218,6 +3325,12 @@ test "Vm each, map, filter, reduce " {
         \\total
     );
     try std.testing.expectEqual(@as(u32, 6), value.asUint(got).?);
+
+    got = try testVmValue(allocator,
+        \\m := [1, 2, 3].map() { a => a * 2 + index }
+        \\m[1]
+    );
+    try std.testing.expectEqual(@as(u32, 5), value.asUint(got).?);
 
     got = try testVmValue(allocator,
         \\f := { a => a * 2 + index }

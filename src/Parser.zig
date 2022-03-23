@@ -191,6 +191,8 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .at_cols,
         .at_file,
         .at_frnum,
+        .at_head,
+        .at_headers,
         .at_ics,
         .at_irs,
         .at_ocs,
@@ -206,6 +208,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
 
         .pd_atan2,
         .pd_chars,
+        .pd_col,
         .pd_contains,
         .pd_cos,
         .pd_each,
