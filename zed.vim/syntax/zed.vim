@@ -38,6 +38,8 @@ syn keyword zedFunction	pop push reverse unique
 syn keyword zedFunction	sortAsc sortDec
 " Map Manipulation Methods
 syn keyword zedFunction	keys values keysByValueAsc keysByValueDesc
+" Other builtins
+syn keyword zedFunction	col
 highlight link zedFunction Function
 
 syn keyword zedConditional	if else
@@ -56,7 +58,7 @@ highlight link zedConstant Constant
 
 " Built-in Variables
 syn keyword zedVariable         @file @rnum @frnum @rec @cols
-syn keyword zedVariable         @ics @irs @ocs @ors
+syn keyword zedVariable         @ics @irs @ocs @ors @head @headers
 highlight link zedVariable Special
 
 " Arithmetic operators: +, and * take care of ++, and **
