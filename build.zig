@@ -15,7 +15,10 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("zed", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
+    exe.setTarget(target);
     deps.addAllTo(exe);
+    exe.strip = true;
+    exe.single_threaded = true;
     exe.install();
 
     const run_cmd = exe.run();
@@ -38,5 +41,8 @@ pub fn build(b: *std.build.Builder) void {
     const compiler_exe = b.addExecutable("zedc", "src/zedc.zig");
     compiler_exe.setTarget(target);
     compiler_exe.setBuildMode(mode);
+    compiler_exe.setTarget(target);
+    compiler_exe.strip = true;
+    compiler_exe.single_threaded = true;
     compiler_exe.install();
 }
