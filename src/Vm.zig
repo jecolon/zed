@@ -308,6 +308,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
 
     return switch (builtin) {
         .pd_atan2 => self.execAtan2(),
+        .pd_capture => self.execCapture(),
         .pd_chars => self.execChars(),
         .pd_col => self.execCol(),
         .pd_contains => self.execContains(),
@@ -2991,6 +2992,56 @@ fn execMatch(self: *Vm) anyerror!void {
         try self.scope_stack.value_cache.put(match_hash, value.val_nil);
         try self.value_stack.append(value.val_nil);
     }
+}
+fn execCapture(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const m = self.value_stack.pop();
+    const match_obj_ptr = value.asMatch(m) orelse return self.ctx.err(
+        "`capture` only works on regex matches.",
+        .{},
+        error.InvalidCapture,
+        offset,
+    );
+
+    var arg = self.value_stack.pop();
+    if (value.asUint(arg)) |u| {
+        if (match_obj_ptr.match.captureN(u)) |cstr| {
+            if (cstr.len < 7) {
+                try self.value_stack.append(value.strToValue(cstr));
+            } else {
+                const obj_ptr = try self.allocator.create(value.Object);
+                obj_ptr.* = .{ .string = cstr };
+                const obj_addr = @ptrToInt(obj_ptr);
+                try self.value_stack.append(value.addrToValue(obj_addr));
+            }
+        } else {
+            try self.value_stack.append(value.val_nil);
+        }
+    } else if (value.isAnyStr(arg)) {
+        const name = if (value.unboxStr(arg)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(arg).?.string;
+        if (match_obj_ptr.match.capture(name)) |cstr| {
+            if (cstr.len < 7) {
+                try self.value_stack.append(value.strToValue(cstr));
+            } else {
+                const obj_ptr = try self.allocator.create(value.Object);
+                obj_ptr.* = .{ .string = cstr };
+                const obj_addr = @ptrToInt(obj_ptr);
+                try self.value_stack.append(value.addrToValue(obj_addr));
+            }
+        } else {
+            try self.value_stack.append(value.val_nil);
+        }
+    } else return self.ctx.err(
+        "`capture` arg must be unsigend integer index or a string.",
+        .{},
+        error.InvalidCapture,
+        offset,
+    );
+
+    self.ip.* += 1;
 }
 
 // Scopes

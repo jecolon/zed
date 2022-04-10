@@ -207,6 +207,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .pd_nil => Parser.parseNil,
 
         .pd_atan2,
+        .pd_capture,
         .pd_chars,
         .pd_col,
         .pd_contains,
@@ -385,6 +386,7 @@ fn parseBuiltin(self: *Parser) anyerror!Node {
 
 fn isBuiltinMethod(tag: Token.Tag) bool {
     return switch (tag) {
+        .pd_capture,
         .pd_chars,
         .pd_contains,
         .pd_each,
