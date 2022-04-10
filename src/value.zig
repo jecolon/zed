@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const Regex = @import("Regex.zig");
+
 // Value NaN box.
 pub const Value = u64;
 
@@ -117,6 +119,13 @@ pub fn asRange(v: Value) ?*const Object {
     if (asAddr(v)) |addr| {
         const obj_ptr = @intToPtr(*const Object, addr);
         if (obj_ptr.* == .range) return obj_ptr;
+    }
+    return null;
+}
+pub fn asRegex(v: Value) ?*Object {
+    if (asAddr(v)) |addr| {
+        const obj_ptr = @intToPtr(*Object, addr);
+        if (obj_ptr.* == .regex) return obj_ptr;
     }
     return null;
 }
@@ -379,6 +388,7 @@ fn copyObject(v: Value, allocator: std.mem.Allocator) anyerror!Value {
         .list => |l| copyList(allocator, l),
         .map => |m| copyMap(allocator, m),
         .range => |r| copyRange(allocator, r),
+        .regex => |r| copyRegex(allocator, r),
         .string => |s| copyString(allocator, s),
     };
 }
@@ -431,6 +441,12 @@ fn copyRange(allocator: std.mem.Allocator, r: [2]u32) anyerror!Value {
     const obj_addr = @ptrToInt(obj_ptr);
     return addrToValue(obj_addr);
 }
+fn copyRegex(allocator: std.mem.Allocator, r: Regex) anyerror!Value {
+    const obj_ptr = try allocator.create(Object);
+    obj_ptr.* = .{ .regex = .{ .code = r.code, .data = r.data } };
+    const obj_addr = @ptrToInt(obj_ptr);
+    return addrToValue(obj_addr);
+}
 fn copyString(allocator: std.mem.Allocator, str: []const u8) anyerror!Value {
     const str_copy = try allocator.dupe(u8, str);
     const obj_ptr = try allocator.create(Object);
@@ -458,6 +474,7 @@ fn printObject(v: Value, writer: anytype) !void {
         .list => |l| try printList(l, writer),
         .map => |m| try printMap(m, writer),
         .range => |r| _ = try writer.print("{} ..< {}", .{ r[0], r[1] }),
+        .regex => |r| _ = try writer.print("Regex @{*}", .{r.code}),
         .string => |s| try writer.writeAll(s),
     }
 }
@@ -487,6 +504,7 @@ pub const Object = union(enum) {
     list: std.ArrayList(Value),
     map: std.StringHashMap(Value),
     range: [2]u32,
+    regex: Regex,
     string: []const u8,
 
     fn eqlTag(a: Object, b: Object) bool {
@@ -495,6 +513,7 @@ pub const Object = union(enum) {
             .list => b == .list,
             .map => b == .map,
             .range => b == .range,
+            .regex => b == .regex,
             .string => b == .string,
         };
     }
@@ -507,6 +526,7 @@ pub const Object = union(enum) {
             .list => eqlList(a, b),
             .map => eqlMap(a, b),
             .range => eqlRange(a, b),
+            .regex => eqlRegex(a, b),
             .string => eqlStr(a, b),
         };
     }
@@ -529,6 +549,9 @@ pub const Object = union(enum) {
     }
     pub fn eqlRange(a: Object, b: Object) bool {
         return a.range[0] == b.range[0] and a.range[1] == b.range[1];
+    }
+    pub fn eqlRegex(a: Object, b: Object) bool {
+        return a.regex.code == b.regex.code;
     }
     pub fn eqlStr(a: Object, b: Object) bool {
         return std.mem.eql(u8, a.string, b.string);

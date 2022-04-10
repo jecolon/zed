@@ -40,6 +40,7 @@ fn next(self: *Lexer) !?Token {
             '#' => try self.lexComment(),
             '\n' => self.lexNewline(),
             '"' => try self.lexString(),
+            '`' => try self.lexRegex(),
             '@' => try self.lexGlobal(),
 
             ':',
@@ -252,6 +253,25 @@ fn lexOp(self: *Lexer, byte: u8) Token {
 
         else => unreachable,
     };
+}
+
+fn lexRegex(self: *Lexer) !Token {
+    const start = self.offset.?;
+    var reached_eof = true;
+
+    while (self.advance()) |byte| {
+        if ('\\' == byte and self.peekIs('`')) {
+            _ = self.advance();
+        } else if ('`' == byte) {
+            reached_eof = false;
+            break;
+        }
+    }
+
+    if (reached_eof) return self.ctx.err("Unterminated regex pattern.", .{}, error.UnterminatedRegex, start);
+
+    const src = self.ctx.src[start .. self.offset.? + 1];
+    return Token.new(.regex, start, src.len);
 }
 
 fn lexString(self: *Lexer) !Token {

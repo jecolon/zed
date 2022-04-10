@@ -177,6 +177,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .float => Parser.parseFloat,
         .ident => Parser.parseIdent,
         .int => Parser.parseInt,
+        .regex => Parser.parseRegex,
         .string => Parser.parseString,
         .uint => Parser.parseUint,
 
@@ -1128,6 +1129,20 @@ fn parseString(self: *Parser) anyerror!Node {
 }
 
 // End Strings
+
+fn parseRegex(self: *Parser) anyerror!Node {
+    const offset = self.currentOffset();
+    const str = self.ctx.src[self.currentOffset() + 1 .. self.currentOffset() + self.currentLen() - 1];
+    var copy = std.ArrayList(u8).init(self.allocator);
+    var i: usize = 0;
+
+    while (i < str.len) : (i += 1) {
+        if ('\\' == str[i] and i + 1 < str.len and '`' == str[i + 1]) continue;
+        try copy.append(str[i]);
+    }
+
+    return Node.new(.{ .regex = copy.items }, offset);
+}
 
 fn parseTernary(self: *Parser, condition: Node) anyerror!Node {
     const offset = self.currentOffset();

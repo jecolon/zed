@@ -4,6 +4,7 @@ pub const Tag = enum {
     float,
     ident,
     int,
+    regex,
     string,
     uint,
 

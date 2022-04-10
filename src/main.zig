@@ -85,6 +85,7 @@ pub fn main() anyerror!void {
 
     // Program scope stack with global scope
     var scope_stack = ScopeStack.init(static_allocator);
+    defer scope_stack.deinit();
 
     // Output change check
     var output = std.ArrayList(u8).init(static_allocator);

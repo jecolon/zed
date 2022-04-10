@@ -4,6 +4,7 @@ const Compiler = @import("Compiler.zig");
 const Context = @import("Context.zig");
 const GraphemeIterator = @import("ziglyph").GraphemeIterator;
 const Node = @import("Node.zig");
+const Regex = @import("Regex.zig");
 const Scope = @import("Scope.zig");
 const ScopeStack = @import("ScopeStack.zig");
 const Token = @import("Token.zig");
@@ -122,6 +123,8 @@ pub fn run(self: *Vm) !void {
             .redir => try self.execRedir(),
             // Printing
             .sprint => try self.execSprint(),
+            // Regex
+            .regex => try self.execRegex(),
         }
     }
 }
@@ -244,7 +247,7 @@ fn execFunc(self: *Vm) !void {
     self.ip.* += 8;
 
     // Check for cached function.
-    if (self.scope_stack.func_cache.get(func_hash_ptr.*)) |v| {
+    if (self.scope_stack.value_cache.get(func_hash_ptr.*)) |v| {
         try self.value_stack.append(v);
         self.ip.* += skip_bytes;
         return;
@@ -293,7 +296,7 @@ fn execFunc(self: *Vm) !void {
 
     const obj_val = value.addrToValue(obj_addr);
     // Cache for further re-use.
-    try self.scope_stack.func_cache.put(func_hash_ptr.*, obj_val);
+    try self.scope_stack.value_cache.put(func_hash_ptr.*, obj_val);
 
     try self.value_stack.append(obj_val);
 }
@@ -2891,6 +2894,50 @@ fn execColStr(self: *Vm, index_val: Value, offset: u16) !void {
 
     try self.value_stack.append(cols_ptr.list.items[index]);
     self.ip.* += 1;
+}
+
+fn execRegex(self: *Vm) !void {
+    // Offset
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    // Bytes to skip if cached function.
+    const skip_bytes = self.getU16(self.ip.*);
+    self.ip.* += 2;
+
+    // Regex pattern hash
+    const regex_hash_ptr = @ptrCast(*align(1) const u64, self.bytecode[self.ip.* .. self.ip.* + 8]);
+    self.ip.* += 8;
+
+    // Check for cached regex.
+    if (self.scope_stack.value_cache.get(regex_hash_ptr.*)) |v| {
+        try self.value_stack.append(v);
+        self.ip.* += skip_bytes;
+        return;
+    }
+
+    // Regex pattern
+    const pattern = std.mem.sliceTo(self.bytecode[self.ip.*..], 0);
+    self.ip.* += @intCast(u16, pattern.len) + 1;
+
+    // Create object
+    const regex = Regex.compile(pattern) catch |err| return self.ctx.err(
+        "Could not compile regex pattern: `{s}`.",
+        .{pattern},
+        err,
+        offset,
+    );
+
+    const obj_ptr = try self.scope_stack.allocator.create(value.Object);
+    obj_ptr.* = .{ .regex = regex };
+    const obj_addr = @ptrToInt(obj_ptr);
+
+    const obj_val = value.addrToValue(obj_addr);
+    // Cache for further re-use.
+    try self.scope_stack.value_cache.put(regex_hash_ptr.*, obj_val);
+
+    try self.value_stack.append(obj_val);
 }
 
 // Scopes

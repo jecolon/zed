@@ -8,7 +8,7 @@ const ScopeStack = @This();
 
 allocator: std.mem.Allocator,
 columns: Value = value.val_nil,
-func_cache: std.AutoHashMap(u64, Value),
+value_cache: std.AutoHashMap(u64, Value),
 func_memo: std.AutoHashMap(u64, Value),
 global_scope: std.StringHashMap(Value),
 headers: std.StringArrayHashMap(usize),
@@ -94,13 +94,18 @@ const globals = std.ComptimeStringMap(void, .{
 pub fn init(allocator: std.mem.Allocator) ScopeStack {
     return ScopeStack{
         .allocator = allocator,
-        .func_cache = std.AutoHashMap(u64, Value).init(allocator),
+        .value_cache = std.AutoHashMap(u64, Value).init(allocator),
         .func_memo = std.AutoHashMap(u64, Value).init(allocator),
         .global_scope = std.StringHashMap(Value).init(allocator),
         .headers = std.StringArrayHashMap(usize).init(allocator),
         .rec_ranges = std.AutoHashMap(u8, void).init(allocator),
         .stack = std.ArrayList(Scope).init(allocator),
     };
+}
+
+pub fn deinit(self: *ScopeStack) void {
+    var iter = self.value_cache.valueIterator();
+    while (iter.next()) |val_ptr| if (value.asRange(val_ptr.*)) |obj_ptr| obj_ptr.regex.deinit();
 }
 
 pub fn push(self: *ScopeStack, scope: Scope) !void {

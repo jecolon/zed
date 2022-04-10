@@ -19,6 +19,10 @@ pub fn build(b: *std.build.Builder) void {
     deps.addAllTo(exe);
     exe.strip = true;
     exe.single_threaded = true;
+    exe.linkLibC();
+    exe.addLibPath("/opt/homebrew/Cellar/pcre2/10.39/lib");
+    exe.addIncludePath("/opt/homebrew/Cellar/pcre2/10.39/include");
+    exe.linkSystemLibrary("pcre2-8");
     exe.install();
 
     const run_cmd = exe.run();
@@ -34,6 +38,10 @@ pub fn build(b: *std.build.Builder) void {
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
     deps.addAllTo(exe_tests);
+    exe_tests.linkLibC();
+    exe_tests.addLibPath("/opt/homebrew/Cellar/pcre2/10.39/lib");
+    exe_tests.addIncludePath("/opt/homebrew/Cellar/pcre2/10.39/include");
+    exe_tests.linkSystemLibrary("pcre2-8");
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);
