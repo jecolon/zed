@@ -48,7 +48,6 @@ fn next(self: *Lexer) !?Token {
             '<',
             '>',
             '=',
-            '~',
             '*',
             '/',
             '%',
@@ -66,6 +65,7 @@ fn next(self: *Lexer) !?Token {
             '[' => self.oneChar(.punct_lbracket),
             ']' => self.oneChar(.punct_rbracket),
             '|' => self.oneChar(.punct_pipe),
+            '~' => self.oneChar(.op_match),
 
             else => self.ctx.err("Unknown byte {c}.", .{byte}, error.UnknownByte, self.offset.?),
         };
@@ -204,9 +204,6 @@ fn lexOp(self: *Lexer, byte: u8) Token {
             if (self.skipByte('=')) {
                 token.tag = .op_neq;
                 token.len = 2;
-            } else if (self.skipByte('~')) {
-                token.tag = .op_nomatch;
-                token.len = 2;
             } else if (self.skipByte('>')) {
                 token.tag = .op_redir_clobber;
                 token.len = 2;
@@ -215,7 +212,6 @@ fn lexOp(self: *Lexer, byte: u8) Token {
         },
         '<' => self.lexCombineAssing(.punct_lt, .op_lte),
         '>' => self.lexCombineAssing(.punct_gt, .op_gte),
-        '~' => self.lexCombineAssing(.punct_tilde, .op_xmatch),
         '*' => op: {
             if (self.skipByte('*')) break :op self.twoChar(.op_repeat);
             break :op self.lexCombineAssing(.punct_star, .op_mul_eq);
@@ -638,12 +634,10 @@ test "Lex ops" {
         .{ .input = "!>", .tag = .op_redir_clobber, .len = 2 },
         .{ .input = "+>", .tag = .op_redir_append, .len = 2 },
         .{ .input = "!=", .tag = .op_neq, .len = 2 },
-        .{ .input = "!~", .tag = .op_nomatch, .len = 2 },
+        .{ .input = "~", .tag = .op_match, .len = 1 },
         .{ .input = ":", .tag = .punct_colon, .len = 1 },
         .{ .input = ".", .tag = .punct_dot, .len = 1 },
         .{ .input = ":=", .tag = .op_define, .len = 2 },
-        .{ .input = "~", .tag = .punct_tilde, .len = 1 },
-        .{ .input = "~=", .tag = .op_xmatch, .len = 2 },
         .{ .input = "..<", .tag = .op_range_ex, .len = 3 },
         .{ .input = "..=", .tag = .op_range_in, .len = 3 },
         .{ .input = "?", .tag = .punct_question, .len = 1 },

@@ -125,6 +125,7 @@ pub fn run(self: *Vm) !void {
             .sprint => try self.execSprint(),
             // Regex
             .regex => try self.execRegex(),
+            .match => try self.execMatch(),
         }
     }
 }
@@ -2938,6 +2939,30 @@ fn execRegex(self: *Vm) !void {
     try self.scope_stack.value_cache.put(regex_hash_ptr.*, obj_val);
 
     try self.value_stack.append(obj_val);
+}
+fn execMatch(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const right = self.value_stack.pop();
+    const regex = (value.asRegex(right)) orelse return self.ctx.err(
+        "Match right hand side must be a regex.",
+        .{},
+        error.InvalidMatch,
+        offset,
+    );
+
+    const left = self.value_stack.pop();
+    if (!value.isAnyStr(left)) return self.ctx.err(
+        "Match left hand side must be a string.",
+        .{},
+        error.InvalidMatch,
+        offset,
+    );
+    const subject = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
+
+    try self.value_stack.append(value.boolToValue(regex.regex.match(subject)));
 }
 
 // Scopes

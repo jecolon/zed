@@ -118,8 +118,7 @@ const Precedence = enum {
             .punct_lt,
             .punct_gt,
             .punct_tilde,
-            .op_nomatch,
-            .op_xmatch,
+            .op_match,
             .op_lte,
             .op_gte,
             .op_eq,
@@ -283,6 +282,7 @@ fn infixFn(self: Parser) InfixFn {
         .kw_or,
         .op_concat,
         .op_repeat,
+        .op_match,
         => Parser.parseInfix,
 
         .punct_equals,
