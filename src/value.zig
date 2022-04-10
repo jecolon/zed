@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const Regex = @import("Regex.zig");
+const regex = @import("regex.zig");
 
 // Value NaN box.
 pub const Value = u64;
@@ -119,6 +119,13 @@ pub fn asRange(v: Value) ?*const Object {
     if (asAddr(v)) |addr| {
         const obj_ptr = @intToPtr(*const Object, addr);
         if (obj_ptr.* == .range) return obj_ptr;
+    }
+    return null;
+}
+pub fn asMatch(v: Value) ?*Object {
+    if (asAddr(v)) |addr| {
+        const obj_ptr = @intToPtr(*Object, addr);
+        if (obj_ptr.* == .match) return obj_ptr;
     }
     return null;
 }
@@ -387,6 +394,7 @@ fn copyObject(v: Value, allocator: std.mem.Allocator) anyerror!Value {
         .func => |f| copyFunc(allocator, f),
         .list => |l| copyList(allocator, l),
         .map => |m| copyMap(allocator, m),
+        .match => |m| copyMatch(allocator, m),
         .range => |r| copyRange(allocator, r),
         .regex => |r| copyRegex(allocator, r),
         .string => |s| copyString(allocator, s),
@@ -441,9 +449,25 @@ fn copyRange(allocator: std.mem.Allocator, r: [2]u32) anyerror!Value {
     const obj_addr = @ptrToInt(obj_ptr);
     return addrToValue(obj_addr);
 }
-fn copyRegex(allocator: std.mem.Allocator, r: Regex) anyerror!Value {
+fn copyMatch(allocator: std.mem.Allocator, m: regex.Match) anyerror!Value {
     const obj_ptr = try allocator.create(Object);
-    obj_ptr.* = .{ .regex = .{ .code = r.code, .data = r.data } };
+    obj_ptr.* = .{ .match = .{
+        .captures_len = m.captures_len,
+        .code = m.code,
+        .data = m.data,
+        .name_count = m.name_count,
+        .name_entry_size = m.name_entry_size,
+        .name_table_ptr = m.name_table_ptr,
+        .ovector = m.ovector,
+        .pattern = try allocator.dupe(u8, m.pattern),
+        .subject = try allocator.dupe(u8, m.subject),
+    } };
+    const obj_addr = @ptrToInt(obj_ptr);
+    return addrToValue(obj_addr);
+}
+fn copyRegex(allocator: std.mem.Allocator, r: regex.Regex) anyerror!Value {
+    const obj_ptr = try allocator.create(Object);
+    obj_ptr.* = .{ .regex = .{ .code = r.code, .pattern = try allocator.dupe(u8, r.pattern) } };
     const obj_addr = @ptrToInt(obj_ptr);
     return addrToValue(obj_addr);
 }
@@ -473,8 +497,9 @@ fn printObject(v: Value, writer: anytype) !void {
         .func => try writer.writeAll("fn()"),
         .list => |l| try printList(l, writer),
         .map => |m| try printMap(m, writer),
+        .match => |m| _ = try writer.print("\"{s}\" ~ `{s}`", .{ m.subject, m.pattern }),
         .range => |r| _ = try writer.print("{} ..< {}", .{ r[0], r[1] }),
-        .regex => |r| _ = try writer.print("Regex @{*}", .{r.code}),
+        .regex => |r| _ = try writer.print("`{s}`", .{r.pattern}),
         .string => |s| try writer.writeAll(s),
     }
 }
@@ -503,8 +528,9 @@ pub const Object = union(enum) {
     func: Function,
     list: std.ArrayList(Value),
     map: std.StringHashMap(Value),
+    match: regex.Match,
     range: [2]u32,
-    regex: Regex,
+    regex: regex.Regex,
     string: []const u8,
 
     fn eqlTag(a: Object, b: Object) bool {
@@ -512,6 +538,7 @@ pub const Object = union(enum) {
             .func => b == .func,
             .list => b == .list,
             .map => b == .map,
+            .match => b == .match,
             .range => b == .range,
             .regex => b == .regex,
             .string => b == .string,
@@ -525,6 +552,7 @@ pub const Object = union(enum) {
             .func => false,
             .list => eqlList(a, b),
             .map => eqlMap(a, b),
+            .match => eqlMatch(a, b),
             .range => eqlRange(a, b),
             .regex => eqlRegex(a, b),
             .string => eqlStr(a, b),
@@ -549,6 +577,9 @@ pub const Object = union(enum) {
     }
     pub fn eqlRange(a: Object, b: Object) bool {
         return a.range[0] == b.range[0] and a.range[1] == b.range[1];
+    }
+    pub fn eqlMatch(a: Object, b: Object) bool {
+        return a.match.data == b.match.data;
     }
     pub fn eqlRegex(a: Object, b: Object) bool {
         return a.regex.code == b.regex.code;

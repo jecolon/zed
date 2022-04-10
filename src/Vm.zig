@@ -4,7 +4,7 @@ const Compiler = @import("Compiler.zig");
 const Context = @import("Context.zig");
 const GraphemeIterator = @import("ziglyph").GraphemeIterator;
 const Node = @import("Node.zig");
-const Regex = @import("Regex.zig");
+const regex = @import("regex.zig");
 const Scope = @import("Scope.zig");
 const ScopeStack = @import("ScopeStack.zig");
 const Token = @import("Token.zig");
@@ -2923,7 +2923,7 @@ fn execRegex(self: *Vm) !void {
     self.ip.* += @intCast(u16, pattern.len) + 1;
 
     // Create object
-    const regex = Regex.compile(pattern) catch |err| return self.ctx.err(
+    const re = regex.Regex.compile(pattern) catch |err| return self.ctx.err(
         "Could not compile regex pattern: `{s}`.",
         .{pattern},
         err,
@@ -2931,7 +2931,7 @@ fn execRegex(self: *Vm) !void {
     );
 
     const obj_ptr = try self.scope_stack.allocator.create(value.Object);
-    obj_ptr.* = .{ .regex = regex };
+    obj_ptr.* = .{ .regex = re };
     const obj_addr = @ptrToInt(obj_ptr);
 
     const obj_val = value.addrToValue(obj_addr);
@@ -2946,7 +2946,7 @@ fn execMatch(self: *Vm) anyerror!void {
     self.ip.* += 2;
 
     const right = self.value_stack.pop();
-    const regex = (value.asRegex(right)) orelse return self.ctx.err(
+    const re = (value.asRegex(right)) orelse return self.ctx.err(
         "Match right hand side must be a regex.",
         .{},
         error.InvalidMatch,
@@ -2962,7 +2962,35 @@ fn execMatch(self: *Vm) anyerror!void {
     );
     const subject = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
 
-    try self.value_stack.append(value.boolToValue(regex.regex.match(subject)));
+    var wh = std.hash.Wyhash.init(Context.seed);
+    wh.update(re.regex.pattern);
+    wh.update(subject);
+    const match_hash = wh.final();
+
+    // Check for cached match.
+    if (self.scope_stack.value_cache.get(match_hash)) |v| {
+        try self.value_stack.append(v);
+        return;
+    }
+
+    const sub_copy = try self.allocator.dupe(u8, subject);
+    const m_opt = try re.regex.match(sub_copy);
+
+    if (m_opt) |m| {
+        const obj_ptr = try self.scope_stack.allocator.create(value.Object);
+        obj_ptr.* = .{ .match = m };
+        const obj_addr = @ptrToInt(obj_ptr);
+
+        const obj_val = value.addrToValue(obj_addr);
+        // Cache for further re-use.
+        try self.scope_stack.value_cache.put(match_hash, obj_val);
+
+        try self.value_stack.append(obj_val);
+    } else {
+        // No match for this regex and subject pair.
+        try self.scope_stack.value_cache.put(match_hash, value.val_nil);
+        try self.value_stack.append(value.val_nil);
+    }
 }
 
 // Scopes
