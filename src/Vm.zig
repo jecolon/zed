@@ -3076,7 +3076,8 @@ fn isTruthy(v: Value) bool {
     if (value.asRange(v)) |r| return r.range[1] - r.range[0] != 0;
     if (value.asString(v)) |s| return s.string.len != 0;
     if (value.unboxStr(v)) |u| return u != 0;
-    return false;
+
+    return v != value.val_nil;
 }
 
 fn getNumber(self: Vm, comptime T: type, start: usize, n: usize) T {
