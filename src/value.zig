@@ -453,13 +453,9 @@ fn copyMatch(allocator: std.mem.Allocator, m: regex.Match) anyerror!Value {
     const obj_ptr = try allocator.create(Object);
     obj_ptr.* = .{ .match = .{
         .captures_len = m.captures_len,
-        .code = m.code,
+        .re = m.re,
         .data = m.data,
-        .name_count = m.name_count,
-        .name_entry_size = m.name_entry_size,
-        .name_table_ptr = m.name_table_ptr,
         .ovector = m.ovector,
-        .pattern = try allocator.dupe(u8, m.pattern),
         .subject = try allocator.dupe(u8, m.subject),
     } };
     const obj_addr = @ptrToInt(obj_ptr);
@@ -467,7 +463,15 @@ fn copyMatch(allocator: std.mem.Allocator, m: regex.Match) anyerror!Value {
 }
 fn copyRegex(allocator: std.mem.Allocator, r: regex.Regex) anyerror!Value {
     const obj_ptr = try allocator.create(Object);
-    obj_ptr.* = .{ .regex = .{ .code = r.code, .pattern = try allocator.dupe(u8, r.pattern) } };
+    obj_ptr.* = .{ .regex = .{
+        .code = r.code,
+        .is_crlf = r.is_crlf,
+        .is_utf8 = r.is_utf8,
+        .name_count = r.name_count,
+        .name_entry_size = r.name_entry_size,
+        .name_table_ptr = r.name_table_ptr,
+        .pattern = try allocator.dupe(u8, r.pattern),
+    } };
     const obj_addr = @ptrToInt(obj_ptr);
     return addrToValue(obj_addr);
 }
@@ -497,7 +501,7 @@ fn printObject(v: Value, writer: anytype) !void {
         .func => try writer.writeAll("fn()"),
         .list => |l| try printList(l, writer),
         .map => |m| try printMap(m, writer),
-        .match => |m| _ = try writer.print("\"{s}\" ~ `{s}`", .{ m.subject, m.pattern }),
+        .match => |m| _ = try writer.print("\"{s}\" ~ `{s}`", .{ m.subject, m.re.pattern }),
         .range => |r| _ = try writer.print("{} ..< {}", .{ r[0], r[1] }),
         .regex => |r| _ = try writer.print("`{s}`", .{r.pattern}),
         .string => |s| try writer.writeAll(s),

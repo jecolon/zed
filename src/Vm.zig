@@ -2391,7 +2391,7 @@ fn execEachRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) !vo
     try self.value_stack.append(value.addrToValue(obj_addr));
     self.ip.* += 1;
 }
-fn execEachMatch(self: *Vm, match_obj_ptr: *const value.Object, offset: u16) !void {
+fn execEachMatch(self: *Vm, match_obj_ptr: *value.Object, offset: u16) !void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
         "`each` arg must be a function.",
@@ -2408,26 +2408,28 @@ fn execEachMatch(self: *Vm, match_obj_ptr: *const value.Object, offset: u16) !vo
         return;
     }
 
-    var i: usize = 0;
-    while (i < match_obj_ptr.match.captures_len) : (i += 1) {
-        const capture_num: u32 = @intCast(u32, i);
-        const capture_str = match_obj_ptr.match.captureN(i).?;
-        var capture_name: ?[]const u8 = null;
-        if (match_obj_ptr.match.name_table_ptr) |name_table_ptr| {
-            var ptr_copy = name_table_ptr;
+    while (try match_obj_ptr.match.next()) {
+        var i: usize = 0;
+        while (i < match_obj_ptr.match.captures_len) : (i += 1) {
+            const capture_num: u32 = @intCast(u32, i);
+            const capture_str = match_obj_ptr.match.captureN(i).?;
+            var capture_name: ?[]const u8 = null;
+            if (match_obj_ptr.match.re.name_table_ptr) |name_table_ptr| {
+                var ptr_copy = name_table_ptr;
 
-            var names_i: usize = 0;
-            while (names_i < match_obj_ptr.match.name_count) : (names_i += 1) {
-                const n: u16 = (@as(u16, ptr_copy[0]) << 8) | @as(u16, ptr_copy[1]);
-                if (n == i) {
-                    capture_name = ptr_copy[2 .. match_obj_ptr.match.name_entry_size - 1];
-                    break;
+                var names_i: usize = 0;
+                while (names_i < match_obj_ptr.match.re.name_count) : (names_i += 1) {
+                    const n: u16 = (@as(u16, ptr_copy[0]) << 8) | @as(u16, ptr_copy[1]);
+                    if (n == i) {
+                        capture_name = ptr_copy[2 .. match_obj_ptr.match.re.name_entry_size - 1];
+                        break;
+                    }
+                    ptr_copy += match_obj_ptr.match.re.name_entry_size;
                 }
-                ptr_copy += match_obj_ptr.match.name_entry_size;
             }
-        }
 
-        _ = try self.execCapturePredicate(func_obj_ptr, capture_str, capture_num, capture_name);
+            _ = try self.execCapturePredicate(func_obj_ptr, capture_str, capture_num, capture_name);
+        }
     }
 
     try self.value_stack.append(value.addrToValue(obj_addr));
