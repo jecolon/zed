@@ -105,7 +105,13 @@ pub fn init(allocator: std.mem.Allocator) ScopeStack {
 
 pub fn deinit(self: *ScopeStack) void {
     var iter = self.value_cache.valueIterator();
-    while (iter.next()) |val_ptr| if (value.asRange(val_ptr.*)) |obj_ptr| obj_ptr.regex.deinit();
+    while (iter.next()) |val_ptr| {
+        if (value.asRange(val_ptr.*)) |obj_ptr| {
+            obj_ptr.regex.deinit();
+        } else if (value.asMatch(val_ptr.*)) |obj_ptr| {
+            obj_ptr.match.deinit();
+        }
+    }
 }
 
 pub fn push(self: *ScopeStack, scope: Scope) !void {

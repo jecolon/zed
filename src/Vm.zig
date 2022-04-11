@@ -2147,7 +2147,7 @@ fn execMapMethod(self: *Vm) anyerror!void {
     } else return self.ctx.err(
         "`map` only works on lists and ranges.",
         .{},
-        error.InvalidEach,
+        error.InvalidMap,
         offset,
     );
 }
@@ -2227,7 +2227,7 @@ fn execFilter(self: *Vm) anyerror!void {
     } else return self.ctx.err(
         "`filter` only works on lists and ranges.",
         .{},
-        error.InvalidEach,
+        error.InvalidFilter,
         offset,
     );
 }
@@ -2309,8 +2309,10 @@ fn execEach(self: *Vm) anyerror!void {
         return self.execEachMap(map_obj_ptr, offset);
     } else if (value.asRange(container)) |range_obj_ptr| {
         return self.execEachRange(range_obj_ptr, offset);
+    } else if (value.asMatch(container)) |match_obj_ptr| {
+        return self.execEachMatch(match_obj_ptr, offset);
     } else return self.ctx.err(
-        "`each` only works on lists, maps, and ranges.",
+        "`each` only works on lists, maps, ranges, and regex matches.",
         .{},
         error.InvalidEach,
         offset,
@@ -2385,6 +2387,48 @@ fn execEachRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) !vo
         n += 1;
         i += 1;
     }) _ = try self.execRangePredicate(func_obj_ptr, n, i);
+
+    try self.value_stack.append(value.addrToValue(obj_addr));
+    self.ip.* += 1;
+}
+fn execEachMatch(self: *Vm, match_obj_ptr: *const value.Object, offset: u16) !void {
+    const f = self.value_stack.pop();
+    const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
+        "`each` arg must be a function.",
+        .{},
+        error.InvalidEach,
+        offset,
+    );
+
+    // No-ops
+    const obj_addr = @ptrToInt(match_obj_ptr);
+    if (func_obj_ptr.func.bytecode == null) {
+        try self.value_stack.append(value.addrToValue(obj_addr));
+        self.ip.* += 1;
+        return;
+    }
+
+    var i: usize = 0;
+    while (i < match_obj_ptr.match.captures_len) : (i += 1) {
+        const capture_num: u32 = @intCast(u32, i);
+        const capture_str = match_obj_ptr.match.captureN(i).?;
+        var capture_name: ?[]const u8 = null;
+        if (match_obj_ptr.match.name_table_ptr) |name_table_ptr| {
+            var ptr_copy = name_table_ptr;
+
+            var names_i: usize = 0;
+            while (names_i < match_obj_ptr.match.name_count) : (names_i += 1) {
+                const n: u16 = (@as(u16, ptr_copy[0]) << 8) | @as(u16, ptr_copy[1]);
+                if (n == i) {
+                    capture_name = ptr_copy[2 .. match_obj_ptr.match.name_entry_size - 1];
+                    break;
+                }
+                ptr_copy += match_obj_ptr.match.name_entry_size;
+            }
+        }
+
+        _ = try self.execCapturePredicate(func_obj_ptr, capture_str, capture_num, capture_name);
+    }
 
     try self.value_stack.append(value.addrToValue(obj_addr));
     self.ip.* += 1;
@@ -2628,6 +2672,41 @@ fn execRangePredicate(self: *Vm, func_obj_ptr: *value.Object, n: u32, i: u32) an
     if (func_obj_ptr.func.params) |params| {
         if (params.len > 0) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[0]..], 0), n_val);
         if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), i_val);
+    }
+
+    try self.pushScope(func_scope);
+    const result = self.execPredicate(func_obj_ptr.func.bytecode.?);
+    _ = self.popScope();
+
+    return result;
+}
+
+fn execCapturePredicate(self: *Vm, func_obj_ptr: *value.Object, capture_str: []const u8, capture_num: u32, capture_name: ?[]const u8) anyerror!Value {
+    // Assign args as locals in function scope.
+    var func_scope = Scope.init(self.allocator, .function); //TODO: Can we use other allocator here?
+    defer func_scope.map.deinit();
+
+    const capture_num_val = value.uintToValue(capture_num);
+    var capture_str_val: value.Value = undefined;
+    if (capture_str.len < 7) {
+        capture_str_val = value.strToValue(capture_str);
+    } else {
+        const obj_ptr = try self.allocator.create(value.Object);
+        obj_ptr.* = .{ .string = capture_str };
+        const obj_addr = @ptrToInt(obj_ptr);
+        capture_str_val = value.addrToValue(obj_addr);
+    }
+
+    try func_scope.map.put("it", capture_str_val);
+    try func_scope.map.put("@0", capture_str_val);
+    try func_scope.map.put("index", capture_num_val);
+    if (capture_name) |name| {
+        try func_scope.map.put(name, capture_str_val);
+    }
+
+    if (func_obj_ptr.func.params) |params| {
+        if (params.len > 0) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[0]..], 0), capture_str_val);
+        if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), capture_num_val);
     }
 
     try self.pushScope(func_scope);
