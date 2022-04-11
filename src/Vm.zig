@@ -349,6 +349,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
         .pd_rand => self.execRand(),
         .pd_reduce => self.execReduce(),
         .pd_replace => self.execReplace(),
+        .pd_reset => self.execReset(),
         .pd_reverse => self.execListReverse(),
         .pd_sin => self.execOneArgMath(builtin),
         .pd_sortAsc => self.execListSort(true),
@@ -3132,6 +3133,25 @@ fn execCapture(self: *Vm) anyerror!void {
         offset,
     );
 
+    self.ip.* += 1;
+}
+
+fn execReset(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const m = self.value_stack.pop();
+    const match_obj_ptr = value.asMatch(m) orelse return self.ctx.err(
+        "`reset` only works on regex matches.",
+        .{},
+        error.InvalidReset,
+        offset,
+    );
+
+    match_obj_ptr.match.reset();
+
+    try self.value_stack.append(m);
     self.ip.* += 1;
 }
 

@@ -170,7 +170,6 @@ pub const Match = struct {
     captures_len: c_int = 0,
     data: *pcre2.pcre2_match_data_8,
     re: Regex,
-    match_index: usize = 0,
     ovector: ?[*c]usize = null,
     subject: []const u8,
 
@@ -287,5 +286,20 @@ pub const Match = struct {
         if (self.ovector.?[0] > self.ovector.?[1]) return error.RegexStartAfterFinish;
 
         return true;
+    }
+
+    pub fn reset(self: *Match) void {
+        //  Run the matching operation from the start.
+        self.captures_len = pcre2.pcre2_match_8(
+            self.re.code, //  the compiled pattern
+            self.subject.ptr, //  the subject string
+            self.subject.len, //  the length of the subject
+            0, //  starting offset in the subject
+            0, //  default options
+            self.data, //  block for storing the result
+            null, //  use default match context
+        );
+
+        self.ovector = null;
     }
 };
