@@ -303,7 +303,17 @@ fn execFunc(self: *Vm) !void {
 }
 
 fn execBuiltin(self: *Vm) anyerror!void {
-    self.ip.* += 1;
+    self.ip.* += 2;
+    const offset = self.getOffset();
+    self.ip.* -= 1;
+
+    if (value.val_nil == self.value_stack.items[self.value_stack.items.len - 1]) return self.ctx.err(
+        "Calling a method on nil.",
+        .{},
+        error.NilMethodCall,
+        offset,
+    );
+
     const builtin = @intToEnum(Token.Tag, self.bytecode[self.ip.*]);
 
     return switch (builtin) {

@@ -39,7 +39,7 @@ syn keyword zedFunction	sortAsc sortDec
 " Map Manipulation Methods
 syn keyword zedFunction	keys values keysByValueAsc keysByValueDesc
 " Other builtins
-syn keyword zedFunction	col
+syn keyword zedFunction	col capture
 highlight link zedFunction Function
 
 syn keyword zedConditional	if else
