@@ -1230,9 +1230,8 @@ fn execRecRange(self: *Vm) anyerror!void {
             // We have from
             start_range = isTruthy(from);
         } else {
-            // No from; start only at row == 1.
-            const rnum = value.asUint(self.scope_stack.rnum).?;
-            start_range = rnum == 1;
+            // No from; start only at first row.
+            start_range = self.scope_stack.rnum == 0;
         }
 
         if (start_range) {
@@ -3002,19 +3001,8 @@ fn execRegex(self: *Vm) !void {
     self.ip.* += 2;
 
     // Bytes to skip if cached function.
-    const skip_bytes = self.getU16(self.ip.*);
+    //const skip_bytes = self.getU16(self.ip.*);
     self.ip.* += 2;
-
-    // Regex pattern hash
-    const regex_hash_ptr = @ptrCast(*align(1) const u64, self.bytecode[self.ip.* .. self.ip.* + 8]);
-    self.ip.* += 8;
-
-    // Check for cached regex.
-    if (self.scope_stack.value_cache.get(regex_hash_ptr.*)) |v| {
-        try self.value_stack.append(v);
-        self.ip.* += skip_bytes;
-        return;
-    }
 
     // Regex pattern
     const pattern = std.mem.sliceTo(self.bytecode[self.ip.*..], 0);
@@ -3032,11 +3020,7 @@ fn execRegex(self: *Vm) !void {
     obj_ptr.* = .{ .regex = re };
     const obj_addr = @ptrToInt(obj_ptr);
 
-    const obj_val = value.addrToValue(obj_addr);
-    // Cache for further re-use.
-    try self.scope_stack.value_cache.put(regex_hash_ptr.*, obj_val);
-
-    try self.value_stack.append(obj_val);
+    try self.value_stack.append(value.addrToValue(obj_addr));
 }
 fn execMatch(self: *Vm) anyerror!void {
     self.ip.* += 1;
@@ -3060,17 +3044,6 @@ fn execMatch(self: *Vm) anyerror!void {
     );
     const subject = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
 
-    var wh = std.hash.Wyhash.init(Context.seed);
-    wh.update(re.regex.pattern);
-    wh.update(subject);
-    const match_hash = wh.final();
-
-    // Check for cached match.
-    if (self.scope_stack.value_cache.get(match_hash)) |v| {
-        try self.value_stack.append(v);
-        return;
-    }
-
     const sub_copy = try self.allocator.dupe(u8, subject);
     const m_opt = try re.regex.match(sub_copy);
 
@@ -3079,15 +3052,10 @@ fn execMatch(self: *Vm) anyerror!void {
         obj_ptr.* = .{ .match = m };
         const obj_addr = @ptrToInt(obj_ptr);
 
-        const obj_val = value.addrToValue(obj_addr);
-        // Cache for further re-use.
-        try self.scope_stack.value_cache.put(match_hash, obj_val);
-
-        try self.value_stack.append(obj_val);
+        try self.value_stack.append(value.addrToValue(obj_addr));
     } else {
-        // No match for this regex and subject pair.
-        try self.scope_stack.value_cache.put(match_hash, value.val_nil);
-        try self.value_stack.append(value.val_nil);
+        // This can't be nil due to how record ranges work.
+        try self.value_stack.append(value.val_false);
     }
 }
 fn execCapture(self: *Vm) anyerror!void {
@@ -3197,11 +3165,13 @@ fn isTruthy(v: Value) bool {
     if (value.asUint(v)) |u| return u != 0;
     if (value.asList(v)) |l| return l.list.items.len != 0;
     if (value.asMap(v)) |m| return m.map.count() != 0;
+    if (value.asMatch(v)) |_| return true;
     if (value.asRange(v)) |r| return r.range[1] - r.range[0] != 0;
+    if (value.asRegex(v)) |r| return r.regex.pattern.len != 0;
     if (value.asString(v)) |s| return s.string.len != 0;
     if (value.unboxStr(v)) |u| return u != 0;
 
-    return v != value.val_nil;
+    return false;
 }
 
 fn getNumber(self: Vm, comptime T: type, start: usize, n: usize) T {

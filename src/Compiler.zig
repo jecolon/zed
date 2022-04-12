@@ -612,9 +612,6 @@ fn compileRedir(self: *Compiler, node: Node) anyerror!void {
 fn compileRegex(self: *Compiler, node: Node) anyerror!void {
     try self.pushInstruction(.regex);
     try self.pushOffset(node.offset);
-    const regex_hash = std.hash.Wyhash.hash(Context.seed, node.ty.regex);
-    try self.pushSlice(std.mem.asBytes(&regex_hash));
-    try self.pushLen(node.ty.regex.len + 1);
     try self.pushSlice(node.ty.regex);
     try self.pushByte(0);
 }

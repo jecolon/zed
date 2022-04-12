@@ -17,7 +17,7 @@ pub fn build(b: *std.build.Builder) void {
     exe.setBuildMode(mode);
     exe.setTarget(target);
     deps.addAllTo(exe);
-    exe.strip = true;
+    //exe.strip = true;
     exe.single_threaded = true;
     exe.linkLibC();
     exe.addLibPath("/opt/homebrew/Cellar/pcre2/10.39/lib");
