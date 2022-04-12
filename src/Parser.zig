@@ -386,7 +386,7 @@ fn parseBuiltin(self: *Parser) anyerror!Node {
     return Node.new(.{ .builtin = self.currentTag() }, self.currentOffset());
 }
 
-fn isBuiltinMethod(tag: Token.Tag) bool {
+pub fn isBuiltinMethod(tag: Token.Tag) bool {
     return switch (tag) {
         .pd_capture,
         .pd_chars,

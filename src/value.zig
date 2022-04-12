@@ -92,6 +92,16 @@ pub fn unboxStr(v: Value) ?u64 {
 pub fn isStr(v: Value) bool {
     return v & (mask_str | mask_qnan) == (mask_str | mask_qnan);
 }
+pub fn isAnyStr(v: Value) bool {
+    if (unboxStr(v)) |_| {
+        return true;
+    } else if (asAddr(v)) |addr| {
+        const obj_ptr = @intToPtr(*const Object, addr);
+        return obj_ptr.* == .string;
+    } else {
+        return false;
+    }
+}
 
 // Object convenience functions.
 pub fn asFunc(v: Value) ?*Object {
@@ -144,15 +154,18 @@ pub fn asString(v: Value) ?*const Object {
     return null;
 }
 
-pub fn isAnyStr(v: Value) bool {
-    if (unboxStr(v)) |_| {
-        return true;
-    } else if (asAddr(v)) |addr| {
-        const obj_ptr = @intToPtr(*const Object, addr);
-        return obj_ptr.* == .string;
-    } else {
-        return false;
+pub fn typeOf(v: Value) []const u8 {
+    if (asAddr(v)) |obj_addr| {
+        const obj_ptr = @intToPtr(*const Object, obj_addr);
+        return @tagName(obj_ptr.*);
     }
+    if (isBool(v)) return "bool";
+    if (isInt(v)) return "int";
+    if (isFloat(v)) return "float";
+    if (isAnyStr(v)) return "string";
+    if (isUint(v)) return "uint";
+
+    return "nil";
 }
 
 fn eqlInner(a: Value, b: Value) bool {

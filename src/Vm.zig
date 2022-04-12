@@ -4,6 +4,7 @@ const Compiler = @import("Compiler.zig");
 const Context = @import("Context.zig");
 const GraphemeIterator = @import("ziglyph").GraphemeIterator;
 const Node = @import("Node.zig");
+const isBuiltinMethod = @import("Parser.zig").isBuiltinMethod;
 const regex = @import("regex.zig");
 const Scope = @import("Scope.zig");
 const ScopeStack = @import("ScopeStack.zig");
@@ -307,14 +308,14 @@ fn execBuiltin(self: *Vm) anyerror!void {
     const offset = self.getOffset();
     self.ip.* -= 1;
 
-    if (value.val_nil == self.value_stack.items[self.value_stack.items.len - 1]) return self.ctx.err(
+    const builtin = @intToEnum(Token.Tag, self.bytecode[self.ip.*]);
+
+    if (isBuiltinMethod(builtin) and value.val_nil == self.value_stack.items[self.value_stack.items.len - 1]) return self.ctx.err(
         "Calling a method on nil.",
         .{},
         error.NilMethodCall,
         offset,
     );
-
-    const builtin = @intToEnum(Token.Tag, self.bytecode[self.ip.*]);
 
     return switch (builtin) {
         .pd_atan2 => self.execAtan2(),
@@ -376,8 +377,8 @@ fn execCall(self: *Vm) anyerror!void {
     // Get the function.
     const callee = self.value_stack.pop();
     const func_obj_ptr = (value.asFunc(callee)) orelse return self.ctx.err(
-        "{} is not callable.",
-        .{callee},
+        "{s} is not callable.",
+        .{value.typeOf(callee)},
         error.InvalidCall,
         offset,
     );
@@ -621,8 +622,8 @@ fn execGlobalStore(self: *Vm) !void {
     switch (global) {
         .at_ics => {
             if (!value.isAnyStr(rvalue)) return self.ctx.err(
-                "@ics must be a string.",
-                .{},
+                "@ics must be a string, got: {s}",
+                .{value.typeOf(rvalue)},
                 error.InvalidIcs,
                 offset,
             );
@@ -630,8 +631,8 @@ fn execGlobalStore(self: *Vm) !void {
         },
         .at_irs => {
             if (!value.isAnyStr(rvalue)) return self.ctx.err(
-                "@irs must be a string.",
-                .{},
+                "@irs must be a string, got: {s}",
+                .{value.typeOf(rvalue)},
                 error.InvalidIrs,
                 offset,
             );
@@ -639,8 +640,8 @@ fn execGlobalStore(self: *Vm) !void {
         },
         .at_ocs => {
             if (!value.isAnyStr(rvalue)) return self.ctx.err(
-                "@ocs must be a string.",
-                .{},
+                "@ocs must be a string, got: {s}",
+                .{value.typeOf(rvalue)},
                 error.InvalidOcs,
                 offset,
             );
@@ -648,8 +649,8 @@ fn execGlobalStore(self: *Vm) !void {
         },
         .at_ors => {
             if (!value.isAnyStr(rvalue)) return self.ctx.err(
-                "@ors must be a string.",
-                .{},
+                "@ors must be a string. got: {s}",
+                .{value.typeOf(rvalue)},
                 error.InvalidOrs,
                 offset,
             );
@@ -657,8 +658,8 @@ fn execGlobalStore(self: *Vm) !void {
         },
         .at_rec => {
             if (!value.isAnyStr(rvalue)) return self.ctx.err(
-                "@rec must be a string.",
-                .{},
+                "@rec must be a string, got {s}",
+                .{value.typeOf(rvalue)},
                 error.InvalidRec,
                 offset,
             );
@@ -666,8 +667,8 @@ fn execGlobalStore(self: *Vm) !void {
         },
         .at_cols => {
             if (value.asList(rvalue) == null) return self.ctx.err(
-                "@cols must be a list.",
-                .{},
+                "@cols must be a list, got: {s}",
+                .{value.typeOf(rvalue)},
                 error.InvalidCols,
                 offset,
             );
@@ -677,16 +678,16 @@ fn execGlobalStore(self: *Vm) !void {
             if (value.asUint(rvalue)) |u| {
                 self.scope_stack.header_row = u;
             } else return self.ctx.err(
-                "@head must be an unsigned integer.",
-                .{},
+                "@head must be an unsigned integer, got: {s}",
+                .{value.typeOf(rvalue)},
                 error.InvalidHead,
                 offset,
             );
         },
         .at_headers => {
             const hlist = value.asList(rvalue) orelse return self.ctx.err(
-                "@headers must be a list.",
-                .{},
+                "@headers must be a list, got: {s}",
+                .{value.typeOf(rvalue)},
                 error.InvalidHeaders,
                 offset,
             );
@@ -866,8 +867,8 @@ fn execRepeat(self: *Vm) anyerror!void {
     const str_left = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
 
     const n = value.asUint(right) orelse return self.ctx.err(
-        "`repeat` arg must be an unsigned integer.",
-        .{},
+        "`repeat` arg must be an unsigned integer, got: {s}",
+        .{value.typeOf(right)},
         error.InvalidRepeat,
         offset,
     );
@@ -892,8 +893,8 @@ fn execNot(self: *Vm) !void {
     const offset = self.getOffset();
     self.ip.* += 2;
     if (!value.isBool(v)) return self.ctx.err(
-        "Logical not on non-boolean.",
-        .{},
+        "Logical not only works on booleans, got: {s}",
+        .{value.typeOf(v)},
         error.InvalidNot,
         offset,
     );
@@ -910,8 +911,8 @@ fn execNeg(self: *Vm) !void {
     if (value.asUint(v)) |u| return self.value_stack.append(value.floatToValue(-@intToFloat(f64, u)));
 
     return self.ctx.err(
-        "Negation of non-number.",
-        .{},
+        "Negation of non-number, got: {s}",
+        .{value.typeOf(v)},
         error.InvalidNeg,
         offset,
     );
@@ -964,8 +965,8 @@ fn execMap(self: *Vm) !void {
         const key = self.value_stack.pop();
 
         if (!value.isAnyStr(key)) return self.ctx.err(
-            "Map keys must be strings.",
-            .{},
+            "Map keys must be strings, got: {s}",
+            .{value.typeOf(key)},
             error.InvalidMapKey,
             offset,
         );
@@ -988,8 +989,8 @@ fn execSubscript(self: *Vm) !void {
     const container = self.value_stack.pop();
 
     if (value.asList(container) == null and value.asMap(container) == null) return self.ctx.err(
-        "Subscript on non-container.",
-        .{},
+        "Subscript on non-container, got: {s}",
+        .{value.typeOf(container)},
         error.InvalidSubscript,
         offset,
     );
@@ -1002,8 +1003,8 @@ fn execSubscript(self: *Vm) !void {
 fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
     const index = self.value_stack.pop();
     if (!value.isUint(index) and value.asRange(index) == null) return self.ctx.err(
-        "Invalid subscript index.",
-        .{},
+        "Invalid subscript index, got: {s}",
+        .{value.typeOf(index)},
         error.InvalidSubscript,
         offset,
     );
@@ -1042,8 +1043,8 @@ fn execSubscriptList(self: *Vm, list: Value, offset: u16) !void {
 fn execSubscriptMap(self: *Vm, map: Value, offset: u16) !void {
     const key = self.value_stack.pop();
     if (!value.isAnyStr(key)) return self.ctx.err(
-        "Map keys must be strings.",
-        .{},
+        "Map keys must be strings, got: {s}",
+        .{value.typeOf(key)},
         error.InvalidSubscript,
         offset,
     );
@@ -1063,8 +1064,8 @@ fn execSet(self: *Vm) !void {
     self.ip.* += 1;
 
     if (value.asList(container) == null and value.asMap(container) == null) return self.ctx.err(
-        "Subscript assign on non-container.",
-        .{},
+        "Subscript assign on non-container, got: {s}",
+        .{value.typeOf(container)},
         error.InvalidSubscript,
         offset,
     );
@@ -1077,8 +1078,8 @@ fn execSet(self: *Vm) !void {
 fn execSetList(self: *Vm, list: Value, offset: u16, combo: Node.Combo) !void {
     const index = self.value_stack.pop();
     const index_u = value.asUint(index) orelse return self.ctx.err(
-        "List subscript must be unsigned integer.",
-        .{},
+        "List subscript must be unsigned integer, got: {s}",
+        .{value.typeOf(index)},
         error.InvalidSubscript,
         offset,
     );
@@ -1116,8 +1117,8 @@ fn execSetList(self: *Vm, list: Value, offset: u16, combo: Node.Combo) !void {
 fn execSetMap(self: *Vm, map: Value, offset: u16, combo: Node.Combo) !void {
     const key = self.value_stack.pop();
     if (!value.isAnyStr(key)) return self.ctx.err(
-        "Map keys must be strings.",
-        .{},
+        "Map keys must be strings, got: {s}",
+        .{value.typeOf(key)},
         error.InvalidSubscript,
         offset,
     );
@@ -1324,16 +1325,16 @@ fn execAtan2(self: *Vm) anyerror!void {
 
     const y_val = self.value_stack.pop();
     const y = value.toFloat(y_val) orelse return self.ctx.err(
-        "atan2 y not convertible to float.",
-        .{},
+        "atan2 y not convertible to float, got: {s}",
+        .{value.typeOf(y_val)},
         error.InvalidAtan2,
         offset,
     );
 
     const x_val = self.value_stack.pop();
     const x = value.toFloat(x_val) orelse return self.ctx.err(
-        "atan2 x not convertible to float.",
-        .{},
+        "atan2 x not convertible to float, got {s}",
+        .{value.typeOf(x_val)},
         error.InvalidAtan2,
         offset,
     );
@@ -1348,8 +1349,8 @@ fn execChars(self: *Vm) anyerror!void {
 
     const str = self.value_stack.pop();
     if (!value.isAnyStr(str)) return self.ctx.err(
-        "`chars` method on non-string.",
-        .{},
+        "`chars` method only works on strings, got: {s}",
+        .{value.typeOf(str)},
         error.InvalidCharsCall,
         offset,
     );
@@ -1437,8 +1438,8 @@ fn execOneArgMath(self: *Vm, builtin: Token.Tag) anyerror!void {
 
     const x_val = self.value_stack.pop();
     const x = value.toFloat(x_val) orelse return self.ctx.err(
-        "Arg not convertible to float.",
-        .{},
+        "Arg not convertible to float, got: {s}",
+        .{value.typeOf(x_val)},
         error.InvalidArg,
         offset,
     );
@@ -1463,8 +1464,8 @@ fn execContains(self: *Vm) anyerror!void {
 
     const haystack = self.value_stack.pop();
     if (!value.isAnyStr(haystack) and value.asList(haystack) == null) return self.ctx.err(
-        "`contains` only works on strings and lists.",
-        .{},
+        "`contains` only works on strings and lists, got: {s}.",
+        .{value.typeOf(haystack)},
         error.InvalidContains,
         offset,
     );
@@ -1478,8 +1479,8 @@ fn execContains(self: *Vm) anyerror!void {
         }
     } else {
         if (!value.isAnyStr(needle)) return self.ctx.err(
-            "`contains` arg on string must be a string.",
-            .{},
+            "`contains` arg on string must be a string, got {s}",
+            .{value.typeOf(needle)},
             error.InvalidContains,
             offset,
         );
@@ -1498,8 +1499,8 @@ fn execIndexOf(self: *Vm) anyerror!void {
 
     const haystack = self.value_stack.pop();
     if (!value.isAnyStr(haystack) and value.asList(haystack) == null) return self.ctx.err(
-        "`indexOf` only works on strings and lists.",
-        .{},
+        "`indexOf` only works on strings and lists, got: {s}.",
+        .{value.typeOf(haystack)},
         error.InvalidIndexOf,
         offset,
     );
@@ -1516,8 +1517,8 @@ fn execIndexOf(self: *Vm) anyerror!void {
         }
     } else {
         if (!value.isAnyStr(needle)) return self.ctx.err(
-            "`indexOf` arg on string must be a string.",
-            .{},
+            "`indexOf` arg on string must be a string, got: {s}",
+            .{value.typeOf(needle)},
             error.InvalidContains,
             offset,
         );
@@ -1544,8 +1545,8 @@ fn execLastIndexOf(self: *Vm) anyerror!void {
 
     const haystack = self.value_stack.pop();
     if (!value.isAnyStr(haystack) and value.asList(haystack) == null) return self.ctx.err(
-        "`lastIndexOf` only works on strings and lists.",
-        .{},
+        "`lastIndexOf` only works on strings and lists, got {s}",
+        .{value.typeOf(haystack)},
         error.InvalidLastIndexOf,
         offset,
     );
@@ -1564,8 +1565,8 @@ fn execLastIndexOf(self: *Vm) anyerror!void {
         }
     } else {
         if (!value.isAnyStr(needle)) return self.ctx.err(
-            "`lastIndexOf` arg on string must be a string.",
-            .{},
+            "`lastIndexOf` arg on string must be a string, got: {s}",
+            .{value.typeOf(needle)},
             error.InvalidLastIndexOf,
             offset,
         );
@@ -1589,8 +1590,8 @@ fn execLen(self: *Vm) anyerror!void {
 
     const v = self.value_stack.pop();
     if (value.asList(v) == null and value.asMap(v) == null and !value.isAnyStr(v)) return self.ctx.err(
-        "`len` only works on strings, lists, and maps.",
-        .{},
+        "`len` only works on strings, lists, and maps, got {s}",
+        .{value.typeOf(v)},
         error.InvalidLen,
         offset,
     );
@@ -1615,8 +1616,8 @@ fn execMapKeys(self: *Vm) anyerror!void {
 
     const m = self.value_stack.pop();
     const map_obj_ptr = value.asMap(m) orelse return self.ctx.err(
-        "`keys` only works on maps.",
-        .{},
+        "`keys` only works on maps, got {s}",
+        .{value.typeOf(m)},
         error.InvalidKeys,
         offset,
     );
@@ -1668,8 +1669,8 @@ fn execMapKeysByValue(self: *Vm, asc: bool) anyerror!void {
 
     const m = self.value_stack.pop();
     const map_obj_ptr = value.asMap(m) orelse return self.ctx.err(
-        "`keysByValueAsc` only works on maps.",
-        .{},
+        "`keysByValueAsc` only works on maps, got: {s}",
+        .{value.typeOf(m)},
         error.InvalidKeysByValueAsc,
         offset,
     );
@@ -1724,8 +1725,8 @@ fn execMapValues(self: *Vm) anyerror!void {
 
     const m = self.value_stack.pop();
     const map_obj_ptr = value.asMap(m) orelse return self.ctx.err(
-        "`values` only works on maps.",
-        .{},
+        "`values` only works on maps, got {s}",
+        .{value.typeOf(m)},
         error.InvalidValues,
         offset,
     );
@@ -1772,8 +1773,8 @@ fn execListMean(self: *Vm) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`mean` only works on lists.",
-        .{},
+        "`mean` only works on lists, got: {s}",
+        .{value.typeOf(l)},
         error.InvalidMean,
         offset,
     );
@@ -1794,8 +1795,8 @@ fn execListMedian(self: *Vm) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`median` only works on lists.",
-        .{},
+        "`median` only works on lists, got: {s}",
+        .{value.typeOf(l)},
         error.InvalidMedian,
         offset,
     );
@@ -1829,8 +1830,8 @@ fn execListMode(self: *Vm) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`mode` only workds on lists.",
-        .{},
+        "`mode` only works on lists, got: {s}",
+        .{value.typeOf(l)},
         error.InvalidMode,
         offset,
     );
@@ -1882,8 +1883,8 @@ fn execListStdev(self: *Vm) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`stdev` only works on lists.",
-        .{},
+        "`stdev` only works on lists, got: {s}",
+        .{value.typeOf(l)},
         error.InvalidStdev,
         offset,
     );
@@ -1919,8 +1920,8 @@ fn execListMin(self: *Vm) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "min only works on lists.",
-        .{},
+        "min only works on lists, got: {s}",
+        .{value.typeOf(l)},
         error.InvalidMin,
         offset,
     );
@@ -1947,8 +1948,8 @@ fn execListMax(self: *Vm) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`max` only works on lists.",
-        .{},
+        "`max` only works on lists, got: {s}",
+        .{value.typeOf(l)},
         error.InvalidMax,
         offset,
     );
@@ -1975,8 +1976,8 @@ fn execListSort(self: *Vm, asc: bool) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`listSortAsc` only works on lists.",
-        .{},
+        "`listSortAsc` only works on lists, got: {s}",
+        .{value.typeOf(l)},
         error.InvalidSortAsc,
         offset,
     );
@@ -2003,8 +2004,8 @@ fn execListReverse(self: *Vm) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`reverse` only works on lists.",
-        .{},
+        "`reverse` only works on lists, got: {s}",
+        .{value.typeOf(l)},
         error.InvalidReverse,
         offset,
     );
@@ -2026,16 +2027,16 @@ fn execStrSplit(self: *Vm) anyerror!void {
 
     const str = self.value_stack.pop();
     if (!value.isAnyStr(str)) return self.ctx.err(
-        "`split` only works on strings.",
-        .{},
+        "`split` only works on strings, got: {s}",
+        .{value.typeOf(str)},
         error.InvalidSplit,
         offset,
     );
 
     const delim = self.value_stack.pop();
     if (!value.isAnyStr(delim)) return self.ctx.err(
-        "`split` delimiter must be a string",
-        .{},
+        "`split` delimiter must be a string, got: {s}",
+        .{value.typeOf(delim)},
         error.InvalidSplit,
         offset,
     );
@@ -2069,16 +2070,16 @@ fn execListJoin(self: *Vm) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`join` only works on lists.",
-        .{},
+        "`join` only works on lists, got: {s}",
+        .{value.typeOf(l)},
         error.InvalidJoin,
         offset,
     );
 
     const delim = self.value_stack.pop();
     if (!value.isAnyStr(delim)) return self.ctx.err(
-        "`join` delimiter must be a string",
-        .{},
+        "`join` delimiter must be a string, got: {s}",
+        .{value.typeOf(delim)},
         error.InvalidJoin,
         offset,
     );
@@ -2109,16 +2110,16 @@ fn execStrEndStart(self: *Vm, start: bool) anyerror!void {
 
     const str = self.value_stack.pop();
     if (!value.isAnyStr(str)) return self.ctx.err(
-        "This method only works on strings.",
-        .{},
+        "This method only works on strings, got: {s}",
+        .{value.typeOf(str)},
         error.InvalidEndsWith,
         offset,
     );
 
     const needle = self.value_stack.pop();
     if (!value.isAnyStr(needle)) return self.ctx.err(
-        "Arg must be a string.",
-        .{},
+        "Arg must be a string, got: {s}",
+        .{value.typeOf(needle)},
         error.InvalidXWith,
         offset,
     );
@@ -2147,8 +2148,8 @@ fn execMapMethod(self: *Vm) anyerror!void {
     } else if (value.asRange(container)) |range_obj_ptr| {
         return self.execMapRange(range_obj_ptr, offset);
     } else return self.ctx.err(
-        "`map` only works on lists and ranges.",
-        .{},
+        "`map` only works on lists and ranges, got: {s}",
+        .{value.typeOf(container)},
         error.InvalidMap,
         offset,
     );
@@ -2156,8 +2157,8 @@ fn execMapMethod(self: *Vm) anyerror!void {
 fn execMapList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) anyerror!void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`map` requres function argument.",
-        .{},
+        "`map` requres function argument, got: {s}",
+        .{value.typeOf(f)},
         error.InvalidMap,
         offset,
     );
@@ -2185,8 +2186,8 @@ fn execMapList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) anyerror!voi
 fn execMapRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) anyerror!void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`map` requres function argument.",
-        .{},
+        "`map` requres function argument, got {s}",
+        .{value.typeOf(f)},
         error.InvalidMap,
         offset,
     );
@@ -2227,8 +2228,8 @@ fn execFilter(self: *Vm) anyerror!void {
     } else if (value.asRange(container)) |range_obj_ptr| {
         return self.execFilterRange(range_obj_ptr, offset);
     } else return self.ctx.err(
-        "`filter` only works on lists and ranges.",
-        .{},
+        "`filter` only works on lists and ranges, got: {s}",
+        .{value.typeOf(container)},
         error.InvalidFilter,
         offset,
     );
@@ -2236,8 +2237,8 @@ fn execFilter(self: *Vm) anyerror!void {
 fn execFilterList(self: *Vm, list_obj_ptr: *const value.Object, offset: u16) !void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`filter` arg must be a function.",
-        .{},
+        "`filter` arg must be a function, got: {s}",
+        .{value.typeOf(f)},
         error.InvalidFilter,
         offset,
     );
@@ -2265,8 +2266,8 @@ fn execFilterList(self: *Vm, list_obj_ptr: *const value.Object, offset: u16) !vo
 fn execFilterRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) !void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`filter` arg must be a function.",
-        .{},
+        "`filter` arg must be a function, got: {s}",
+        .{value.typeOf(f)},
         error.InvalidFilter,
         offset,
     );
@@ -2314,8 +2315,8 @@ fn execEach(self: *Vm) anyerror!void {
     } else if (value.asMatch(container)) |match_obj_ptr| {
         return self.execEachMatch(match_obj_ptr, offset);
     } else return self.ctx.err(
-        "`each` only works on lists, maps, ranges, and regex matches.",
-        .{},
+        "`each` only works on lists, maps, ranges, and regex matches, got {s}",
+        .{value.typeOf(container)},
         error.InvalidEach,
         offset,
     );
@@ -2323,8 +2324,8 @@ fn execEach(self: *Vm) anyerror!void {
 fn execEachList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) !void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`each` arg must be a function.",
-        .{},
+        "`each` arg must be a function, got: {s}",
+        .{value.typeOf(f)},
         error.InvalidEach,
         offset,
     );
@@ -2345,8 +2346,8 @@ fn execEachList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) !void {
 fn execEachMap(self: *Vm, map_obj_ptr: *value.Object, offset: u16) !void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`each` arg must be a function.",
-        .{},
+        "`each` arg must be a function, got: {s}",
+        .{value.typeOf(f)},
         error.InvalidEach,
         offset,
     );
@@ -2369,8 +2370,8 @@ fn execEachMap(self: *Vm, map_obj_ptr: *value.Object, offset: u16) !void {
 fn execEachRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) !void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`each` arg must be a function.",
-        .{},
+        "`each` arg must be a function, got: {s}",
+        .{value.typeOf(f)},
         error.InvalidEach,
         offset,
     );
@@ -2396,8 +2397,8 @@ fn execEachRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) !vo
 fn execEachMatch(self: *Vm, match_obj_ptr: *value.Object, offset: u16) !void {
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`each` arg must be a function.",
-        .{},
+        "`each` arg must be a function, got: {s}",
+        .{value.typeOf(f)},
         error.InvalidEach,
         offset,
     );
@@ -2451,8 +2452,8 @@ fn execReduce(self: *Vm) anyerror!void {
     } else if (value.asRange(container)) |range_obj_ptr| {
         return self.execReduceRange(range_obj_ptr, offset);
     } else return self.ctx.err(
-        "`reduce` only works on lists and ranges.",
-        .{},
+        "`reduce` only works on lists and ranges, got {s}",
+        .{value.typeOf(container)},
         error.InvalidEach,
         offset,
     );
@@ -2461,8 +2462,8 @@ fn execReduceList(self: *Vm, list_obj_ptr: *value.Object, offset: u16) anyerror!
     var acc = self.value_stack.pop();
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`reduce` last arg must be a function.",
-        .{},
+        "`reduce` last arg must be a function, got: {s}",
+        .{value.typeOf(f)},
         error.InvalidReduce,
         offset,
     );
@@ -2501,8 +2502,8 @@ fn execReduceRange(self: *Vm, range_obj_ptr: *const value.Object, offset: u16) a
     var acc = self.value_stack.pop();
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`reduce` last arg must be a function.",
-        .{},
+        "`reduce` last arg must be a function, got: {s}",
+        .{value.typeOf(f)},
         error.InvalidReduce,
         offset,
     );
@@ -2563,8 +2564,8 @@ fn execRand(self: *Vm) anyerror!void {
 
     const x_val = self.value_stack.pop();
     const x = value.asUint(x_val) orelse return self.ctx.err(
-        "rand argument must be unsigned integer.",
-        .{},
+        "rand argument must be unsigned integer, got: {s}",
+        .{value.typeOf(x_val)},
         error.InvalidRand,
         offset,
     );
@@ -2579,8 +2580,8 @@ fn execListPush(self: *Vm) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`push` only works on lists.",
-        .{},
+        "`push` only works on lists, got {s}",
+        .{value.typeOf(l)},
         error.InvalidPush,
         offset,
     );
@@ -2598,8 +2599,8 @@ fn execListPop(self: *Vm) anyerror!void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`pop` only works on lists.",
-        .{},
+        "`pop` only works on lists, got {s}",
+        .{value.typeOf(l)},
         error.InvalidPop,
         offset,
     );
@@ -2752,8 +2753,8 @@ fn execRedir(self: *Vm) !void {
     // Get filename
     const filename = self.value_stack.pop();
     if (!value.isAnyStr(filename)) return self.ctx.err(
-        "Redirection filename must be a string",
-        .{},
+        "Redirection filename must be a string, got: {s}",
+        .{value.typeOf(filename)},
         error.InvalidRedirect,
         offset,
     );
@@ -2786,8 +2787,8 @@ fn execStrCase(self: *Vm, lower: bool) !void {
 
     const s = self.value_stack.pop();
     if (!value.isAnyStr(s)) return self.ctx.err(
-        "Case conversion only works on strings.",
-        .{},
+        "Case conversion only works on strings, got: {s}",
+        .{value.typeOf(s)},
         error.InvalidToCase,
         offset,
     );
@@ -2826,8 +2827,8 @@ fn execUnique(self: *Vm) !void {
 
     const l = self.value_stack.pop();
     const list_obj_ptr = value.asList(l) orelse return self.ctx.err(
-        "`unique` only works on lists.",
-        .{},
+        "`unique` only works on lists, got: {s}",
+        .{value.typeOf(l)},
         error.InvalidUnique,
         offset,
     );
@@ -2874,8 +2875,8 @@ fn execReplace(self: *Vm) !void {
 
     const str = self.value_stack.pop();
     if (!value.isAnyStr(str)) return self.ctx.err(
-        "`replace` only works on strings.",
-        .{},
+        "`replace` only works on strings, got: {s}",
+        .{value.typeOf(str)},
         error.InvalidReplace,
         offset,
     );
@@ -2889,8 +2890,8 @@ fn execReplace(self: *Vm) !void {
 
     const needle = self.value_stack.pop();
     if (!value.isAnyStr(needle)) return self.ctx.err(
-        "`replace` needle must be a string.",
-        .{},
+        "`replace` needle must be a string, got: {s}",
+        .{value.typeOf(needle)},
         error.InvalidReplace,
         offset,
     );
@@ -2904,8 +2905,8 @@ fn execReplace(self: *Vm) !void {
 
     const rep = self.value_stack.pop();
     if (!value.isAnyStr(rep)) return self.ctx.err(
-        "`replace` replacement must be a string.",
-        .{},
+        "`replace` replacement must be a string, got: {s}",
+        .{value.typeOf(rep)},
         error.InvalidReplace,
         offset,
     );
@@ -2930,8 +2931,8 @@ fn execMemo(self: *Vm) anyerror!void {
 
     const f = self.value_stack.pop();
     const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
-        "`memo` only works on functions.",
-        .{},
+        "`memo` only works on functions, got: {s}",
+        .{value.typeOf(f)},
         error.InvalidMemo,
         offset,
     );
@@ -2953,8 +2954,8 @@ fn execCol(self: *Vm) anyerror!void {
     } else if (value.isAnyStr(idx)) {
         return self.execColStr(idx, offset);
     } else return self.ctx.err(
-        "`col` arg must be a sting or unsigned integer.",
-        .{},
+        "`col` arg must be a sting or unsigned integer, got: {s}",
+        .{value.typeOf(idx)},
         error.InvalidCol,
         offset,
     );
@@ -3044,16 +3045,16 @@ fn execMatch(self: *Vm) anyerror!void {
 
     const right = self.value_stack.pop();
     const re = (value.asRegex(right)) orelse return self.ctx.err(
-        "Match right hand side must be a regex.",
-        .{},
+        "Match right hand side must be a regex, got: {s}",
+        .{value.typeOf(right)},
         error.InvalidMatch,
         offset,
     );
 
     const left = self.value_stack.pop();
     if (!value.isAnyStr(left)) return self.ctx.err(
-        "Match left hand side must be a string.",
-        .{},
+        "Match left hand side must be a string, got: {s}",
+        .{value.typeOf(left)},
         error.InvalidMatch,
         offset,
     );
@@ -3096,8 +3097,8 @@ fn execCapture(self: *Vm) anyerror!void {
 
     const m = self.value_stack.pop();
     const match_obj_ptr = value.asMatch(m) orelse return self.ctx.err(
-        "`capture` only works on regex matches.",
-        .{},
+        "`capture` only works on regex matches, got: {s}",
+        .{value.typeOf(m)},
         error.InvalidCapture,
         offset,
     );
@@ -3131,8 +3132,8 @@ fn execCapture(self: *Vm) anyerror!void {
             try self.value_stack.append(value.val_nil);
         }
     } else return self.ctx.err(
-        "`capture` arg must be unsigend integer index or a string.",
-        .{},
+        "`capture` arg must be unsigend integer index or a string, got: {s}",
+        .{value.typeOf(arg)},
         error.InvalidCapture,
         offset,
     );
@@ -3147,8 +3148,8 @@ fn execNext(self: *Vm) anyerror!void {
 
     const m = self.value_stack.pop();
     const match_obj_ptr = value.asMatch(m) orelse return self.ctx.err(
-        "`next` only works on regex matches.",
-        .{},
+        "`next` only works on regex matches, got: {s}",
+        .{value.typeOf(m)},
         error.InvalidNext,
         offset,
     );
@@ -3165,8 +3166,8 @@ fn execReset(self: *Vm) anyerror!void {
 
     const m = self.value_stack.pop();
     const match_obj_ptr = value.asMatch(m) orelse return self.ctx.err(
-        "`reset` only works on regex matches.",
-        .{},
+        "`reset` only works on regex matches, got: {s}",
+        .{value.typeOf(m)},
         error.InvalidReset,
         offset,
     );
