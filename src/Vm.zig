@@ -343,6 +343,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
         .pd_memo => self.execMemo(),
         .pd_min => self.execListMin(),
         .pd_mode => self.execListMode(),
+        .pd_next => self.execNext(),
         .pd_print => self.execPrint(),
         .pd_pop => self.execListPop(),
         .pd_push => self.execListPush(),
@@ -2433,6 +2434,9 @@ fn execEachMatch(self: *Vm, match_obj_ptr: *value.Object, offset: u16) !void {
         }
     }
 
+    // Reset to the first match.
+    match_obj_ptr.match.reset();
+
     try self.value_stack.append(value.addrToValue(obj_addr));
     self.ip.* += 1;
 }
@@ -3136,6 +3140,24 @@ fn execCapture(self: *Vm) anyerror!void {
     self.ip.* += 1;
 }
 
+fn execNext(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const m = self.value_stack.pop();
+    const match_obj_ptr = value.asMatch(m) orelse return self.ctx.err(
+        "`next` only works on regex matches.",
+        .{},
+        error.InvalidNext,
+        offset,
+    );
+
+    const has_next = try match_obj_ptr.match.next();
+
+    try self.value_stack.append(value.boolToValue(has_next));
+    self.ip.* += 1;
+}
 fn execReset(self: *Vm) anyerror!void {
     self.ip.* += 1;
     const offset = self.getOffset();
