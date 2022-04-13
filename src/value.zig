@@ -186,16 +186,16 @@ fn isFloatStr(str: []const u8) bool {
         std.mem.containsAtLeast(u8, str, 1, "p");
 }
 
-fn strToNum(v: Value) Value {
+fn strToNum(v: Value, comptime default: comptime_int) Value {
     std.debug.assert(isAnyStr(v));
     var str = if (unboxStr(v)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else asString(v).?.string;
 
     if (isFloatStr(str)) {
-        return if (std.fmt.parseFloat(f64, str)) |f| floatToValue(f) else |_| 0;
+        return if (std.fmt.parseFloat(f64, str)) |f| floatToValue(f) else |_| default;
     } else if ('-' == str[0] or '+' == str[0]) {
-        return if (std.fmt.parseInt(i32, str, 0)) |i| intToValue(i) else |_| 0;
+        return if (std.fmt.parseInt(i32, str, 0)) |i| intToValue(i) else |_| default;
     } else {
-        return if (std.fmt.parseInt(u32, str, 0)) |u| uintToValue(u) else |_| 0;
+        return if (std.fmt.parseInt(u32, str, 0)) |u| uintToValue(u) else |_| default;
     }
 }
 
@@ -219,7 +219,7 @@ pub fn add(a: Value, b: Value) anyerror!Value {
     if (isFloat(a)) return addFloat(a, b);
     if (isInt(a)) return addInt(a, b);
     if (isUint(a)) return addUint(a, b);
-    if (isAnyStr(a)) return add(strToNum(a), b);
+    if (isAnyStr(a)) return add(strToNum(a, 0), b);
     return error.InvalidAdd;
 }
 
@@ -243,83 +243,83 @@ pub fn sub(a: Value, b: Value) anyerror!Value {
     if (isFloat(a)) return subFloat(a, b);
     if (isInt(a)) return subInt(a, b);
     if (isUint(a)) return subUint(a, b);
-    if (isAnyStr(a)) return sub(strToNum(a), b);
+    if (isAnyStr(a)) return sub(strToNum(a, 0), b);
     return error.InvalidSubtract;
 }
 
 // Multiplication
 fn mulFloat(a: Value, b: Value) Value {
     if (asFloat(b)) |fb| return floatToValue(asFloat(a).? * fb);
-    const fb: f64 = toFloat(b) orelse 0;
+    const fb: f64 = toFloat(b) orelse 1;
     return floatToValue(asFloat(a).? * fb);
 }
 fn mulInt(a: Value, b: Value) Value {
     if (asInt(b)) |ib| return intToValue(asInt(a).? * ib);
-    const fb: f64 = toFloat(b) orelse 0;
+    const fb: f64 = toFloat(b) orelse 1;
     return floatToValue(asFloat(a).? * fb);
 }
 fn mulUint(a: Value, b: Value) Value {
     if (asUint(b)) |ub| return uintToValue(asUint(a).? * ub);
-    const fb: f64 = toFloat(b) orelse 0;
+    const fb: f64 = toFloat(b) orelse 1;
     return floatToValue(asFloat(a).? * fb);
 }
 pub fn mul(a: Value, b: Value) anyerror!Value {
     if (isFloat(a)) return mulFloat(a, b);
     if (isInt(a)) return mulInt(a, b);
     if (isUint(a)) return mulUint(a, b);
-    if (isAnyStr(a)) return mul(strToNum(a), b);
+    if (isAnyStr(a)) return mul(strToNum(a, 1), b);
     return error.InvalidMultiply;
 }
 
 // Division
 fn divFloat(a: Value, b: Value) Value {
     if (asFloat(b)) |fb| return floatToValue(asFloat(a).? / fb);
-    const fb: f64 = toFloat(b) orelse 0;
+    const fb: f64 = toFloat(b) orelse 1;
     return floatToValue(asFloat(a).? / fb);
 }
 fn divInt(a: Value, b: Value) Value {
     if (asInt(b)) |ib| return intToValue(@divFloor(asInt(a).?, ib));
-    const fb: f64 = toFloat(b) orelse 0;
+    const fb: f64 = toFloat(b) orelse 1;
     return floatToValue(asFloat(a).? / fb);
 }
 fn divUint(a: Value, b: Value) Value {
     if (asUint(b)) |ub| return uintToValue(@divFloor(asUint(a).?, ub));
-    const fb: f64 = toFloat(b) orelse 0;
+    const fb: f64 = toFloat(b) orelse 1;
     return floatToValue(asFloat(a).? / fb);
 }
 pub fn div(a: Value, b: Value) anyerror!Value {
     if (isFloat(a)) return divFloat(a, b);
     if (isInt(a)) return divInt(a, b);
     if (isUint(a)) return divUint(a, b);
-    if (isAnyStr(a)) return div(strToNum(a), b);
+    if (isAnyStr(a)) return div(strToNum(a, 1), b);
     return error.InvalidDivide;
 }
 
 // Modulo
 fn modFloat(a: Value, b: Value) Value {
     if (asFloat(b)) |fb| return floatToValue(@rem(asFloat(a).?, fb));
-    const fb: f64 = toFloat(b) orelse 0;
+    const fb: f64 = toFloat(b) orelse 1;
     return floatToValue(@rem(asFloat(a).?, fb));
 }
 fn modInt(a: Value, b: Value) Value {
     if (asInt(b)) |ib| return intToValue(@rem(asInt(a).?, ib));
-    const fb: f64 = toFloat(b) orelse 0;
+    const fb: f64 = toFloat(b) orelse 1;
     return floatToValue(@rem(asFloat(a).?, fb));
 }
 fn modUint(a: Value, b: Value) Value {
     if (asUint(b)) |ub| return uintToValue(@rem(asUint(a).?, ub));
-    const fb: f64 = toFloat(b) orelse 0;
+    const fb: f64 = toFloat(b) orelse 1;
     return floatToValue(@rem(asFloat(a).?, fb));
 }
 pub fn mod(a: Value, b: Value) anyerror!Value {
     if (isFloat(a)) return modFloat(a, b);
     if (isInt(a)) return modInt(a, b);
     if (isUint(a)) return modUint(a, b);
-    if (isAnyStr(a)) return mod(strToNum(a), b);
+    if (isAnyStr(a)) return mod(strToNum(a, 1), b);
     return error.InvalidModulo;
 }
 
-// Multiplication
+// Comparison
 fn cmpFloat(a: Value, b: Value) std.math.Order {
     if (asFloat(b)) |fb| return std.math.order(asFloat(a).?, fb);
     const fb: f64 = toFloat(b) orelse 0;
@@ -342,7 +342,7 @@ fn cmpStr(a: Value, b: Value) anyerror!std.math.Order {
         return std.mem.order(u8, a_str, b_str);
     }
 
-    return cmp(strToNum(a), b);
+    return cmp(strToNum(a, 0), b);
 }
 pub fn cmp(a: Value, b: Value) anyerror!std.math.Order {
     if (isFloat(a)) return cmpFloat(a, b);
