@@ -44,7 +44,7 @@ pub const Regex = struct {
         };
 
         // JIT compile it.
-        const jit_options = pcre2.PCRE2_JIT_COMPLETE; // | pcre2.PCRE2_JIT_PARTIAL_HARD | pcre2.PCRE2_JIT_PARTIAL_SOFT;
+        const jit_options = pcre2.PCRE2_JIT_COMPLETE | pcre2.PCRE2_JIT_PARTIAL_HARD | pcre2.PCRE2_JIT_PARTIAL_SOFT;
         const jit_error = pcre2.pcre2_jit_compile_8(self.code, jit_options);
         if (jit_error != 0) std.log.debug("PCRE2 JIT compile failed: {}", .{jit_error}); // Fall-back to non-JIT mode.
 
