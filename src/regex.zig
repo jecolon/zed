@@ -28,6 +28,7 @@ pub const Regex = struct {
             &erroroffset, //  for error offset
             null, //  use default compile context
         );
+        //std.debug.print("\n--> {s} {} <--\n", .{ pattern, errornumber });
 
         //  Compilation failed: print the error message and exit.
         if (re_opt_ptr == null) {
@@ -101,6 +102,7 @@ pub const Regex = struct {
     }
 
     pub fn match(self: Regex, subject: []const u8) !?Match {
+        //std.debug.print("\n--> {s} {s} <--\n", .{ self.pattern, subject });
         // match_data: *pcre2.pcre2_match_data
         var data_opt_ptr = pcre2.pcre2_match_data_create_from_pattern_8(self.code, null);
         // Match data creation failed?

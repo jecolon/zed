@@ -464,9 +464,10 @@ fn copyRange(allocator: std.mem.Allocator, r: [2]u32) anyerror!Value {
 }
 fn copyMatch(allocator: std.mem.Allocator, m: regex.Match) anyerror!Value {
     const obj_ptr = try allocator.create(Object);
+    const re_copy_val = try copyRegex(allocator, m.re);
     obj_ptr.* = .{ .match = .{
         .captures_len = m.captures_len,
-        .re = m.re,
+        .re = asRegex(re_copy_val).?.regex,
         .data = m.data,
         .ovector = m.ovector,
         .subject = try allocator.dupe(u8, m.subject),

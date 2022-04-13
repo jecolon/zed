@@ -3000,16 +3000,20 @@ fn execRegex(self: *Vm) !void {
     const offset = self.getOffset();
     self.ip.* += 2;
 
-    // Bytes to skip if cached function.
-    //const skip_bytes = self.getU16(self.ip.*);
-    self.ip.* += 2;
-
     // Regex pattern
     const pattern = std.mem.sliceTo(self.bytecode[self.ip.*..], 0);
     self.ip.* += @intCast(u16, pattern.len) + 1;
 
+    // See if it's cached.
+    const hash = std.hash.Wyhash.hash(Context.seed, pattern);
+    if (self.scope_stack.value_cache.get(hash)) |v| {
+        try self.value_stack.append(v);
+        return;
+    }
+
     // Create object
-    const re = regex.Regex.compile(pattern) catch |err| return self.ctx.err(
+    const pattern_copy = try self.scope_stack.allocator.dupe(u8, pattern);
+    const re = regex.Regex.compile(pattern_copy) catch |err| return self.ctx.err(
         "Could not compile regex pattern: `{s}`.",
         .{pattern},
         err,
@@ -3019,8 +3023,10 @@ fn execRegex(self: *Vm) !void {
     const obj_ptr = try self.scope_stack.allocator.create(value.Object);
     obj_ptr.* = .{ .regex = re };
     const obj_addr = @ptrToInt(obj_ptr);
+    const obj_val = value.addrToValue(obj_addr);
 
-    try self.value_stack.append(value.addrToValue(obj_addr));
+    try self.scope_stack.value_cache.put(hash, obj_val);
+    try self.value_stack.append(obj_val);
 }
 fn execMatch(self: *Vm) anyerror!void {
     self.ip.* += 1;
@@ -3044,19 +3050,35 @@ fn execMatch(self: *Vm) anyerror!void {
     );
     const subject = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
 
-    const sub_copy = try self.allocator.dupe(u8, subject);
+    const sub_copy = try self.scope_stack.allocator.dupe(u8, subject);
+
+    // Check for cached match.
+    var wh = std.hash.Wyhash.init(Context.seed);
+    wh.update(re.regex.pattern);
+    wh.update(subject);
+    const hash = wh.final();
+    if (self.scope_stack.value_cache.get(hash)) |v| {
+        try self.value_stack.append(v);
+        return;
+    }
+
     const m_opt = try re.regex.match(sub_copy);
+    var result: value.Value = undefined;
 
     if (m_opt) |m| {
         const obj_ptr = try self.scope_stack.allocator.create(value.Object);
         obj_ptr.* = .{ .match = m };
         const obj_addr = @ptrToInt(obj_ptr);
-
-        try self.value_stack.append(value.addrToValue(obj_addr));
+        result = value.addrToValue(obj_addr);
     } else {
         // This can't be nil due to how record ranges work.
-        try self.value_stack.append(value.val_false);
+        result = value.val_false;
     }
+
+    // Cache it for future use.
+    try self.scope_stack.value_cache.put(hash, result);
+
+    try self.value_stack.append(result);
 }
 fn execCapture(self: *Vm) anyerror!void {
     self.ip.* += 1;
