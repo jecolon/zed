@@ -351,6 +351,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
         .pd_rand => self.execRand(),
         .pd_reduce => self.execReduce(),
         .pd_replace => self.execReplace(),
+        .pd_regexReplace => self.execRegexReplace(),
         .pd_reset => self.execReset(),
         .pd_reverse => self.execListReverse(),
         .pd_sin => self.execOneArgMath(builtin),
@@ -2894,9 +2895,10 @@ fn execReplace(self: *Vm) !void {
         error.InvalidReplace,
         offset,
     );
+
     const needle_str = if (value.unboxStr(needle)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(needle).?.string;
     if (needle_str.len == 0) return self.ctx.err(
-        "`replace` needle can't be empty.",
+        "`replace` needle string can't be empty.",
         .{},
         error.InvalidReplace,
         offset,
@@ -2912,6 +2914,63 @@ fn execReplace(self: *Vm) !void {
     const rep_str = if (value.unboxStr(rep)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(rep).?.string;
 
     const new_str = try std.mem.replaceOwned(u8, self.allocator, str_str, needle_str, rep_str);
+
+    if (new_str.len < 7) {
+        try self.value_stack.append(value.strToValue(new_str));
+    } else {
+        const obj_ptr = try self.allocator.create(value.Object);
+        obj_ptr.* = .{ .string = new_str };
+        const obj_addr = @ptrToInt(obj_ptr);
+        try self.value_stack.append(value.addrToValue(obj_addr));
+    }
+}
+fn execRegexReplace(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const num_args = self.bytecode[self.ip.*];
+    self.ip.* += 1;
+
+    if (num_args != 3) return self.ctx.err(
+        "`regexReplace` requires two args",
+        .{},
+        error.InvalidRegexReplace,
+        offset,
+    );
+
+    const str = self.value_stack.pop();
+    if (!value.isAnyStr(str)) return self.ctx.err(
+        "`regexRelace` only works on strings, got: {s}",
+        .{value.typeOf(str)},
+        error.InvalidReplace,
+        offset,
+    );
+    const str_str = if (value.unboxStr(str)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(str).?.string;
+
+    // No-op
+    if (str_str.len == 0) {
+        try self.value_stack.append(str);
+        return;
+    }
+
+    const needle = self.value_stack.pop();
+    const needle_obj_ptr = value.asRegex(needle) orelse return self.ctx.err(
+        "`regexReplace` needle must be a regex, got: {s}",
+        .{value.typeOf(needle)},
+        error.InvalidRegexReplace,
+        offset,
+    );
+
+    const rep = self.value_stack.pop();
+    const rep_obj_ptr = value.asRegex(rep) orelse return self.ctx.err(
+        "`regexReplace` replacement must be a regex, got: {s}",
+        .{value.typeOf(rep)},
+        error.InvalidRegexReplace,
+        offset,
+    );
+
+    const new_str = try needle_obj_ptr.regex.replace(self.allocator, str_str, rep_obj_ptr.regex.pattern);
 
     if (new_str.len < 7) {
         try self.value_stack.append(value.strToValue(new_str));

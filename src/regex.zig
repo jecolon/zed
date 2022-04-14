@@ -153,6 +153,37 @@ pub const Regex = struct {
         return m;
     }
 
+    pub fn replace(
+        self: Regex,
+        allocator: std.mem.Allocator,
+        subject: []const u8,
+        rep: []const u8,
+    ) ![]u8 {
+        //std.debug.print("\n--> {s} {s} {s} <--\n", .{ self.pattern, subject, rep });
+        var buf = try allocator.alloc(u8, 1024); //TODO: Deal with this limit.
+        var buf_len = buf.len;
+        const num_replacements = pcre2.pcre2_substitute_8(
+            self.code, //  the compiled pattern
+            subject.ptr, //  the subject string
+            subject.len, //  the length of the subject
+            0, //  start at offset 0 in the subject
+            pcre2.PCRE2_SUBSTITUTE_EXTENDED, //  default options
+            null, // existing match_data or null
+            null, // match context or null
+            rep.ptr, // replacement
+            rep.len, // replacement length
+            buf.ptr, // output buffer
+            &buf_len, // buffer length
+        );
+
+        if (num_replacements < 0) {
+            std.log.err("Regex.replace error: {}", .{num_replacements});
+            return error.RegexReplaceError;
+        }
+
+        return buf[0..buf_len];
+    }
+
     pub fn nameToIndex(self: Regex, name: []const u8) ?usize {
         if (self.name_table_ptr == null) return null;
 
