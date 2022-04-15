@@ -139,6 +139,20 @@ pub fn isAnyStr(v: Value) bool {
     }
 }
 
+pub fn typeOf(v: Value) []const u8 {
+    if (asAddr(v)) |obj_addr| {
+        const obj_ptr = @intToPtr(*const Object, obj_addr);
+        return @tagName(obj_ptr.*);
+    }
+    if (isBool(v)) return "bool";
+    if (isInt(v)) return "int";
+    if (isFloat(v)) return "float";
+    if (isAnyStr(v)) return "string";
+    if (isUint(v)) return "uint";
+
+    return "nil";
+}
+
 fn eqlInner(a: Value, b: Value) bool {
     if (isAddr(a) and isAddr(b)) return true;
     if (isFloat(a) and isFloat(b)) return true;

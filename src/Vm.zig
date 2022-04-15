@@ -1258,7 +1258,7 @@ fn execMatch(self: *Vm, opcode: Compiler.Opcode) !void {
     const right = self.value_stack.pop();
     if (!value.isAnyStr(right)) return self.ctx.err(
         "Match op right hand side must be a regex pattern string; got {s}",
-        .{"fixme"},
+        .{value.typeOf(right)},
         error.InvalidMatch,
         offset,
     );
@@ -1276,7 +1276,7 @@ fn execMatch(self: *Vm, opcode: Compiler.Opcode) !void {
     const left = self.value_stack.pop();
     if (!value.isAnyStr(left)) return self.ctx.err(
         "Match op left hand side must be a string; got {s}",
-        .{"fixme"},
+        .{value.typeOf(left)},
         error.InvalidMatch,
         offset,
     );
