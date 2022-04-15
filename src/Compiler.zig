@@ -20,6 +20,7 @@ pub const Opcode = enum {
     format,
     plain,
     string,
+    raw_str,
     // Scopes
     scope_in,
     scope_out,
@@ -49,6 +50,8 @@ pub const Opcode = enum {
     neq,
     concat,
     repeat,
+    match,
+    nomatch,
     // Prefix
     neg,
     not,
@@ -135,6 +138,7 @@ pub fn compile(self: *Compiler, node: Node) anyerror!void {
         .uint => try self.compileUint(node),
         // Strings
         .string => try self.compileString(node),
+        .raw_str => try self.compileRawStr(node),
         // Functions
         .call => try self.compileCall(node),
         .func => try self.compileFunc(node),
@@ -227,6 +231,12 @@ fn compileString(self: *Compiler, node: Node) anyerror!void {
 
     try self.pushInstruction(.string);
     try self.pushLen(len);
+}
+
+fn compileRawStr(self: *Compiler, node: Node) anyerror!void {
+    try self.pushInstruction(.raw_str);
+    try self.pushSlice(node.ty.raw_str);
+    try self.pushByte(0);
 }
 
 fn compileFunc(self: *Compiler, node: Node) anyerror!void {
@@ -376,6 +386,8 @@ fn compileInfix(self: *Compiler, node: Node) anyerror!void {
         .op_neq => try self.pushInstruction(.neq),
         .op_concat => try self.pushInstruction(.concat),
         .op_repeat => try self.pushInstruction(.repeat),
+        .op_match => try self.pushInstruction(.match),
+        .op_nomatch => try self.pushInstruction(.nomatch),
         else => unreachable,
     }
 

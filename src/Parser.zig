@@ -118,8 +118,8 @@ const Precedence = enum {
             .punct_lt,
             .punct_gt,
             .punct_tilde,
+            .op_match,
             .op_nomatch,
-            .op_xmatch,
             .op_lte,
             .op_gte,
             .op_eq,
@@ -177,6 +177,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .float => Parser.parseFloat,
         .ident => Parser.parseIdent,
         .int => Parser.parseInt,
+        .raw_str => Parser.parseRawStr,
         .string => Parser.parseString,
         .uint => Parser.parseUint,
 
@@ -282,6 +283,8 @@ fn infixFn(self: Parser) InfixFn {
         .kw_or,
         .op_concat,
         .op_repeat,
+        .op_match,
+        .op_nomatch,
         => Parser.parseInfix,
 
         .punct_equals,
@@ -1125,6 +1128,12 @@ fn parseString(self: *Parser) anyerror!Node {
     }
 
     return Node.new(.{ .string = segments.items }, offset);
+}
+
+fn parseRawStr(self: *Parser) anyerror!Node {
+    const start = self.currentOffset();
+    const end = self.currentOffset() + self.currentLen();
+    return Node.new(.{ .raw_str = self.ctx.src[start + 1 .. end - 1] }, start);
 }
 
 // End Strings

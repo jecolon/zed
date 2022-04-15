@@ -4,6 +4,7 @@ pub const Tag = enum {
     float,
     ident,
     int,
+    raw_str,
     string,
     uint,
 
@@ -96,14 +97,15 @@ pub const Tag = enum {
     op_mul_eq,
     op_neg,
     op_neq,
-    op_nomatch,
     op_range_ex,
     op_range_in,
     op_repeat,
     op_sub_eq,
     op_redir_append,
     op_redir_clobber,
-    op_xmatch,
+
+    op_match,
+    op_nomatch,
 
     punct_at,
     punct_bang,

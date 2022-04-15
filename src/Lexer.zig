@@ -37,9 +37,10 @@ fn next(self: *Lexer) !?Token {
         if (isNumStart(byte)) return self.lexNumber(byte);
 
         return switch (byte) {
-            '#' => try self.lexComment(),
+            '#' => self.lexComment(),
             '\n' => self.lexNewline(),
             '"' => try self.lexString(),
+            '`' => try self.lexRawStr(),
             '@' => try self.lexGlobal(),
 
             ':',
@@ -214,7 +215,7 @@ fn lexOp(self: *Lexer, byte: u8) Token {
         },
         '<' => self.lexCombineAssing(.punct_lt, .op_lte),
         '>' => self.lexCombineAssing(.punct_gt, .op_gte),
-        '~' => self.lexCombineAssing(.punct_tilde, .op_xmatch),
+        '~' => self.oneChar(.op_match),
         '*' => op: {
             if (self.skipByte('*')) break :op self.twoChar(.op_repeat);
             break :op self.lexCombineAssing(.punct_star, .op_mul_eq);
@@ -280,6 +281,24 @@ fn lexString(self: *Lexer) !Token {
 
     const src = self.ctx.src[start .. self.offset.? + 1];
     return Token.new(.string, start, src.len);
+}
+
+fn lexRawStr(self: *Lexer) !Token {
+    const start = self.offset.?;
+    var reached_eof = true;
+
+    while (self.advance()) |byte| {
+        if ('\\' == byte and self.peekIs('`')) _ = self.advance();
+        if ('`' == byte) {
+            reached_eof = false;
+            break;
+        }
+    }
+
+    if (reached_eof) return self.ctx.err("Unterminated raw string.", .{}, error.UnterminatedRawString, start);
+
+    const src = self.ctx.src[start .. self.offset.? + 1];
+    return Token.new(.raw_str, start, src.len);
 }
 
 // Scanning
@@ -618,12 +637,11 @@ test "Lex ops" {
         .{ .input = "!>", .tag = .op_redir_clobber, .len = 2 },
         .{ .input = "+>", .tag = .op_redir_append, .len = 2 },
         .{ .input = "!=", .tag = .op_neq, .len = 2 },
-        .{ .input = "!~", .tag = .op_nomatch, .len = 2 },
         .{ .input = ":", .tag = .punct_colon, .len = 1 },
         .{ .input = ".", .tag = .punct_dot, .len = 1 },
         .{ .input = ":=", .tag = .op_define, .len = 2 },
-        .{ .input = "~", .tag = .punct_tilde, .len = 1 },
-        .{ .input = "~=", .tag = .op_xmatch, .len = 2 },
+        .{ .input = "~", .tag = .op_match, .len = 1 },
+        .{ .input = "!~", .tag = .op_nomatch, .len = 2 },
         .{ .input = "..<", .tag = .op_range_ex, .len = 3 },
         .{ .input = "..=", .tag = .op_range_in, .len = 3 },
         .{ .input = "?", .tag = .punct_question, .len = 1 },

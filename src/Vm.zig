@@ -10,6 +10,8 @@ const Token = @import("Token.zig");
 const value = @import("value.zig");
 const Value = value.Value;
 const runtimePrint = @import("fmt.zig").runtimePrint;
+
+const p2z = @import("pcre2zig");
 const ziglyph = @import("ziglyph");
 
 const ObjectTag = std.meta.Tag(Value.Object);
@@ -70,7 +72,7 @@ pub fn run(self: *Vm) !void {
             .uint => try self.execUint(),
             // Strings
             .format => try self.execFormat(),
-            .plain => try self.execPlain(),
+            .plain, .raw_str => try self.execPlain(),
             .string => try self.execString(),
             // functions
             .builtin => try self.execBuiltin(),
@@ -122,6 +124,8 @@ pub fn run(self: *Vm) !void {
             .redir => try self.execRedir(),
             // Printing
             .sprint => try self.execSprint(),
+            // Regex
+            .match, .nomatch => try self.execMatch(opcode),
         }
     }
 }
@@ -1244,6 +1248,52 @@ fn execRecRange(self: *Vm) anyerror!void {
     }
 
     try self.value_stack.append(result);
+}
+
+fn execMatch(self: *Vm, opcode: Compiler.Opcode) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const right = self.value_stack.pop();
+    if (!value.isAnyStr(right)) return self.ctx.err(
+        "Match op right hand side must be a regex pattern string; got {s}",
+        .{"fixme"},
+        error.InvalidMatch,
+        offset,
+    );
+    const pattern = if (value.unboxStr(right)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(right).?.string;
+
+    const code = p2z.compile(pattern, .{}) catch |err| return self.ctx.err(
+        "Could not compile regex pattern: {s}",
+        .{pattern},
+        err,
+        offset,
+    );
+    defer code.deinit();
+    _ = code.jitCompile(0);
+
+    const left = self.value_stack.pop();
+    if (!value.isAnyStr(left)) return self.ctx.err(
+        "Match op left hand side must be a string; got {s}",
+        .{"fixme"},
+        error.InvalidMatch,
+        offset,
+    );
+    const str_str = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
+
+    const data = try p2z.MatchData.init(code);
+    defer data.deinit();
+
+    var matches = try p2z.match(
+        code,
+        str_str,
+        0,
+        data,
+        .{},
+    );
+    if (opcode == .nomatch) matches = !matches;
+    try self.value_stack.append(value.boolToValue(matches));
 }
 
 // Stack Frame

@@ -17,8 +17,10 @@ pub fn build(b: *std.build.Builder) void {
     exe.setBuildMode(mode);
     exe.setTarget(target);
     deps.addAllTo(exe);
-    exe.strip = true;
-    exe.single_threaded = true;
+    exe.addIncludePath("libs/pcre2zig/libs/pcre2-10.39/src");
+    exe.addLibraryPath("libs/pcre2zig/zig-out/lib");
+    exe.linkSystemLibraryName("pcre2zig");
+    exe.addPackagePath("pcre2zig", "libs/pcre2zig/src/pcre2zig.zig");
     exe.install();
 
     const run_cmd = exe.run();
@@ -34,6 +36,10 @@ pub fn build(b: *std.build.Builder) void {
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
     deps.addAllTo(exe_tests);
+    exe_tests.addIncludePath("libs/pcre2zig/libs/pcre2-10.39/src");
+    exe_tests.addLibraryPath("libs/pcre2zig/zig-out/lib");
+    exe_tests.linkSystemLibraryName("pcre2zig");
+    exe_tests.addPackagePath("pcre2zig", "libs/pcre2zig/src/pcre2zig.zig");
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);
