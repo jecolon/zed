@@ -310,6 +310,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
 
     return switch (builtin) {
         .pd_atan2 => self.execAtan2(),
+        .pd_capture => self.execCapture(),
         .pd_chars => self.execChars(),
         .pd_col => self.execCol(),
         .pd_contains => self.execContains(),
@@ -334,6 +335,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
         .pd_memo => self.execMemo(),
         .pd_min => self.execListMin(),
         .pd_mode => self.execListMode(),
+        .pd_next => self.execNext(),
         .pd_print => self.execPrint(),
         .pd_pop => self.execListPop(),
         .pd_push => self.execListPush(),
@@ -1377,6 +1379,82 @@ fn execMatcher(self: *Vm) !void {
         // This is false instead of nil so that record ranges without a from clause can still work.
         try self.value_stack.append(value.val_false);
     }
+}
+fn execCapture(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 3;
+
+    const m = self.value_stack.pop();
+    const matcher_obj_ptr = value.asMatcher(m) orelse return self.ctx.err(
+        "`capture` only works on regex matchers; got {s}",
+        .{value.typeOf(m)},
+        error.InvalidCapture,
+        offset,
+    );
+
+    const arg = self.value_stack.pop();
+    if (value.isAnyStr(arg)) {
+        // Named capture
+        const name = if (value.unboxStr(arg)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(arg).?.string;
+        if (p2z.namedCapture(
+            matcher_obj_ptr.matcher.code,
+            matcher_obj_ptr.matcher.data,
+            matcher_obj_ptr.matcher.subject,
+            name,
+        )) |substring| {
+            if (substring.len < 7) {
+                try self.value_stack.append(value.strToValue(substring));
+            } else {
+                const obj_ptr = try self.allocator.create(value.Object);
+                obj_ptr.* = .{ .string = substring };
+                const obj_addr = @ptrToInt(obj_ptr);
+                try self.value_stack.append(value.addrToValue(obj_addr));
+            }
+        } else {
+            // No capture with that nae found.
+            try self.value_stack.append(value.val_nil);
+        }
+    } else if (value.asUint(arg)) |u| {
+        // Numbered captue
+        if (p2z.numberedCapture(
+            matcher_obj_ptr.matcher.data,
+            matcher_obj_ptr.matcher.subject,
+            u,
+        )) |substring| {
+            if (substring.len < 7) {
+                try self.value_stack.append(value.strToValue(substring));
+            } else {
+                const obj_ptr = try self.allocator.create(value.Object);
+                obj_ptr.* = .{ .string = substring };
+                const obj_addr = @ptrToInt(obj_ptr);
+                try self.value_stack.append(value.addrToValue(obj_addr));
+            }
+        } else {
+            // No capture with that number found.
+            try self.value_stack.append(value.val_nil);
+        }
+    } else return self.ctx.err(
+        "`capture` arg must be a string or unsigned integer; got {s}",
+        .{value.typeOf(arg)},
+        error.InvalidCapture,
+        offset,
+    );
+}
+fn execNext(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 3;
+
+    const m = self.value_stack.pop();
+    const matcher_obj_ptr = value.asMatcher(m) orelse return self.ctx.err(
+        "`next` only works on regex matchers; got {s}",
+        .{value.typeOf(m)},
+        error.InvalidNext,
+        offset,
+    );
+
+    try self.value_stack.append(value.boolToValue(try matcher_obj_ptr.matcher.next()));
 }
 
 // Stack Frame
