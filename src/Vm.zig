@@ -1292,14 +1292,14 @@ fn execMatch(self: *Vm, opcode: Compiler.Opcode) !void {
     );
     const subject = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
 
-    const data = try p2z.MatchData.init(code_gop.value_ptr.*);
+    var data = try p2z.MatchData.init(code_gop.value_ptr.*);
     defer data.deinit();
 
     var matches = try p2z.match(
         code_gop.value_ptr.*,
         subject,
         0,
-        data,
+        &data,
         .{},
     );
 
@@ -1351,14 +1351,14 @@ fn execMatcher(self: *Vm) !void {
         _ = code_gop.value_ptr.jitCompile(0);
     }
 
-    const data = try p2z.MatchData.init(code_gop.value_ptr.*);
+    var data = try p2z.MatchData.init(code_gop.value_ptr.*);
     errdefer data.deinit();
 
     var matches = try p2z.match(
         code_gop.value_ptr.*,
         subject,
         0,
-        data,
+        &data,
         .{},
     );
 
@@ -1421,7 +1421,7 @@ fn execCapture(self: *Vm) !void {
         if (p2z.numberedCapture(
             matcher_obj_ptr.matcher.data,
             matcher_obj_ptr.matcher.subject,
-            u,
+            @intCast(u16, u),
         )) |substring| {
             if (substring.len < 7) {
                 try self.value_stack.append(value.strToValue(substring));
@@ -1472,6 +1472,31 @@ fn execReset(self: *Vm) !void {
 
     matcher_obj_ptr.matcher.reset();
     try self.value_stack.append(m);
+}
+fn execEachMatcher(self: *Vm, match_obj_ptr: *value.Object, offset: u16) !void {
+    const f = self.value_stack.pop();
+    const func_obj_ptr = value.asFunc(f) orelse return self.ctx.err(
+        "`each` arg must be a function, got: {s}",
+        .{value.typeOf(f)},
+        error.InvalidEach,
+        offset,
+    );
+
+    // No-ops
+    const matcher_val = value.addrToValue(@ptrToInt(match_obj_ptr));
+    if (func_obj_ptr.func.bytecode == null) {
+        try self.value_stack.append(matcher_val);
+        self.ip.* += 1;
+        return;
+    }
+
+    var i: u32 = 0;
+    while (try match_obj_ptr.matcher.next()) : (i += 1) _ = try self.execMatchPredicate(func_obj_ptr, matcher_val, value.uintToValue(i));
+    // Reset to the first match.
+    match_obj_ptr.matcher.reset();
+
+    try self.value_stack.append(value.addrToValue(matcher_val));
+    self.ip.* += 1;
 }
 
 // Stack Frame
@@ -2520,6 +2545,8 @@ fn execEach(self: *Vm) anyerror!void {
         return self.execEachList(list_obj_ptr, offset);
     } else if (value.asMap(container)) |map_obj_ptr| {
         return self.execEachMap(map_obj_ptr, offset);
+    } else if (value.asMatcher(container)) |matcher_obj_ptr| {
+        return self.execEachMatcher(matcher_obj_ptr, offset);
     } else if (value.asRange(container)) |range_obj_ptr| {
         return self.execEachRange(range_obj_ptr, offset);
     } else return self.ctx.err(
@@ -2770,6 +2797,31 @@ fn execListPop(self: *Vm) anyerror!void {
     self.ip.* += 1;
 }
 
+fn execMatchPredicate(
+    self: *Vm,
+    func_obj_ptr: *value.Object,
+    matcher_val: value.Value,
+    match_index_val: value.Value,
+) anyerror!Value {
+    // Assign args as locals in function scope.
+    var func_scope = Scope.init(self.allocator, .function); //TODO: Can we use other allocator here?
+    defer func_scope.map.deinit();
+
+    try func_scope.map.put("it", matcher_val);
+    try func_scope.map.put("@0", matcher_val);
+    try func_scope.map.put("index", match_index_val);
+
+    if (func_obj_ptr.func.params) |params| {
+        if (params.len > 0) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[0]..], 0), matcher_val);
+        if (params.len > 1) try func_scope.map.put(std.mem.sliceTo(self.bytecode[params[1]..], 0), match_index_val);
+    }
+
+    try self.pushScope(func_scope);
+    const result = self.execPredicate(func_obj_ptr.func.bytecode.?);
+    _ = self.popScope();
+
+    return result;
+}
 fn execListPredicate(self: *Vm, func_obj_ptr: *value.Object, item: Value, index: usize) anyerror!Value {
     // Assign args as locals in function scope.
     var func_scope = Scope.init(self.allocator, .function); //TODO: Can we use other allocator here?
