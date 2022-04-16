@@ -342,6 +342,7 @@ fn execBuiltin(self: *Vm) anyerror!void {
         .pd_rand => self.execRand(),
         .pd_reduce => self.execReduce(),
         .pd_replace => self.execReplace(),
+        .pd_reset => self.execReset(),
         .pd_reverse => self.execListReverse(),
         .pd_sin => self.execOneArgMath(builtin),
         .pd_sortAsc => self.execListSort(true),
@@ -1455,6 +1456,22 @@ fn execNext(self: *Vm) !void {
     );
 
     try self.value_stack.append(value.boolToValue(try matcher_obj_ptr.matcher.next()));
+}
+fn execReset(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 3;
+
+    const m = self.value_stack.pop();
+    const matcher_obj_ptr = value.asMatcher(m) orelse return self.ctx.err(
+        "`reset` only works on regex matchers; got {s}",
+        .{value.typeOf(m)},
+        error.InvalidNext,
+        offset,
+    );
+
+    matcher_obj_ptr.matcher.reset();
+    try self.value_stack.append(m);
 }
 
 // Stack Frame
