@@ -2385,7 +2385,7 @@ fn execMapMethod(self: *Vm) anyerror!void {
     } else return self.ctx.err(
         "`map` only works on lists and ranges, got: {s}",
         .{value.typeOf(container)},
-        error.InvalidEach,
+        error.InvalidMap,
         offset,
     );
 }
@@ -2465,7 +2465,7 @@ fn execFilter(self: *Vm) anyerror!void {
     } else return self.ctx.err(
         "`filter` only works on lists and ranges, got: {s}",
         .{value.typeOf(container)},
-        error.InvalidEach,
+        error.InvalidFilter,
         offset,
     );
 }
