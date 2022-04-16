@@ -1263,15 +1263,20 @@ fn execMatch(self: *Vm, opcode: Compiler.Opcode) !void {
         offset,
     );
     const pattern = if (value.unboxStr(right)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(right).?.string;
+    const pattern_copy = try self.scope_stack.allocator.dupe(u8, pattern);
 
-    const code = p2z.compile(pattern, .{}) catch |err| return self.ctx.err(
-        "Could not compile regex pattern: {s}",
-        .{pattern},
-        err,
-        offset,
-    );
-    defer code.deinit();
-    _ = code.jitCompile(0);
+    // Check if code isn't cached.
+    const code_gop = try self.scope_stack.regex_cache.getOrPut(pattern_copy);
+    if (!code_gop.found_existing) {
+        // Compile it
+        code_gop.value_ptr.* = p2z.compile(pattern_copy, .{}) catch |err| return self.ctx.err(
+            "Could not compile regex pattern: {s}",
+            .{pattern},
+            err,
+            offset,
+        );
+        _ = code_gop.value_ptr.jitCompile(0);
+    }
 
     const left = self.value_stack.pop();
     if (!value.isAnyStr(left)) return self.ctx.err(
@@ -1282,16 +1287,17 @@ fn execMatch(self: *Vm, opcode: Compiler.Opcode) !void {
     );
     const str_str = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
 
-    const data = try p2z.MatchData.init(code);
+    const data = try p2z.MatchData.init(code_gop.value_ptr.*);
     defer data.deinit();
 
     var matches = try p2z.match(
-        code,
+        code_gop.value_ptr.*,
         str_str,
         0,
         data,
         .{},
     );
+
     if (opcode == .nomatch) matches = !matches;
     try self.value_stack.append(value.boolToValue(matches));
 }

@@ -4,6 +4,8 @@ const Scope = @import("Scope.zig");
 const value = @import("value.zig");
 const Value = value.Value;
 
+const p2z = @import("pcre2zig");
+
 const ScopeStack = @This();
 
 allocator: std.mem.Allocator,
@@ -12,6 +14,7 @@ func_cache: std.AutoHashMap(u64, Value),
 func_memo: std.AutoHashMap(u64, Value),
 global_scope: std.StringHashMap(Value),
 headers: std.StringArrayHashMap(usize),
+regex_cache: std.StringHashMap(p2z.CompiledCode),
 stack: std.ArrayList(Scope),
 
 // Current data filename
@@ -99,8 +102,14 @@ pub fn init(allocator: std.mem.Allocator) ScopeStack {
         .global_scope = std.StringHashMap(Value).init(allocator),
         .headers = std.StringArrayHashMap(usize).init(allocator),
         .rec_ranges = std.AutoHashMap(u8, void).init(allocator),
+        .regex_cache = std.StringHashMap(p2z.CompiledCode).init(allocator),
         .stack = std.ArrayList(Scope).init(allocator),
     };
+}
+
+pub fn deinit(self: *ScopeStack) void {
+    var iter = self.regex_cache.valueIterator();
+    while (iter.next()) |code_ptr| code_ptr.deinit();
 }
 
 pub fn push(self: *ScopeStack, scope: Scope) !void {
