@@ -39,7 +39,7 @@ syn keyword zedFunction	sortAsc sortDec
 " Map Manipulation Methods
 syn keyword zedFunction	keys values keysByValueAsc keysByValueDesc
 " Other builtins
-syn keyword zedFunction	col capture
+syn keyword zedFunction	col capture next reset
 highlight link zedFunction Function
 
 syn keyword zedConditional	if else
@@ -62,8 +62,8 @@ syn keyword zedVariable         @ics @irs @ocs @ors @head @headers
 highlight link zedVariable Special
 
 " Arithmetic operators: +, and * take care of ++, and **
-syn match   zedOperator		"+\|-\|\*\|/\|%\|="
-syn match   zedOperator		"+=\|-=\|\*=\|/=\|%=\|:=\|?:\|?="
+syn match   zedOperator		"+\|-\|\*\|/\|%\|=\|\~"
+syn match   zedOperator		"+=\|-=\|\*=\|/=\|%=\|:=\|?:\|?=\|\~@"
 highlight link zedOperator Operator
 
 syn match   zedAutoParam	"\W@\d\+"
