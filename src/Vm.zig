@@ -126,6 +126,7 @@ pub fn run(self: *Vm) !void {
             .sprint => try self.execSprint(),
             // Regex
             .match, .nomatch => try self.execMatch(opcode),
+            .matcher => try self.execMatcher(),
         }
     }
 }
@@ -243,22 +244,22 @@ fn execFunc(self: *Vm) !void {
     const skip_bytes = self.getU16(self.ip.*);
     self.ip.* += 2;
 
-    // Func hash
-    const func_hash_ptr = @ptrCast(*align(1) const u64, self.bytecode[self.ip.* .. self.ip.* + 8]);
-    self.ip.* += 8;
+    // Func string
+    const func_str = try self.scope_stack.allocator.dupe(u8, std.mem.sliceTo(self.bytecode[self.ip.*..], 0));
+    self.ip.* += @intCast(u16, func_str.len) + 1;
 
     // Check for cached function.
-    if (self.scope_stack.func_cache.get(func_hash_ptr.*)) |v| {
+    if (self.scope_stack.value_cache.get(func_str)) |v| {
         try self.value_stack.append(v);
         self.ip.* += skip_bytes;
         return;
     }
 
     // Function name
-    var func_name_index: ?u16 = null;
+    var func_name: ?[]const u8 = null;
     if (self.bytecode[self.ip.*] != 0) {
-        func_name_index = self.ip.*;
-        self.ip.* += @intCast(u16, std.mem.sliceTo(self.bytecode[self.ip.*..], 0).len) + 1;
+        func_name = try self.scope_stack.allocator.dupe(u8, std.mem.sliceTo(self.bytecode[self.ip.*..], 0));
+        self.ip.* += @intCast(u16, func_name.?.len) + 1;
     } else {
         self.ip.* += 1;
     }
@@ -285,8 +286,8 @@ fn execFunc(self: *Vm) !void {
     self.ip.* += bytecode_len;
 
     const func = value.Function{
-        .hash = func_hash_ptr.*,
-        .name = func_name_index,
+        .str = func_str,
+        .name = func_name,
         .params = params,
         .bytecode = func_bytecode,
     };
@@ -297,7 +298,8 @@ fn execFunc(self: *Vm) !void {
 
     const obj_val = value.addrToValue(obj_addr);
     // Cache for further re-use.
-    try self.scope_stack.func_cache.put(func_hash_ptr.*, obj_val);
+    const func_str_copy = try self.scope_stack.allocator.dupe(u8, func_str);
+    try self.scope_stack.value_cache.put(func_str_copy, obj_val);
 
     try self.value_stack.append(obj_val);
 }
@@ -383,7 +385,7 @@ fn execCall(self: *Vm) anyerror!void {
     var func_scope = Scope.init(self.allocator, .function);
 
     // Self-references
-    if (func_obj_ptr.func.name) |idx| try func_scope.map.put(std.mem.sliceTo(self.bytecode[idx..], 0), callee);
+    if (func_obj_ptr.func.name) |name| try func_scope.map.put(name, callee);
 
     // Process args
     const num_args = self.bytecode[self.ip.*];
@@ -412,7 +414,7 @@ fn execCallMemo(self: *Vm, func_obj_ptr: *value.Object) !void {
 
     // Hash and check for memoized result.
     var wh = std.hash.Wyhash.init(Context.seed);
-    wh.update(std.mem.asBytes(&func_obj_ptr.func.hash));
+    wh.update(func_obj_ptr.func.str);
     var args_buf: [256]Value = undefined;
     var i: usize = 0;
     while (i < num_args) : (i += 1) args_buf[i] = self.value_stack.pop();
@@ -432,9 +434,9 @@ fn execCallMemo(self: *Vm, func_obj_ptr: *value.Object) !void {
     try func_scope.map.put("@memo", memo_hash);
 
     // Self-references
-    if (func_obj_ptr.func.name) |idx| {
+    if (func_obj_ptr.func.name) |name| {
         const addr = @ptrToInt(func_obj_ptr);
-        try func_scope.map.put(std.mem.sliceTo(self.bytecode[idx..], 0), value.addrToValue(addr));
+        try func_scope.map.put(name, value.addrToValue(addr));
     }
 
     for (args) |arg, j| {
@@ -1285,14 +1287,14 @@ fn execMatch(self: *Vm, opcode: Compiler.Opcode) !void {
         error.InvalidMatch,
         offset,
     );
-    const str_str = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
+    const subject = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
 
     const data = try p2z.MatchData.init(code_gop.value_ptr.*);
     defer data.deinit();
 
     var matches = try p2z.match(
         code_gop.value_ptr.*,
-        str_str,
+        subject,
         0,
         data,
         .{},
@@ -1300,6 +1302,81 @@ fn execMatch(self: *Vm, opcode: Compiler.Opcode) !void {
 
     if (opcode == .nomatch) matches = !matches;
     try self.value_stack.append(value.boolToValue(matches));
+}
+fn execMatcher(self: *Vm) !void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    const right = self.value_stack.pop();
+    if (!value.isAnyStr(right)) return self.ctx.err(
+        "Matcher op right hand side must be a regex pattern string; got {s}",
+        .{value.typeOf(right)},
+        error.InvalidMatcher,
+        offset,
+    );
+    const pattern = if (value.unboxStr(right)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(right).?.string;
+
+    const left = self.value_stack.pop();
+    if (!value.isAnyStr(left)) return self.ctx.err(
+        "Matcher op left hand side must be a string; got {s}",
+        .{value.typeOf(left)},
+        error.InvalidMatcher,
+        offset,
+    );
+    const subject = if (value.unboxStr(left)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(left).?.string;
+
+    // Check for cached result.
+    const subpat = try self.allocator.alloc(u8, pattern.len + subject.len);
+    std.mem.copy(u8, subpat, subject);
+    std.mem.copy(u8, subpat[subject.len..], pattern);
+    if (self.scope_stack.value_cache.get(subpat)) |v| {
+        try self.value_stack.append(v);
+        return;
+    }
+
+    // Check if code isn't cached.
+    const code_gop = try self.scope_stack.regex_cache.getOrPut(pattern);
+    if (!code_gop.found_existing) {
+        // Compile and cache it.
+        code_gop.value_ptr.* = p2z.compile(pattern, .{}) catch |err| return self.ctx.err(
+            "Could not compile regex pattern: {s}",
+            .{pattern},
+            err,
+            offset,
+        );
+        _ = code_gop.value_ptr.jitCompile(0);
+    }
+
+    const data = try p2z.MatchData.init(code_gop.value_ptr.*);
+    errdefer data.deinit();
+
+    var matches = try p2z.match(
+        code_gop.value_ptr.*,
+        subject,
+        0,
+        data,
+        .{},
+    );
+
+    if (matches) {
+        const obj_ptr = try self.scope_stack.allocator.create(value.Object);
+        obj_ptr.* = .{ .matcher = p2z.MatchIterator.init(
+            code_gop.value_ptr.*,
+            data,
+            try self.scope_stack.allocator.dupe(u8, subject),
+        ) };
+        const v = value.addrToValue(@ptrToInt(obj_ptr));
+
+        // Cache the result.
+        const subpat_copy = try self.scope_stack.allocator.dupe(u8, subpat);
+        try self.scope_stack.value_cache.put(subpat_copy, v);
+        // Put it on the stack too.
+        try self.value_stack.append(v);
+    } else {
+        // This is false instead of nil so that record ranges without a from clause can still work.
+        try self.value_stack.append(value.val_false);
+    }
 }
 
 // Stack Frame
@@ -2971,7 +3048,8 @@ fn isTruthy(v: Value) bool {
     if (value.asRange(v)) |r| return r.range[1] - r.range[0] != 0;
     if (value.asString(v)) |s| return s.string.len != 0;
     if (value.unboxStr(v)) |u| return u != 0;
-    return false;
+
+    return v != value.val_nil;
 }
 
 fn getNumber(self: Vm, comptime T: type, start: usize, n: usize) T {

@@ -215,7 +215,14 @@ fn lexOp(self: *Lexer, byte: u8) Token {
         },
         '<' => self.lexCombineAssing(.punct_lt, .op_lte),
         '>' => self.lexCombineAssing(.punct_gt, .op_gte),
-        '~' => self.oneChar(.op_match),
+        '~' => op: {
+            var token = self.oneChar(.op_match);
+            if (self.skipByte('@')) {
+                token.tag = .op_matcher;
+                token.len = 2;
+            }
+            break :op token;
+        },
         '*' => op: {
             if (self.skipByte('*')) break :op self.twoChar(.op_repeat);
             break :op self.lexCombineAssing(.punct_star, .op_mul_eq);

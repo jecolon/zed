@@ -24,6 +24,7 @@ pub const Tag = enum {
     pd_true,
 
     pd_atan2,
+    pd_capture,
     pd_chars,
     pd_col,
     pd_contains,
@@ -105,6 +106,7 @@ pub const Tag = enum {
     op_redir_clobber,
 
     op_match,
+    op_matcher,
     op_nomatch,
 
     punct_at,
@@ -151,6 +153,7 @@ pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "while", .kw_while },
 
     .{ "atan2", .pd_atan2 },
+    .{ "capture", .pd_capture },
     .{ "chars", .pd_chars },
     .{ "col", .pd_col },
     .{ "contains", .pd_contains },

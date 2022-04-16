@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const p2z = @import("pcre2zig");
+
 // Value NaN box.
 pub const Value = u64;
 
@@ -19,6 +21,7 @@ const mask_str: u64 = 0b0_0000000000000_11_0000000000000000_00000000000000000000
 
 // Nil
 pub const val_nil = mask_qnan | mask_nil;
+
 // Booleans
 pub const val_false = mask_qnan | mask_false;
 pub const val_true = mask_qnan | mask_true;
@@ -32,6 +35,7 @@ pub fn asBool(v: Value) ?bool {
 pub fn isBool(v: Value) bool {
     return val_true == v or val_false == v;
 }
+
 // Floats
 pub fn floatToValue(f: f64) Value {
     return @bitCast(Value, f);
@@ -42,16 +46,7 @@ pub fn asFloat(v: Value) ?f64 {
 pub fn isFloat(v: Value) bool {
     return (v & mask_qnan) != mask_qnan;
 }
-// Pointers
-pub fn addrToValue(addr: usize) Value {
-    return @bitCast(Value, (mask_sign | mask_qnan | addr));
-}
-pub fn asAddr(v: Value) ?usize {
-    return if (isAddr(v)) @bitCast(usize, v & ~(mask_sign | mask_qnan)) else null;
-}
-pub fn isAddr(v: Value) bool {
-    return v & (mask_sign | mask_qnan) == (mask_sign | mask_qnan);
-}
+
 // Uints
 pub fn uintToValue(u: u32) Value {
     return @bitCast(Value, (mask_uint | mask_qnan | u));
@@ -62,6 +57,7 @@ pub fn asUint(v: Value) ?u32 {
 pub fn isUint(v: Value) bool {
     return (v & (mask_uint | mask_qnan) == (mask_uint | mask_qnan)) and (v & mask_str != mask_str);
 }
+
 // Ints
 pub fn intToValue(i: i32) Value {
     return @bitCast(Value, (mask_int | mask_qnan | @bitCast(u32, i)));
@@ -72,6 +68,7 @@ pub fn asInt(v: Value) ?i32 {
 pub fn isInt(v: Value) bool {
     return (v & (mask_int | mask_qnan) == (mask_int | mask_qnan)) and (v & mask_str != mask_str);
 }
+
 // Short Strings
 pub fn strToValue(str: []const u8) Value {
     std.debug.assert(str.len < 7);
@@ -90,7 +87,27 @@ pub fn unboxStr(v: Value) ?u64 {
 pub fn isStr(v: Value) bool {
     return v & (mask_str | mask_qnan) == (mask_str | mask_qnan);
 }
+pub fn isAnyStr(v: Value) bool {
+    if (unboxStr(v)) |_| {
+        return true;
+    } else if (asAddr(v)) |addr| {
+        const obj_ptr = @intToPtr(*const Object, addr);
+        return obj_ptr.* == .string;
+    } else {
+        return false;
+    }
+}
 
+// Object pointers
+pub fn addrToValue(addr: usize) Value {
+    return @bitCast(Value, (mask_sign | mask_qnan | addr));
+}
+pub fn asAddr(v: Value) ?usize {
+    return if (isAddr(v)) @bitCast(usize, v & ~(mask_sign | mask_qnan)) else null;
+}
+pub fn isAddr(v: Value) bool {
+    return v & (mask_sign | mask_qnan) == (mask_sign | mask_qnan);
+}
 // Object convenience functions.
 pub fn asFunc(v: Value) ?*Object {
     if (asAddr(v)) |addr| {
@@ -113,6 +130,13 @@ pub fn asMap(v: Value) ?*Object {
     }
     return null;
 }
+pub fn asMatcher(v: Value) ?*Object {
+    if (asAddr(v)) |addr| {
+        const obj_ptr = @intToPtr(*Object, addr);
+        if (obj_ptr.* == .matcher) return obj_ptr;
+    }
+    return null;
+}
 pub fn asRange(v: Value) ?*const Object {
     if (asAddr(v)) |addr| {
         const obj_ptr = @intToPtr(*const Object, addr);
@@ -128,17 +152,7 @@ pub fn asString(v: Value) ?*const Object {
     return null;
 }
 
-pub fn isAnyStr(v: Value) bool {
-    if (unboxStr(v)) |_| {
-        return true;
-    } else if (asAddr(v)) |addr| {
-        const obj_ptr = @intToPtr(*const Object, addr);
-        return obj_ptr.* == .string;
-    } else {
-        return false;
-    }
-}
-
+// Better error messages.
 pub fn typeOf(v: Value) []const u8 {
     if (asAddr(v)) |obj_addr| {
         const obj_ptr = @intToPtr(*const Object, obj_addr);
@@ -153,6 +167,7 @@ pub fn typeOf(v: Value) []const u8 {
     return "nil";
 }
 
+// Value equality
 fn eqlInner(a: Value, b: Value) bool {
     if (isAddr(a) and isAddr(b)) return true;
     if (isFloat(a) and isFloat(b)) return true;
@@ -179,6 +194,7 @@ pub fn eql(a: Value, b: Value) bool {
     return false;
 }
 
+// Conversions
 pub fn toFloat(v: Value) ?f64 {
     if (asFloat(v)) |f| return f;
     if (asInt(v)) |i| return @intToFloat(f64, i);
@@ -213,6 +229,7 @@ fn strToNum(v: Value, comptime default: comptime_int) Value {
     }
 }
 
+// Operations
 // Addition
 fn addFloat(a: Value, b: Value) Value {
     if (asFloat(b)) |fb| return floatToValue(asFloat(a).? + fb);
@@ -392,6 +409,7 @@ fn copyObject(v: Value, allocator: std.mem.Allocator) anyerror!Value {
         .func => |f| copyFunc(allocator, f),
         .list => |l| copyList(allocator, l),
         .map => |m| copyMap(allocator, m),
+        .matcher => |m| copyMatcher(allocator, m),
         .range => |r| copyRange(allocator, r),
         .string => |s| copyString(allocator, s),
     };
@@ -408,8 +426,8 @@ fn copyFunc(allocator: std.mem.Allocator, func: Function) anyerror!Value {
 
     const obj_ptr = try allocator.create(Object);
     obj_ptr.* = .{ .func = .{
-        .hash = func.hash,
-        .name = func.name,
+        .str = try allocator.dupe(u8, func.str),
+        .name = if (func.name) |name| try allocator.dupe(u8, name) else null,
         .params = params,
         .bytecode = bytecode,
     } };
@@ -436,6 +454,17 @@ fn copyMap(allocator: std.mem.Allocator, map: std.StringHashMap(Value)) anyerror
 
     const obj_ptr = try allocator.create(Object);
     obj_ptr.* = .{ .map = map_copy };
+    const obj_addr = @ptrToInt(obj_ptr);
+    return addrToValue(obj_addr);
+}
+fn copyMatcher(allocator: std.mem.Allocator, m: p2z.MatchIterator) anyerror!Value {
+    const obj_ptr = try allocator.create(Object);
+    obj_ptr.* = .{ .matcher = .{
+        .code = m.code,
+        .data = m.data,
+        .ovector = null,
+        .subject = try allocator.dupe(u8, m.subject),
+    } };
     const obj_addr = @ptrToInt(obj_ptr);
     return addrToValue(obj_addr);
 }
@@ -471,11 +500,11 @@ fn printObject(v: Value, writer: anytype) !void {
         .func => try writer.writeAll("fn()"),
         .list => |l| try printList(l, writer),
         .map => |m| try printMap(m, writer),
+        .matcher => |m| _ = try writer.print("MatchIterator on \"{s}\"", .{m.subject}),
         .range => |r| _ = try writer.print("{} ..< {}", .{ r[0], r[1] }),
         .string => |s| try writer.writeAll(s),
     }
 }
-
 fn printList(list: std.ArrayList(Value), writer: anytype) !void {
     try writer.writeByte('[');
     for (list.items) |item, i| {
@@ -500,6 +529,7 @@ pub const Object = union(enum) {
     func: Function,
     list: std.ArrayList(Value),
     map: std.StringHashMap(Value),
+    matcher: p2z.MatchIterator,
     range: [2]u32,
     string: []const u8,
 
@@ -508,6 +538,7 @@ pub const Object = union(enum) {
             .func => b == .func,
             .list => b == .list,
             .map => b == .map,
+            .matcher => b == .matcher,
             .range => b == .range,
             .string => b == .string,
         };
@@ -520,18 +551,19 @@ pub const Object = union(enum) {
             .func => false,
             .list => eqlList(a, b),
             .map => eqlMap(a, b),
+            .matcher => eqlMatcher(a, b),
             .range => eqlRange(a, b),
             .string => eqlStr(a, b),
         };
     }
-    pub fn eqlList(a: Object, b: Object) bool {
+    fn eqlList(a: Object, b: Object) bool {
         if (a.list.items.len != b.list.items.len) return false;
 
         return for (a.list.items) |item_a, i| {
             if (!eql(item_a, b.list.items[i])) break false;
         } else true;
     }
-    pub fn eqlMap(a: Object, b: Object) bool {
+    fn eqlMap(a: Object, b: Object) bool {
         if (a.map.count() != b.map.count()) return false;
 
         var iter = a.map.iterator();
@@ -541,19 +573,22 @@ pub const Object = union(enum) {
             } else break false;
         } else true;
     }
-    pub fn eqlRange(a: Object, b: Object) bool {
+    fn eqlMatcher(a: Object, b: Object) bool {
+        return a.matcher.data.ptr == b.matcher.data.ptr;
+    }
+    fn eqlRange(a: Object, b: Object) bool {
         return a.range[0] == b.range[0] and a.range[1] == b.range[1];
     }
-    pub fn eqlStr(a: Object, b: Object) bool {
+    fn eqlStr(a: Object, b: Object) bool {
         return std.mem.eql(u8, a.string, b.string);
     }
 };
 
 // Runtime function value.
 pub const Function = struct {
-    hash: u64,
+    str: []const u8,
     memo: bool = false,
-    name: ?u16,
+    name: ?[]const u8,
     params: ?[]const u16,
     bytecode: ?[]const u8,
 };

@@ -51,6 +51,7 @@ pub const Opcode = enum {
     concat,
     repeat,
     match,
+    matcher,
     nomatch,
     // Prefix
     neg,
@@ -252,12 +253,12 @@ fn compileFunc(self: *Compiler, node: Node) anyerror!void {
     const skip_bytes_index = try self.pushZeroes();
     var skip_bytes: usize = 0;
 
-    // Function unique hash
+    // Function string for caching.
     var buf = std.ArrayList(u8).init(self.allocator);
     defer buf.deinit();
     _ = try buf.writer().print("{}", .{node.ty.func});
-    const func_hash = std.hash.Wyhash.hash(Context.seed, buf.items);
-    try self.pushSlice(std.mem.asBytes(&func_hash));
+    try self.pushSlice(buf.items);
+    try self.pushByte(0);
 
     // Function name
     if (node.ty.func.name.len != 0) try self.pushSlice(node.ty.func.name);
@@ -387,6 +388,7 @@ fn compileInfix(self: *Compiler, node: Node) anyerror!void {
         .op_concat => try self.pushInstruction(.concat),
         .op_repeat => try self.pushInstruction(.repeat),
         .op_match => try self.pushInstruction(.match),
+        .op_matcher => try self.pushInstruction(.matcher),
         .op_nomatch => try self.pushInstruction(.nomatch),
         else => unreachable,
     }
