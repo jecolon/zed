@@ -3058,10 +3058,10 @@ fn execReplace(self: *Vm) !void {
         error.InvalidReplace,
         offset,
     );
-    const str_str = if (value.unboxStr(str)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(str).?.string;
+    const subject = if (value.unboxStr(str)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(str).?.string;
 
     // No-op
-    if (str_str.len == 0) {
+    if (subject.len == 0) {
         try self.value_stack.append(str);
         return;
     }
@@ -3074,12 +3074,20 @@ fn execReplace(self: *Vm) !void {
         offset,
     );
     const needle_str = if (value.unboxStr(needle)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(needle).?.string;
-    if (needle_str.len == 0) return self.ctx.err(
-        "`replace` needle can't be empty.",
-        .{},
-        error.InvalidReplace,
-        offset,
-    );
+
+    // Check if code isn't cached.
+    const code_gop = try self.scope_stack.regex_cache.getOrPut(needle_str);
+    if (!code_gop.found_existing) {
+        // Compile it
+        const needle_copy = try self.allocator.dupe(u8, needle_str);
+        code_gop.value_ptr.* = p2z.compile(needle_copy, .{}) catch |err| return self.ctx.err(
+            "Could not compile regex pattern: {s}",
+            .{needle_str},
+            err,
+            offset,
+        );
+        _ = code_gop.value_ptr.jitCompile(0);
+    }
 
     const rep = self.value_stack.pop();
     if (!value.isAnyStr(rep)) return self.ctx.err(
@@ -3090,7 +3098,15 @@ fn execReplace(self: *Vm) !void {
     );
     const rep_str = if (value.unboxStr(rep)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(rep).?.string;
 
-    const new_str = try std.mem.replaceOwned(u8, self.allocator, str_str, needle_str, rep_str);
+    var buf = try self.allocator.alloc(u8, subject.len * 2); //TODO: Better way to estimate this?
+    const new_str = try p2z.replace(
+        code_gop.value_ptr.*,
+        subject,
+        0,
+        rep_str,
+        buf,
+        .{ .bits = p2z.pcre2.PCRE2_SUBSTITUTE_GLOBAL },
+    );
 
     if (new_str.len < 7) {
         try self.value_stack.append(value.strToValue(new_str));
@@ -3843,6 +3859,14 @@ test "Vm string methods" {
     );
     got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
     try std.testing.expectEqualStrings("fee", got_str);
+
+    got = try testVmValue(allocator,
+        \\pattern := `(?x) (?<month> \d{2}) / (?<day> \d{2}) / (?<year> \d{4})`
+        \\replacement := `${year}/${month}/${day}`
+        \\"12/25/1970".replace(pattern, replacement)
+    );
+    got_str = if (value.unboxStr(got)) |u| std.mem.sliceTo(std.mem.asBytes(&u), 0) else value.asString(got).?.string;
+    try std.testing.expectEqualStrings("1970/12/25", got_str);
 }
 
 test "Vm list methods" {

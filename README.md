@@ -195,6 +195,17 @@ onInit {
 }
 ```
 
+### Regex Replace 
+The `replace` method on strings has the full power of PCRE2 regular expressions, so you can do this:
+
+```
+pattern := `(?x) (?<month> \d{2}) / (?<day> \d{2}) / (?<year> \d{4})`
+replacement := `${year}/${month}/${day}`
+subject := "12/25/1970"
+result := subject.replace(pattern, replacement)
+# result == "1970/12/25"
+```
+
 ## Lists
 To create a list:
 
