@@ -82,11 +82,12 @@ million   := 1_000_000  # underscores for readability; can be used in any of abo
 
 Operations among equal numeric types produce the same type, otherwise floating point is the result type. If strings are 
 involved in arithmetic operations, an attempt to parse the string as a float is made, if unsuccesful, the string is 
-replaced with `0`. For example:
+replaced with `0` or `1` depending on context. For example:
 
 ```
 "1.2" + 3 == 4.2
 "foo" + 3 == 3
+"bar" * 3 == 3
 ```
 
 ## Strings
@@ -135,6 +136,64 @@ The *specifier* has several options for types:
 
 Note that the `d` specifier is not integer exclusive, when used with floating point numbers, it usually produces what 
 you want to see.
+
+To include a literal `{` or `}` in a string, use `{{` or `}}` respectively.
+
+## Raw Strings 
+Raw strings are enclosed in \` and are not processed for any escapes except \\\`. They are very handy for regular expression
+patterns and file system paths.
+
+```
+regex := `(?x) (?<one> \d{3}) - (?<two> \d{4})`
+```
+
+## Regular Expressions
+zed uses the PCRE2 regular expressions library, so if your familiar with Perl's regular expressions, you'll feel right at 
+home here. Please refer to the [PCRE2 docs](https://www.pcre.org/current/doc/html/pcre2syntax.html) for details on 
+patterns, captures, anchors, etc.
+
+### Simple Matching
+Use the match `~` and not-match `!~` operators to perform simple boolean matching.
+
+```
+if (@rec ~ `ab+c`) print(@rec)
+```
+
+### Matchers and Iteration
+You can get a bit more functionality from a matcher object, which is returned when you use the `~@` operator.
+
+```
+onInit {
+    # A matcher is truthy if there's a match.
+    if (matcher := "Tel: 111-1111 Tel: 222-2222 Tel: 333-3333" ~@ `(?x) (?<one> \d{3}) - (?<two> \d{4})`) {
+
+        # Use *next* to iterate over each match.
+        while (matcher.next()) {
+            print(
+                # *capture* retrieves a capture's substring.
+                matcher.capture(1),
+                # *capture* also works with named captures.
+                matcher.capture("two"),
+                "\n"
+            )
+        }
+
+        # Use *reset* to start-over the iteration.
+        matcher.reset()
+
+        # Matchers have an *each* method too.
+        matcher.each() {
+            print(
+                matcher.capture(0),
+                matcher.capture(1),
+                matcher.capture("two"),
+                "\n"
+            )
+        }
+        # When *each* finishes, the matcher is automatically reset.
+    }
+}
+```
 
 ## Lists
 To create a list:
@@ -256,9 +315,9 @@ The usual suspects found in most dynamic languages. Note that for conditions the
 - *Numbers*: True if not `0`
 - *Strings, lists, and maps*: True if length not `0`
 - *Function*: True
+- *Matcher*: True
 - *Range*: True if upper bound - lower bound is not `0`
 - *nil*: False
-- *Anything else*: False
 
 Here's some `if` conditionals:
 
@@ -328,7 +387,8 @@ a + b - c               # sum ; difference ; concat
 0..<10 ; 0..=10         # ranges 
 
 a < b <= c > d          # comparison
-e >= f
+e >= f ; a ~ b
+c ~@ d
 
 a and b                 # logical and
 
@@ -351,6 +411,14 @@ Noteworthy among the operators above are the two output redirection operators: `
 what any expression produces to a file. `!>` overwrites (*clobbers*) any existing file with the given name, whereas `+>`
 appends to any existing file. Both operators create the given file if it doesn't exist.
 
+```
+# Redirecting a print call.
+print(@cols[1], "foo", 1 + 2) !> "out.txt"
+
+# Redirecting any expression.
+3 * 2 / 1 +> "out.txt"
+```
+
 ## File Processing Events
 Similar to AWK's `BEGIN` and `END` blocks, zed provides several *event* blocks that let you execute code at precise 
 points during file processing.
@@ -370,13 +438,13 @@ Depending on the keywords used, record ranges can be exclusive or inclusive of t
 
 ```
 # inclusive range of records:
-select (@cols[0] == "<html>") ..= (@cols[0] == "</html>") { print(@rec) }
+select (@cols[0] ~ `<html[^>]*>`) ..= (@cols[0] == "</html>") { print(@rec) }
 
 # same as previous line; default action is to print the current record:
-select (@cols[0] == "<html>") ..= (@cols[0] == "</html>")
+select (@cols[0] ~ `<html[^>]*>`) ..= (@cols[0] == "</html>")
 
 # exclusive range of records:
-select (@cols[1] == "Product") ..< (@rec == "") { print(@cols[0], @cols[1]) }
+select (@cols[1] ~ `Product\d+`) ..< (@rec == "") { print(@cols[0], @cols[1]) }
 
 # start range at first record (no start condition):
 select ..< (@rec == "END") { print(@cols.mean()) }
@@ -392,7 +460,7 @@ select (@rec == "<html>") ..= (@rec == "</html>") {
 }
 ```
 
-## Global variables
+## Predefined Global Variables
 Here we differ a bit in what zed calls *Global* variables. These are predefined varibales that are always available
 throughout program execution. They provide information about the current state of file processing. They're distinguished
 easilly from other Variables given they start with `@`.
@@ -443,6 +511,13 @@ such as lists, maps, ranges, and strings.
 "foo".startsWith("fo")
 "foo".toLower()                 # returns new string
 "foo".toUpper()                 # returns new string
+
+# Regex Matcher methods
+matcher := "abbbc" ~@ "a(b+)c"
+matcher.capture(1)              # Numeric and named captures
+matcher.next()                  # Iterate over matches
+matcher.reset()                 # Restart iteration at first match
+matcher.each() { it, index => it.capture(0) }
 
 # List methods
 [1, 2, 3].contains("o")
