@@ -23,6 +23,7 @@ pub const Tag = enum {
     pd_nil,
     pd_true,
 
+    pd_assert,
     pd_atan2,
     pd_capture,
     pd_chars,
@@ -154,6 +155,7 @@ pub const predef = std.ComptimeStringMap(Tag, .{
     .{ "true", .pd_true },
     .{ "while", .kw_while },
 
+    .{ "assert", .pd_assert },
     .{ "atan2", .pd_atan2 },
     .{ "capture", .pd_capture },
     .{ "chars", .pd_chars },

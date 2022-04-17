@@ -203,7 +203,7 @@ pattern := `(?x) (?<month> \d{2}) / (?<day> \d{2}) / (?<year> \d{4})`
 replacement := `${year}/${month}/${day}`
 subject := "12/25/1970"
 result := subject.replace(pattern, replacement)
-# result == "1970/12/25"
+assert(result == "1970/12/25")
 ```
 
 ## Lists
@@ -494,6 +494,7 @@ easilly from other Variables given they start with `@`.
 Like AWK, zed comes with some builtin functions, mostly math, here they are:
 
 ```
+assert(1 == 1)                  # If arg is false, produces an error
 atan2(0, -1)
 col("FirstName")                # if @head is set, get column by header or index
 cos(-1)

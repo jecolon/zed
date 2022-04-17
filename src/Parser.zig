@@ -208,6 +208,7 @@ fn prefixFn(tag: Token.Tag) ?PrefixFn {
         .pd_false, .pd_true => Parser.parseBoolean,
         .pd_nil => Parser.parseNil,
 
+        .pd_assert,
         .pd_atan2,
         .pd_capture,
         .pd_chars,
@@ -390,7 +391,7 @@ fn parseBuiltin(self: *Parser) anyerror!Node {
     return Node.new(.{ .builtin = self.currentTag() }, self.currentOffset());
 }
 
-fn isBuiltinMethod(tag: Token.Tag) bool {
+pub fn isBuiltinMethod(tag: Token.Tag) bool {
     return switch (tag) {
         .pd_capture,
         .pd_chars,

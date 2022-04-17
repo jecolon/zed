@@ -9,6 +9,7 @@ const ScopeStack = @import("ScopeStack.zig");
 const Token = @import("Token.zig");
 const value = @import("value.zig");
 const Value = value.Value;
+const isBuiltinMethod = @import("Parser.zig").isBuiltinMethod;
 const runtimePrint = @import("fmt.zig").runtimePrint;
 
 const p2z = @import("pcre2zig");
@@ -305,10 +306,21 @@ fn execFunc(self: *Vm) !void {
 }
 
 fn execBuiltin(self: *Vm) anyerror!void {
-    self.ip.* += 1;
+    self.ip.* += 2;
+    const offset = self.getOffset();
+    self.ip.* -= 1;
+
     const builtin = @intToEnum(Token.Tag, self.bytecode[self.ip.*]);
 
+    if (isBuiltinMethod(builtin) and value.val_nil == self.value_stack.items[self.value_stack.items.len - 1]) return self.ctx.err(
+        "Calling a method on nil.",
+        .{},
+        error.NilMethodCall,
+        offset,
+    );
+
     return switch (builtin) {
+        .pd_assert => self.execAssert(),
         .pd_atan2 => self.execAtan2(),
         .pd_capture => self.execCapture(),
         .pd_chars => self.execChars(),
@@ -1542,6 +1554,39 @@ fn execScopeOut(self: *Vm) anyerror!void {
 
 // Builtins
 
+fn execAssert(self: *Vm) anyerror!void {
+    self.ip.* += 1;
+    const offset = self.getOffset();
+    self.ip.* += 2;
+
+    // Get args count.
+    const num_args = self.bytecode[self.ip.*];
+    self.ip.* += 1;
+
+    if (num_args != 1) return self.ctx.err(
+        "`assert` requires 1 arguments.",
+        .{},
+        error.InvalidAssert,
+        offset,
+    );
+
+    const b = self.value_stack.pop();
+    if (!value.isBool(b)) return self.ctx.err(
+        "assert arg not a boolean expression; got {s}",
+        .{value.typeOf(b)},
+        error.InvalidAssert,
+        offset,
+    );
+
+    if (b == value.val_false) return self.ctx.err(
+        "assertion failed",
+        .{},
+        error.AssertFailed,
+        offset,
+    );
+
+    try self.value_stack.append(value.val_true);
+}
 fn execAtan2(self: *Vm) anyerror!void {
     self.ip.* += 1;
     const offset = self.getOffset();
@@ -3264,7 +3309,18 @@ fn testVmValue(allocator: std.mem.Allocator, input: []const u8) !Value {
     return vm.last_popped;
 }
 
-test "Compiler predefined constant values" {
+test "Vm assert" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var got = try testVmValue(allocator, "assert(1 == 1)");
+    try std.testing.expectEqual(value.val_true, got);
+
+    //try std.testing.expectError(error.AssertFailed, testVmValue(allocator, "assert(1 == 2)"));
+}
+
+test "Vm basic values and types" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
